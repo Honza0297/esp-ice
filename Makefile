@@ -72,7 +72,7 @@ BINARY := $(O)/$(NAME).exe
 
 else
 
-SRCS += platform/posix/io.c platform/posix/process.c
+SRCS += platform/posix/posix_io.c platform/posix/process.c
 BINARY := $(O)/$(NAME)
 
 endif
@@ -122,7 +122,7 @@ $(O)/context: FORCE | $(O)
 $(O)/%.o: %.c Makefile $(O)/context | $(O)
 	$(CC) $(BUILD_DEFINES) $(BUILD_CFLAGS) -MD -MP -o $@ -c $<
 
-$(O)/%.o: platform/posix/%.c Makefile $(O)/context | $(O)
+$(O)/%.o: platform/posix/%.c Makefile $(O)/context  | $(O)
 	$(CC) $(BUILD_DEFINES) $(BUILD_CFLAGS) -MD -MP -o $@ -c $<
 
 $(O)/%.o: platform/win/%.c Makefile $(O)/context | $(O)

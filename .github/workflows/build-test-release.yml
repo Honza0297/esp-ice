@@ -148,8 +148,10 @@ jobs:
           docker run --rm --platform ${{ matrix.platform }} \
             -v ${{ github.workspace }}:/work -w /work \
             alpine:latest sh -c '
-              apk add gcc musl-dev make pkgconf curl-static curl-dev \
-                openssl-libs-static zlib-static nghttp2-static brotli-static &&
+              apk add gcc musl-dev make pkgconf \
+                curl-static curl-dev openssl-libs-static zlib-static \
+                nghttp2-static brotli-static libidn2-static \
+                libunistring-static c-ares-static &&
               make LDFLAGS_APPEND="-static $(pkg-config --libs --static libcurl)" \
                 ${{ matrix.dist }}
             '
