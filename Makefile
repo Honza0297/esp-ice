@@ -38,6 +38,17 @@ else ifneq ($(findstring arm,$(DUMPMACHINE)),)
 	else
 		ARCH := armel
 	endif
+else ifneq ($(findstring riscv64,$(DUMPMACHINE)),)
+	ARCH := riscv64
+else ifneq ($(findstring powerpc64le,$(DUMPMACHINE)),)
+	ARCH := ppc64el
+else ifneq ($(findstring s390x,$(DUMPMACHINE)),)
+	ARCH := s390x
+endif
+
+# ppc64le: force 64-bit long double for musl compatibility
+ifeq ($(ARCH),ppc64el)
+BUILD_CFLAGS += -mlong-double-64
 endif
 
 ifneq ($(findstring mingw,$(DUMPMACHINE)),)

@@ -12,13 +12,30 @@ PREFIX := $(CURDIR)/deps/install
 DEPS_SRC := $(CURDIR)/deps/src
 STAMP := $(CURDIR)/deps/.stamp
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+ARCH := $(shell uname -m)
+
+# ppc64le: musl doesn't support IEEE 128-bit long double (GCC default);
+# force 64-bit long double for musl and all deps built with musl-gcc.
+ARCH_CFLAGS :=
+MUSL_CFLAGS_ENV :=
+ifeq ($(ARCH),ppc64le)
+ARCH_CFLAGS := -mlong-double-64
+MUSL_CFLAGS_ENV := CFLAGS="$(ARCH_CFLAGS)"
+endif
+
+# s390x: zlib CRC32 VX code requires the vector-extension flag and
+# HWCAP_S390_VX was renamed to HWCAP_S390_VXRS in newer kernel headers.
+ZLIB_CFLAGS_ENV :=
+ifeq ($(ARCH),s390x)
+ZLIB_CFLAGS_ENV := CFLAGS="-O3 -mvx -DHWCAP_S390_VX=HWCAP_S390_VXRS"
+endif
 
 # On Linux, build musl and use musl-gcc for all deps.
 # On macOS/Windows, use the system compiler.
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
 USE_MUSL := 1
-DEPS_CC := $(PREFIX)/bin/musl-gcc -static
+DEPS_CC := $(PREFIX)/bin/musl-gcc -static $(ARCH_CFLAGS)
 MUSL_DEP := $(PREFIX)/bin/musl-gcc
 else
 USE_MUSL :=
@@ -46,7 +63,7 @@ $(DEPS_CC): $(DEPS_SRC)/musl-$(MUSL_VERSION).tar.gz | $(PREFIX)
 	@echo "Building musl $(MUSL_VERSION)..."
 	@cd $(DEPS_SRC) && tar xf musl-$(MUSL_VERSION).tar.gz
 	@cd $(DEPS_SRC)/musl-$(MUSL_VERSION) && \
-		./configure --prefix=$(PREFIX) --disable-shared && \
+		$(MUSL_CFLAGS_ENV) ./configure --prefix=$(PREFIX) --disable-shared && \
 		$(MAKE) -j$(NPROC) && \
 		$(MAKE) install
 	@echo "musl done."
@@ -60,7 +77,7 @@ $(PREFIX)/lib/libz.a: $(DEPS_SRC)/zlib-$(ZLIB_VERSION).tar.gz $(MUSL_DEP) | $(PR
 	@echo "Building zlib $(ZLIB_VERSION)..."
 	@cd $(DEPS_SRC) && tar xf zlib-$(ZLIB_VERSION).tar.gz
 	@cd $(DEPS_SRC)/zlib-$(ZLIB_VERSION) && \
-		CC="$(DEPS_CC)" ./configure --prefix=$(PREFIX) --static && \
+		CC="$(DEPS_CC)" $(ZLIB_CFLAGS_ENV) ./configure --prefix=$(PREFIX) --static && \
 		$(MAKE) -j$(NPROC) && \
 		$(MAKE) install
 	@echo "zlib done."
