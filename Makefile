@@ -61,7 +61,7 @@ SRCS := ice.c \
 	svec.c \
 	http.c
 
-LDFLAGS += -lcurl
+LIBS := -lcurl
 
 ifeq ($(S), win)
 
@@ -132,7 +132,7 @@ $(O)/%.o: cmd/build/%.c Makefile $(O)/context | $(O)
 	$(CC) $(BUILD_DEFINES) $(BUILD_CFLAGS) -MD -MP -o $@ -c $<
 
 $(BINARY): $(OBJS) | $(O)
-	$(CC) -o $@ $^ $(BUILD_LDFLAGS)
+	$(CC) -o $@ $^ $(BUILD_LDFLAGS) $(LIBS)
 
 .PHONY: clean \
 	targz-pkg \
