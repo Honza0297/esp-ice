@@ -148,11 +148,12 @@ jobs:
           docker run --rm --platform ${{ matrix.platform }} \
             -v ${{ github.workspace }}:/work -w /work \
             alpine:latest sh -c '
-              apk add gcc musl-dev make pkgconf curl-dev curl-static &&
-              apk add $(pkg-config --print-requires --print-requires-private libcurl 2>/dev/null |
-                sed "s/$/-static/" | tr "\n" " ") 2>/dev/null || true &&
-              make LDFLAGS_APPEND="-static $(pkg-config --libs --static libcurl)" \
-                ${{ matrix.dist }}
+              apk add gcc musl-dev make pkgconf curl-dev curl-static \
+                openssl-libs-static zlib-static nghttp2-static brotli-static \
+                libidn2-static libunistring-static libpsl-static &&
+              CURL_LIBS="$(pkg-config --libs --static libcurl 2>/dev/null || echo "-lcurl -lssl -lcrypto -lz")" &&
+              make LDFLAGS_APPEND="-static ${CURL_LIBS}" ${{ matrix.dist }}
+            '
             '
 
       # ----- macOS -----
@@ -184,8 +185,10 @@ jobs:
         if: startsWith(matrix.name, 'windows-')
         shell: msys2 {0}
         run: |
+          CURL_LIBS="$(pkg-config --libs --static libcurl)"
           make CC=gcc \
-            LDFLAGS_APPEND="-static $(pkg-config --libs --static libcurl) -lbcrypt" \
+            CFLAGS_APPEND="-DCURL_STATICLIB" \
+            LDFLAGS_APPEND="-static ${CURL_LIBS} -lbcrypt" \
             ${{ matrix.dist }}
 
       - name: sign binaries
