@@ -149,8 +149,8 @@ jobs:
         run: |
           docker run --rm --platform ${{ matrix.platform }} \
             -v ${{ github.workspace }}:/work -w /work \
-            alpine:latest sh -c '
-              apk add gcc musl-dev make curl &&
+            debian:bookworm-slim sh -c '
+              apt-get update && apt-get install -y gcc make curl &&
               make -f Makefile.deps &&
               make STATIC=1 ${{ matrix.dist }}
             '
