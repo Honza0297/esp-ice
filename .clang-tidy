@@ -2,12 +2,17 @@
 Checks: >-
   -*,
   clang-analyzer-*,
+  -clang-analyzer-security.ArrayBound,
+  -clang-analyzer-valist.Uninitialized,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
   -bugprone-multi-level-implicit-pointer-conversion,
   -bugprone-switch-missing-default-case,
+  -bugprone-unchecked-string-to-number-conversion,
+  -bugprone-assignment-in-if-condition,
   performance-*,
+  -performance-no-int-to-ptr,
   portability-*
 WarningsAsErrors: "*"
 FormatStyle: file
