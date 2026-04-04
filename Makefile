@@ -61,7 +61,17 @@ SRCS := ice.c \
 	svec.c \
 	http.c
 
+# STATIC=1: use deps built by Makefile.deps (fully self-contained)
+# otherwise: use system libcurl (for development)
+ifdef STATIC
+DEPS_PREFIX := $(CURDIR)/deps/install
+BUILD_CFLAGS += -I$(DEPS_PREFIX)/include -DCURL_STATICLIB
+LIBS := $(shell PKG_CONFIG_PATH=$(DEPS_PREFIX)/lib/pkgconfig pkg-config --libs --static libcurl 2>/dev/null || echo "-L$(DEPS_PREFIX)/lib -lcurl -lssl -lcrypto -lz")
+LIBS += -lpthread -ldl
+LDFLAGS += -static
+else
 LIBS := -lcurl
+endif
 
 ifeq ($(S), win)
 
