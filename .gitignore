@@ -1,0 +1,7 @@
+/build/
+dist/
+stage/
+t_out/
+cscope.*
+tags
+*.swp

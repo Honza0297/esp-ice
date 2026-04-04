@@ -1,0 +1,267 @@
+name: build-test-release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - v*
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  test-linux:
+    name: test linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy clang-format libcurl4-openssl-dev
+
+      - name: lint
+        run: make CC=clang clang-format clang-tidy
+
+      - name: test
+        run: make CC=clang PFLAGS=-v test
+
+  test-windows:
+    name: test windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            mingw-w64-clang-x86_64-clang-tools-extra
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-curl
+            make
+            diffutils
+
+      - name: lint
+        shell: msys2 {0}
+        run: make CC=clang clang-format clang-tidy
+
+      - name: test
+        shell: msys2 {0}
+        run: make CC=clang PFLAGS=-v test
+
+  test-macos:
+    name: test macos
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install
+        run: |
+          brew install llvm curl
+          echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
+
+      - name: lint
+        run: make CC=clang clang-format clang-tidy
+
+      - name: test
+        run: |
+          make CC=clang \
+            CFLAGS_APPEND="-I$(brew --prefix curl)/include" \
+            LDFLAGS_APPEND="-L$(brew --prefix curl)/lib" \
+            PFLAGS=-v test
+
+  dist:
+    runs-on: ${{ matrix.runner }}
+    name: dist ${{ matrix.name }}
+    needs:
+      - test-linux
+      - test-windows
+      - test-macos
+    strategy:
+      matrix:
+        include:
+          # ----------------------------------------------------------
+          # Linux: Alpine Docker + QEMU user-mode for non-native archs.
+          # All builds are "native" inside the container -- gcc runs
+          # as a process of the target architecture, no cross-compilers.
+          # Fully static binaries (musl + curl-static + openssl-static).
+          # ----------------------------------------------------------
+          - name: linux-x86_64
+            runner: ubuntu-latest
+            platform: linux/amd64
+            dist: targz-pkg
+
+          - name: linux-aarch64
+            runner: ubuntu-latest
+            platform: linux/arm64
+            dist: targz-pkg
+
+          - name: linux-armv7
+            runner: ubuntu-latest
+            platform: linux/arm/v7
+            dist: targz-pkg
+
+          - name: linux-i386
+            runner: ubuntu-latest
+            platform: linux/386
+            dist: targz-pkg
+
+          - name: linux-riscv64
+            runner: ubuntu-latest
+            platform: linux/riscv64
+            dist: targz-pkg
+
+          - name: linux-ppc64le
+            runner: ubuntu-latest
+            platform: linux/ppc64le
+            dist: targz-pkg
+
+          # ----------------------------------------------------------
+          # macOS: static libcurl, dynamic system frameworks
+          # ----------------------------------------------------------
+          - name: macos-arm64
+            runner: macos-latest
+            dist: targz-pkg
+
+          - name: macos-x86-64
+            runner: macos-15-intel
+            dist: targz-pkg
+
+          # ----------------------------------------------------------
+          # Windows: MSYS2 with MinGW static libcurl (Schannel TLS)
+          # ----------------------------------------------------------
+          - name: windows-x86_64
+            runner: windows-latest
+            msystem: MINGW64
+            mingw_prefix: mingw-w64-x86_64
+            dist: zip-pkg
+
+          - name: windows-i686
+            runner: windows-latest
+            msystem: MINGW32
+            mingw_prefix: mingw-w64-i686
+            dist: zip-pkg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ----- Linux (Alpine + QEMU) -----
+      - name: setup qemu
+        if: startsWith(matrix.name, 'linux-')
+        uses: docker/setup-qemu-action@v3
+
+      - name: build linux
+        if: startsWith(matrix.name, 'linux-')
+        run: |
+          docker run --rm --platform ${{ matrix.platform }} \
+            -v ${{ github.workspace }}:/work -w /work \
+            alpine:latest sh -c '
+              apk add gcc musl-dev make curl-static curl-dev \
+                openssl-libs-static zlib-static &&
+              make LDFLAGS_APPEND="-static" ${{ matrix.dist }}
+            '
+
+      # ----- macOS -----
+      - name: build macos
+        if: startsWith(matrix.name, 'macos-')
+        run: |
+          brew install curl coreutils
+          CURL_PREFIX=$(brew --prefix curl)
+          make CC=clang \
+            CFLAGS_APPEND="-I${CURL_PREFIX}/include" \
+            LDFLAGS_APPEND="${CURL_PREFIX}/lib/libcurl.a -framework Security -framework CoreFoundation -lz" \
+            ${{ matrix.dist }}
+
+      # ----- Windows (MSYS2) -----
+      - name: setup msys2
+        if: startsWith(matrix.name, 'windows-')
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.mingw_prefix }}-gcc
+            ${{ matrix.mingw_prefix }}-curl
+            make
+
+      - name: build windows
+        if: startsWith(matrix.name, 'windows-')
+        shell: msys2 {0}
+        run: |
+          make CC=gcc \
+            LDFLAGS_APPEND="-static -lcurl -lssl -lcrypto -lws2_32 -lcrypt32 -lz -lbcrypt" \
+            ${{ matrix.dist }}
+
+      - name: sign binaries
+        if: |
+          (startsWith(matrix.name, 'windows-') || startsWith(matrix.name, 'macOS-')) &&
+          startsWith(github.ref, 'refs/tags/')
+        uses: espressif/release-sign@master
+        with:
+          path: ./build
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-keyvault-uri: ${{ secrets.AZURE_KEYVAULT_URI }}
+          azure-keyvault-cert-name: ${{ secrets.AZURE_KEYVAULT_CERT_NAME }}
+          macos-signing-identity: ${{ secrets.MACOS_CS_IDENTITY_ID }}
+          macos-certificate: ${{ secrets.MACOS_CS_CERTIFICATE }}
+          macos-certificate-pwd: ${{ secrets.MACOS_CS_CERTIFICATE_PWD }}
+          notarization-username: ${{ secrets.MACOS_CS_APPLE_ID }}
+          notarization-password: ${{ secrets.MACOS_CS_APP_SPECIFIC_PASSWORD }}
+          notarization-team-id: ${{ secrets.MACOS_CS_APPLE_TEAM_ID }}
+
+      - name: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    name: release
+    needs:
+      - dist
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: install commitizen
+        run: pip install czespressif
+
+      - name: get version
+        id: get_version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
+          fi
+          echo "VERSION=$VERSION" | tee -a $GITHUB_OUTPUT
+
+      - name: generate changelog
+        run: |
+          cz changelog ${{ steps.get_version.outputs.VERSION }} --file-name changelog_body.md
+          cat changelog_body.md
+
+      - name: create release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: changelog_body.md
+          name: Version ${{ steps.get_version.outputs.version }}
+          draft: true
+          files: |
+            artifacts/**/*

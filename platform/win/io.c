@@ -1,0 +1,291 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file platform/win/io.c
+ * @brief Color-aware, UTF-8-aware I/O overrides for Windows.
+ *
+ * Implements fprintf_p/vfprintf_p/fputs_p (activated via macros in
+ * platform.h) which handle @x{...} color token expansion, UTF-8 to
+ * wide-char conversion for console output, and ANSI-to-Console-API
+ * fallback on legacy Windows without VT processing support.
+ *
+ * Also provides fopen_w, access_w, and mkdir_w for UTF-8 file paths.
+ */
+#include <fcntl.h>
+#include <io.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <wchar.h>
+#include <windows.h>
+
+#include "../../ice.h"
+#include "wconv.h"
+
+/**
+ * @brief Map an ANSI SGR code to a Windows console text attribute.
+ */
+static WORD ansi_to_attr(WORD attr, int code, WORD defattr)
+{
+	switch (code) {
+	case 0:  return defattr;
+	case 1:  return attr | FOREGROUND_INTENSITY;
+	case 31: return (attr & ~0x07) | FOREGROUND_RED;
+	case 32: return (attr & ~0x07) | FOREGROUND_GREEN;
+	case 33: return (attr & ~0x07) | FOREGROUND_RED | FOREGROUND_GREEN;
+	case 34: return (attr & ~0x07) | FOREGROUND_BLUE;
+	case 35: return (attr & ~0x07) | FOREGROUND_RED | FOREGROUND_BLUE;
+	case 36: return (attr & ~0x07) | FOREGROUND_GREEN | FOREGROUND_BLUE;
+	}
+	return attr;
+}
+
+/**
+ * @brief Write a UTF-8 string to a console, translating ANSI escape
+ * codes to Console API calls.
+ *
+ * Used on legacy Windows where VT processing is not available.
+ * Text is converted to wide-char and written with WriteConsoleW;
+ * ESC[...m sequences are translated to SetConsoleTextAttribute.
+ */
+static int console_write_legacy(HANDLE h, const char *buf)
+{
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
+	WORD defattr, attr;
+	const char *p = buf;
+	const char *text_start = buf;
+	int total = 0;
+
+	if (!GetConsoleScreenBufferInfo(h, &csbi))
+		return -1;
+
+	defattr = csbi.wAttributes;
+	attr = defattr;
+
+	while (*p) {
+		if (p[0] == '\033' && p[1] == '[') {
+			/* Flush text before the escape sequence. */
+			if (p > text_start) {
+				wchar_t *ws = mbs_to_wcs_n(text_start,
+							   p - text_start);
+				if (ws) {
+					WriteConsoleW(h, ws,
+						      (DWORD)wcslen(ws),
+						      NULL, NULL);
+					total += (int)(p - text_start);
+					free(ws);
+				}
+			}
+
+			/* Parse SGR parameters: ESC[ n1;n2;...m */
+			p += 2;
+			while (*p && *p != 'm') {
+				int code = 0;
+				while (*p >= '0' && *p <= '9')
+					code = code * 10 + (*p++ - '0');
+				attr = ansi_to_attr(attr, code, defattr);
+				if (*p == ';')
+					p++;
+			}
+			if (*p == 'm')
+				p++;
+
+			SetConsoleTextAttribute(h, attr);
+			text_start = p;
+			continue;
+		}
+		p++;
+	}
+
+	/* Flush remaining text. */
+	if (p > text_start) {
+		wchar_t *ws = mbs_to_wcs_n(text_start, p - text_start);
+		if (ws) {
+			WriteConsoleW(h, ws, (DWORD)wcslen(ws), NULL, NULL);
+			total += (int)(p - text_start);
+			free(ws);
+		}
+	}
+
+	return total;
+}
+
+/**
+ * @brief Write a UTF-8 string to a console with VT processing.
+ *
+ * Converts to wide-char and writes with WriteConsoleW. ANSI escape
+ * codes are interpreted natively by the console.
+ */
+static int console_write_vt(HANDLE h, const char *buf)
+{
+	wchar_t *ws = mbs_to_wcs(buf);
+	if (!ws)
+		return -1;
+
+	BOOL ok = WriteConsoleW(h, ws, (DWORD)wcslen(ws), NULL, NULL);
+	int len = (int)strlen(buf);
+	free(ws);
+	return ok ? len : -1;
+}
+
+/**
+ * @brief Write a formatted UTF-8 string to a stream.
+ *
+ * Handles three cases:
+ *  - Redirected (pipe/file): expand colors, format, fwrite.
+ *  - Console with VT: expand colors, format, WriteConsoleW.
+ *  - Console without VT: expand colors, format, parse ANSI → Console API.
+ */
+int vfprintf_p(FILE *stream, const char *fmt, va_list args)
+{
+	struct sbuf expanded = SBUF_INIT;
+	struct sbuf output = SBUF_INIT;
+	int n;
+	va_list args_copy;
+	DWORD dwMode;
+
+	/* NOLINTNEXTLINE(performance-no-int-to-ptr) */
+	HANDLE h = (HANDLE)_get_osfhandle(_fileno(stream));
+
+	expand_colors(&expanded, fmt);
+
+	/* Redirected: format and fwrite. */
+	if (!GetConsoleMode(h, &dwMode)) {
+		va_copy(args_copy, args);
+		sbuf_vaddf(&output, expanded.buf, args_copy);
+		va_end(args_copy);
+		n = (int)fwrite(output.buf, 1, output.len, stream);
+		if ((size_t)n != output.len)
+			n = -1;
+		goto out;
+	}
+
+	/* Console: format, then write with UTF-8 → wide-char. */
+	va_copy(args_copy, args);
+	sbuf_vaddf(&output, expanded.buf, args_copy);
+	va_end(args_copy);
+
+	if (use_vt)
+		n = console_write_vt(h, output.buf);
+	else
+		n = console_write_legacy(h, output.buf);
+
+out:
+	sbuf_release(&output);
+	sbuf_release(&expanded);
+	return n;
+}
+
+/** Color-aware fprintf for Windows. Delegates to vfprintf_p(). */
+int fprintf_p(FILE *stream, const char *fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	int rv = vfprintf_p(stream, fmt, args);
+	va_end(args);
+	return rv;
+}
+
+/** Color-aware fputs for Windows. Expands @x{...} tokens. */
+int fputs_p(const char *s, FILE *stream)
+{
+	struct sbuf expanded = SBUF_INIT;
+	int n;
+	DWORD dwMode;
+
+	/* NOLINTNEXTLINE(performance-no-int-to-ptr) */
+	HANDLE h = (HANDLE)_get_osfhandle(_fileno(stream));
+
+	expand_colors(&expanded, s);
+
+	if (!GetConsoleMode(h, &dwMode)) {
+		n = (int)fwrite(expanded.buf, 1, expanded.len, stream);
+		if ((size_t)n != expanded.len)
+			n = -1;
+		else
+			n = 0;
+	} else if (use_vt) {
+		n = console_write_vt(h, expanded.buf) >= 0 ? 0 : -1;
+	} else {
+		n = console_write_legacy(h, expanded.buf) >= 0 ? 0 : -1;
+	}
+
+	sbuf_release(&expanded);
+	return n;
+}
+
+int term_width(int fd)
+{
+	/* NOLINTNEXTLINE(performance-no-int-to-ptr) */
+	HANDLE h = (HANDLE)_get_osfhandle(fd);
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
+
+	if (GetConsoleScreenBufferInfo(h, &csbi))
+		return csbi.srWindow.Right - csbi.srWindow.Left + 1;
+	return 80;
+}
+
+/**
+ * @brief UTF-8-aware fopen replacement for Windows.
+ */
+FILE *fopen_w(const char *fn, const char *mode)
+{
+	wchar_t *wfn = mbs_to_wcs(fn);
+	wchar_t *wmode = mbs_to_wcs(mode);
+	FILE *fp = NULL;
+
+	if (!wfn || !wmode) {
+		errno = ENOMEM;
+		goto out;
+	}
+
+	fp = _wfopen(wfn, wmode);
+out:
+	free(wfn);
+	free(wmode);
+	return fp;
+}
+
+/**
+ * @brief UTF-8-aware access() replacement for Windows.
+ */
+int access_w(const char *fn, int mode)
+{
+	wchar_t *wfn = mbs_to_wcs(fn);
+	int rv;
+
+	if (!wfn) {
+		errno = ENOMEM;
+		return -1;
+	}
+
+	rv = _waccess(wfn, mode);
+	free(wfn);
+
+	return rv;
+}
+
+/**
+ * @brief UTF-8-aware mkdir() replacement for Windows.
+ */
+int mkdir_w(const char *path, int mode)
+{
+	wchar_t *wpath = mbs_to_wcs(path);
+	int rv;
+	(void)mode;
+
+	if (!wpath) {
+		errno = ENOMEM;
+		return -1;
+	}
+
+	rv = _wmkdir(wpath);
+	free(wpath);
+
+	return rv;
+}
