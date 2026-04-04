@@ -72,7 +72,7 @@ BINARY := $(O)/$(NAME).exe
 
 else
 
-SRCS += platform/posix/posix_io.c platform/posix/process.c
+SRCS += platform/posix/posix_io.c platform/posix/posix_process.c
 BINARY := $(O)/$(NAME)
 
 endif
