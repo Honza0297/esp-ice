@@ -148,10 +148,9 @@ jobs:
           docker run --rm --platform ${{ matrix.platform }} \
             -v ${{ github.workspace }}:/work -w /work \
             alpine:latest sh -c '
-              apk add gcc musl-dev make pkgconf \
-                curl-static curl-dev openssl-libs-static zlib-static \
-                nghttp2-static nghttp3-static brotli-static \
-                libidn2-static libunistring-static &&
+              apk add gcc musl-dev make pkgconf curl-dev curl-static &&
+              apk add $(pkg-config --print-requires --print-requires-private libcurl 2>/dev/null |
+                sed "s/$/-static/" | tr "\n" " ") 2>/dev/null || true &&
               make LDFLAGS_APPEND="-static $(pkg-config --libs --static libcurl)" \
                 ${{ matrix.dist }}
             '
@@ -160,11 +159,12 @@ jobs:
       - name: build macos
         if: startsWith(matrix.name, 'macos-')
         run: |
-          brew install curl coreutils
+          brew install curl coreutils pkg-config
           CURL_PREFIX=$(brew --prefix curl)
+          export PKG_CONFIG_PATH="${CURL_PREFIX}/lib/pkgconfig"
           make CC=clang \
             CFLAGS_APPEND="-I${CURL_PREFIX}/include" \
-            LDFLAGS_APPEND="${CURL_PREFIX}/lib/libcurl.a -framework Security -framework CoreFoundation -lz" \
+            LDFLAGS_APPEND="$(pkg-config --libs --static libcurl) -framework Security -framework CoreFoundation" \
             ${{ matrix.dist }}
 
       # ----- Windows (MSYS2) -----
@@ -177,6 +177,7 @@ jobs:
           install: >-
             ${{ matrix.mingw_prefix }}-gcc
             ${{ matrix.mingw_prefix }}-curl
+            ${{ matrix.mingw_prefix }}-pkgconf
             make
 
       - name: build windows
@@ -184,7 +185,7 @@ jobs:
         shell: msys2 {0}
         run: |
           make CC=gcc \
-            LDFLAGS_APPEND="-static -lcurl -lssl -lcrypto -lws2_32 -lcrypt32 -lz -lbcrypt" \
+            LDFLAGS_APPEND="-static $(pkg-config --libs --static libcurl) -lbcrypt" \
             ${{ matrix.dist }}
 
       - name: sign binaries
