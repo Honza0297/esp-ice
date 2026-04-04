@@ -38,8 +38,6 @@ else ifneq ($(findstring arm,$(DUMPMACHINE)),)
 	else
 		ARCH := armel
 	endif
-else ifneq ($(findstring riscv64,$(DUMPMACHINE)),)
-	ARCH := riscv64
 endif
 
 ifneq ($(findstring mingw,$(DUMPMACHINE)),)
