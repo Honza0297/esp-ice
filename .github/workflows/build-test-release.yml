@@ -151,7 +151,7 @@ jobs:
               apk add gcc musl-dev make pkgconf curl-dev curl-static \
                 openssl-libs-static zlib-static zstd-static nghttp2-static \
                 brotli-static libidn2-static libunistring-static \
-                libpsl-static c-ares-static ngtcp2-dev nghttp3-dev &&
+                libpsl-static ngtcp2-dev nghttp3-dev &&
               echo "typedef struct { int a; } nghttp3_info; nghttp3_info *nghttp3_version(int v) { (void)v; return 0; }" \
                 | cc -c -x c - -o /tmp/nghttp3_stub.o &&
               ar rcs /usr/lib/libnghttp3.a /tmp/nghttp3_stub.o &&
