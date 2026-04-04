@@ -1,6 +1,6 @@
 # 🧊 esp-ice
 
-*Ice ice baby. Too cold -- slice like a ninja, cut like a razor blade.*
+*Ice ice baby. Too cold -- slice like a ninja, cut like a razor blade.* 😉
 
 ## Contributing
 
