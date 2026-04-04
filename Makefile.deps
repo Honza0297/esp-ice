@@ -1,9 +1,7 @@
-MUSL_VERSION := 1.2.6
 ZLIB_VERSION := 1.3.2
 BEARSSL_VERSION := 0.6
 CURL_VERSION := 8.12.1
 
-MUSL_URL := https://musl.libc.org/releases/musl-$(MUSL_VERSION).tar.gz
 ZLIB_URL := https://zlib.net/zlib-$(ZLIB_VERSION).tar.gz
 BEARSSL_URL := https://bearssl.org/bearssl-$(BEARSSL_VERSION).tar.gz
 CURL_URL := https://curl.se/download/curl-$(CURL_VERSION).tar.gz
@@ -12,19 +10,6 @@ PREFIX := $(CURDIR)/deps/install
 DEPS_SRC := $(CURDIR)/deps/src
 STAMP := $(CURDIR)/deps/.stamp
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
-
-# On Linux, build musl and use musl-gcc for all deps.
-# On macOS/Windows, use the system compiler.
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Linux)
-USE_MUSL := 1
-DEPS_CC := $(PREFIX)/bin/musl-gcc -static
-MUSL_DEP := $(PREFIX)/bin/musl-gcc
-else
-USE_MUSL :=
-DEPS_CC := $(CC)
-MUSL_DEP :=
-endif
 
 all: $(STAMP)
 
@@ -37,30 +22,15 @@ $(DEPS_SRC):
 $(PREFIX):
 	@mkdir -p $@
 
-# --- musl (Linux only) ---
-ifdef USE_MUSL
-$(DEPS_SRC)/musl-$(MUSL_VERSION).tar.gz: | $(DEPS_SRC)
-	curl -fsSL -o $@ $(MUSL_URL)
-
-$(DEPS_CC): $(DEPS_SRC)/musl-$(MUSL_VERSION).tar.gz | $(PREFIX)
-	@echo "Building musl $(MUSL_VERSION)..."
-	@cd $(DEPS_SRC) && tar xf musl-$(MUSL_VERSION).tar.gz
-	@cd $(DEPS_SRC)/musl-$(MUSL_VERSION) && \
-		./configure --prefix=$(PREFIX) --disable-shared && \
-		$(MAKE) -j$(NPROC) && \
-		$(MAKE) install
-	@echo "musl done."
-endif
-
 # --- zlib ---
 $(DEPS_SRC)/zlib-$(ZLIB_VERSION).tar.gz: | $(DEPS_SRC)
 	curl -fsSL -o $@ $(ZLIB_URL)
 
-$(PREFIX)/lib/libz.a: $(DEPS_SRC)/zlib-$(ZLIB_VERSION).tar.gz $(MUSL_DEP) | $(PREFIX)
+$(PREFIX)/lib/libz.a: $(DEPS_SRC)/zlib-$(ZLIB_VERSION).tar.gz | $(PREFIX)
 	@echo "Building zlib $(ZLIB_VERSION)..."
 	@cd $(DEPS_SRC) && tar xf zlib-$(ZLIB_VERSION).tar.gz
 	@cd $(DEPS_SRC)/zlib-$(ZLIB_VERSION) && \
-		CC="$(DEPS_CC)" ./configure --prefix=$(PREFIX) --static && \
+		CC="$(CC)" ./configure --prefix=$(PREFIX) --static && \
 		$(MAKE) -j$(NPROC) && \
 		$(MAKE) install
 	@echo "zlib done."
@@ -69,11 +39,11 @@ $(PREFIX)/lib/libz.a: $(DEPS_SRC)/zlib-$(ZLIB_VERSION).tar.gz $(MUSL_DEP) | $(PR
 $(DEPS_SRC)/bearssl-$(BEARSSL_VERSION).tar.gz: | $(DEPS_SRC)
 	curl -fsSL -o $@ $(BEARSSL_URL)
 
-$(PREFIX)/lib/libbearssl.a: $(DEPS_SRC)/bearssl-$(BEARSSL_VERSION).tar.gz $(MUSL_DEP) | $(PREFIX)
+$(PREFIX)/lib/libbearssl.a: $(DEPS_SRC)/bearssl-$(BEARSSL_VERSION).tar.gz | $(PREFIX)
 	@echo "Building BearSSL $(BEARSSL_VERSION)..."
 	@cd $(DEPS_SRC) && tar xf bearssl-$(BEARSSL_VERSION).tar.gz
 	@cd $(DEPS_SRC)/bearssl-$(BEARSSL_VERSION) && \
-		$(MAKE) -j$(NPROC) CC="$(DEPS_CC)" lib && \
+		$(MAKE) -j$(NPROC) CC="$(CC)" lib && \
 		mkdir -p $(PREFIX)/lib $(PREFIX)/include && \
 		cp build/libbearssl.a $(PREFIX)/lib/ && \
 		cp inc/*.h $(PREFIX)/include/
@@ -87,7 +57,7 @@ $(PREFIX)/lib/libcurl.a: $(DEPS_SRC)/curl-$(CURL_VERSION).tar.gz $(PREFIX)/lib/l
 	@echo "Building curl $(CURL_VERSION)..."
 	@cd $(DEPS_SRC) && tar xf curl-$(CURL_VERSION).tar.gz
 	@cd $(DEPS_SRC)/curl-$(CURL_VERSION) && \
-		CC="$(DEPS_CC)" \
+		CC="$(CC)" \
 		CFLAGS="-I$(PREFIX)/include" \
 		LDFLAGS="-L$(PREFIX)/lib" \
 		LIBS="-lbearssl" \
