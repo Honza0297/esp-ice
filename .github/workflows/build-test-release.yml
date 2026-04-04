@@ -98,16 +98,6 @@ jobs:
             platform: linux/386
             dist: targz-pkg
 
-          - name: linux-riscv64
-            runner: ubuntu-latest
-            platform: linux/riscv64
-            dist: targz-pkg
-
-          - name: linux-ppc64le
-            runner: ubuntu-latest
-            platform: linux/ppc64le
-            dist: targz-pkg
-
           # ----------------------------------------------------------
           # macOS: static libcurl, dynamic system frameworks
           # ----------------------------------------------------------
