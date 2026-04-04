@@ -78,24 +78,30 @@ jobs:
           # as a process of the target architecture, no cross-compilers.
           # Fully static binaries (musl + curl-static + openssl-static).
           # ----------------------------------------------------------
-          - name: linux-x86_64
+          # All 7 Debian Trixie architectures
+          - name: linux-amd64
             runner: ubuntu-latest
             platform: linux/amd64
             dist: targz-pkg
 
-          - name: linux-aarch64
+          - name: linux-arm64
             runner: ubuntu-latest
             platform: linux/arm64
             dist: targz-pkg
 
-          - name: linux-armv7
+          - name: linux-armel
+            runner: ubuntu-latest
+            platform: linux/arm/v5
+            dist: targz-pkg
+
+          - name: linux-armhf
             runner: ubuntu-latest
             platform: linux/arm/v7
             dist: targz-pkg
 
-          - name: linux-i386
+          - name: linux-ppc64el
             runner: ubuntu-latest
-            platform: linux/386
+            platform: linux/ppc64le
             dist: targz-pkg
 
           - name: linux-riscv64
@@ -103,9 +109,9 @@ jobs:
             platform: linux/riscv64
             dist: targz-pkg
 
-          - name: linux-ppc64le
+          - name: linux-s390x
             runner: ubuntu-latest
-            platform: linux/ppc64le
+            platform: linux/s390x
             dist: targz-pkg
 
           # ----------------------------------------------------------
