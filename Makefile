@@ -101,7 +101,7 @@ ifeq ($(S), win)
 SRCS += platform/win/io.c platform/win/process.c platform/win/wconv.c platform/win/wmain.c
 CFLAGS += -municode
 LDFLAGS += -municode
-LIBS += -lws2_32 -lbcrypt -lwinhttp
+LIBS += -lws2_32 -lbcrypt -lwinhttp -liphlpapi
 BINARY := $(O)/$(NAME).exe
 
 else
