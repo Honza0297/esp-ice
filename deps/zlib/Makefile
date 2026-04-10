@@ -1,5 +1,5 @@
 VERSION := 1.3.2
-URL := https://zlib.net/zlib-$(VERSION).tar.gz
+URL := https://github.com/madler/zlib/releases/download/v$(VERSION)/zlib-$(VERSION).tar.gz
 TARBALL := zlib-$(VERSION).tar.gz
 SRC := zlib-$(VERSION)
 
