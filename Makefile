@@ -168,7 +168,7 @@ $(O)/%.o: cmd/build/%.c Makefile $(O)/context | $(O)
 ifdef STATIC
 $(OBJS): | $(DEPS_STAMP)
 $(DEPS_STAMP):
-	$(MAKE) -C deps $(if $(MUSL),MUSL=1)
+	$(MAKE) -C deps S=$(S) $(if $(MUSL),MUSL=1)
 endif
 
 $(BINARY): $(OBJS) | $(O)
@@ -208,7 +208,7 @@ $(DIST)/$(PKG_NAME).zip: $(STAGE) | $(DIST)
 	cd $(STAGE) && zip -r $(abspath $@) $(NAME)-$(VERSION)
 
 deps:
-	$(MAKE) -C deps $(if $(MUSL),MUSL=1)
+	$(MAKE) -C deps S=$(S) $(if $(MUSL),MUSL=1)
 
 clean:
 	rm -rf $(O) $(DIST) $(STAGE) $(T_OUT)
