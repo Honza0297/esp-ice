@@ -11,6 +11,10 @@ ifdef CROSS_COMPILE
 HOST_TRIPLE := $(patsubst %-,%,$(CROSS_COMPILE))
 CONFIGURE_HOST := --host=$(HOST_TRIPLE)
 CMAKE_CROSS_FLAGS := -DCMAKE_SYSTEM_NAME=Linux
+# Static linking for configure tests: on i386 musl-gcc, the hidden
+# __stack_chk_fail_local symbol isn't available for dynamic linking,
+# so configure link tests would fail without -static.
+CROSS_STATIC := -static
 endif
 
 # ppc64le: Debian Trixie GCC defaults to IEEE 128-bit long double,
@@ -24,7 +28,7 @@ MUSL_DEP := musl
 CC := $(PREFIX)/bin/musl-gcc
 endif
 
-export PREFIX CC NPROC S HOST_TRIPLE CONFIGURE_HOST CMAKE_CROSS_FLAGS
+export PREFIX CC NPROC S HOST_TRIPLE CONFIGURE_HOST CMAKE_CROSS_FLAGS CROSS_STATIC
 
 all: $(STAMP)
 
