@@ -143,7 +143,7 @@ jobs:
       # ----- Linux (Debian Trixie Docker + QEMU) -----
       # Fully static binaries: musl + vendored deps (zlib, mbedTLS, curl).
       - name: setup qemu
-        if: startsWith(matrix.name, 'linux-') && matrix.platform != 'linux/amd64'
+        if: startsWith(matrix.name, 'linux-')
         uses: docker/setup-qemu-action@v3
 
       - name: build linux
@@ -154,7 +154,7 @@ jobs:
             -v ${{ github.workspace }}:/work -w /work \
             debian:trixie-slim sh -c '
               apt-get update &&
-              apt-get install -y gcc make cmake curl perl &&
+              apt-get install -y gcc make cmake curl perl bzip2 &&
               make STATIC=1 ${{ matrix.dist }}
             '
 
