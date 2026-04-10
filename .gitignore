@@ -1,5 +1,12 @@
 /build/
-/deps/
+/deps/install/
+/deps/.stamp
+/deps/*/yaml-*/
+/deps/*/zlib-*/
+/deps/*/mbedtls-*/
+/deps/*/curl-*/
+/deps/*/musl-*/
+/deps/*/*.tar.*
 dist/
 stage/
 t_out/

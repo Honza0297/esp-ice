@@ -68,8 +68,14 @@ SRCS := ice.c \
 # otherwise: use system libcurl (for development)
 ifdef STATIC
 DEPS_PREFIX := $(CURDIR)/deps/install
+DEPS_STAMP := $(CURDIR)/deps/.stamp
 BUILD_CFLAGS += -I$(DEPS_PREFIX)/include -DCURL_STATICLIB
-LIBS := $(shell PKG_CONFIG_PATH=$(DEPS_PREFIX)/lib/pkgconfig pkg-config --libs --static libcurl 2>/dev/null || echo "-L$(DEPS_PREFIX)/lib -lcurl -lbearssl -lz")
+LIBS := $(shell PKG_CONFIG_LIBDIR=$(DEPS_PREFIX)/lib/pkgconfig:$(DEPS_PREFIX)/lib64/pkgconfig pkg-config --libs --static libcurl 2>/dev/null || echo "-L$(DEPS_PREFIX)/lib -L$(DEPS_PREFIX)/lib64 -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz")
+ifeq ($(S),linux)
+CC := $(DEPS_PREFIX)/bin/musl-gcc
+LDFLAGS += -static
+MUSL := 1
+endif
 ifeq ($(S),win)
 LDFLAGS += -static
 endif
@@ -146,10 +152,16 @@ $(O)/%.o: platform/win/%.c Makefile $(O)/context | $(O)
 $(O)/%.o: cmd/build/%.c Makefile $(O)/context | $(O)
 	$(CC) $(BUILD_DEFINES) $(BUILD_CFLAGS) -MD -MP -o $@ -c $<
 
+ifdef STATIC
+$(OBJS): | $(DEPS_STAMP)
+$(DEPS_STAMP):
+	$(MAKE) -C deps $(if $(MUSL),MUSL=1)
+endif
+
 $(BINARY): $(OBJS) | $(O)
 	$(CC) -o $@ $^ $(BUILD_LDFLAGS) $(LIBS)
 
-.PHONY: clean \
+.PHONY: clean mrproper deps \
 	targz-pkg \
 	tarxz-pkg \
 	zip-pkg \
@@ -182,8 +194,14 @@ $(DIST)/$(PKG_NAME).tar.xz: $(STAGE) | $(DIST)
 $(DIST)/$(PKG_NAME).zip: $(STAGE) | $(DIST)
 	cd $(STAGE) && zip -r $(abspath $@) $(NAME)-$(VERSION)
 
+deps:
+	$(MAKE) -C deps $(if $(MUSL),MUSL=1)
+
 clean:
 	rm -rf $(O) $(DIST) $(STAGE) $(T_OUT)
+
+mrproper: clean
+	$(MAKE) -C deps clean
 
 clang-format:
 	clang-format --style=file -i *.[ch] platform/posix/*.[ch] platform/win/*.[ch] cmd/*/*.[ch]
@@ -242,8 +260,12 @@ help:
 	@echo ' clang-format     - run clang formatter'
 	@echo ' clang-tidy       - run clang tidy'
 	@echo ''
+	@echo 'dependency targets:'
+	@echo ' deps             - build vendored deps (zlib, mbedTLS, curl)'
+	@echo ''
 	@echo 'misc targets:'
 	@echo ' clean            - remove: $(O) $(DIST) $(STAGE) $(T_OUT)'
+	@echo ' mrproper         - clean + remove vendored deps'
 	@echo ' cscope           - generate cscope tags'
 	@echo ' ctags            - generate ctags'
 	@echo ' tags             - alias for cscope and tags'
