@@ -78,12 +78,10 @@ jobs:
           # ----------------------------------------------------------
           - name: linux-amd64
             runner: ubuntu-latest
-            platform: linux/amd64
             dist: targz-pkg
 
           - name: linux-arm64
             runner: ubuntu-24.04-arm
-            platform: linux/arm64
             dist: targz-pkg
 
           - name: linux-armel
@@ -145,14 +143,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ----- Linux (Debian Trixie Docker + QEMU) -----
-      # Fully static binaries: musl + vendored deps (zlib, mbedTLS, curl).
+      # ----- Linux (native) -----
+      - name: build linux
+        if: startsWith(matrix.name, 'linux-') && !matrix.qemu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc make cmake curl perl bzip2
+          make STATIC=1 ${{ matrix.dist }}
+
+      # ----- Linux (QEMU-emulated via Debian Trixie Docker) -----
       - name: setup qemu
         if: matrix.qemu
         uses: docker/setup-qemu-action@v3
 
-      - name: build linux
-        if: matrix.platform
+      - name: build linux (qemu)
+        if: matrix.qemu
         run: |
           docker run --rm \
             --platform ${{ matrix.platform }} \
