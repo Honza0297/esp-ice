@@ -18,7 +18,11 @@ $(PREFIX)/bin/musl-gcc: $(TARBALL)
 	@# Default to static linking -- the musl dynamic linker is not
 	@# installed on the host, so configure scripts that try to run
 	@# compiled test programs would fail without this.
-	@sed -i 's/-dynamic-linker [^ ]*/-static/' $(PREFIX)/lib/musl-gcc.specs
+	@sed -i \
+		-e 's/-dynamic-linker [^ ]*//' \
+		-e 's/Scrt1\.o/crt1.o/g' \
+		$(PREFIX)/lib/musl-gcc.specs
+	@printf '*self_spec:\n-static\n\n' >> $(PREFIX)/lib/musl-gcc.specs
 	@echo "musl done."
 
 clean:
