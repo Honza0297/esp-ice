@@ -14,10 +14,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help clean \
-	linux-amd64 linux-arm64 linux-armel linux-armhf \
-	linux-i386 linux-ppc64el linux-riscv64 linux-s390x \
-	windows-amd64 windows-i386 windows-arm64
+.PHONY: help clean
 
 help:
 	@echo 'Makefile.toolchain — fetch prebuilt cross-compilation toolchains'
@@ -45,151 +42,39 @@ clean:
 	@rm -rf $(CURDIR)/toolchains
 
 # ---------------------------------------------------------------------------
-# linux-amd64
+# Linux — one musl.cc tarball per target.
+#
+# Each target X has a matching `X-URL` variable below.  The static
+# pattern rule then uses GNU Make's computed variable reference —
+# $(linux-$*-URL) — to look the URL up at recipe expansion time.
 # ---------------------------------------------------------------------------
 
-LINUX_AMD64_URL  := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/x86_64-linux-musl-cross.tgz
-LINUX_AMD64_DIR  := $(CURDIR)/toolchains/linux-amd64
-LINUX_AMD64_DONE := $(LINUX_AMD64_DIR)/.done
+linux-amd64-URL   := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/x86_64-linux-musl-cross.tgz
+linux-arm64-URL   := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/aarch64-linux-musl-cross.tgz
+linux-armel-URL   := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/arm-linux-musleabi-cross.tgz
+linux-armhf-URL   := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/arm-linux-musleabihf-cross.tgz
+linux-i386-URL    := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/i686-linux-musl-cross.tgz
+linux-ppc64el-URL := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/powerpc64le-linux-musl-cross.tgz
+linux-riscv64-URL := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/riscv64-linux-musl-cross.tgz
+linux-s390x-URL   := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/s390x-linux-musl-cross.tgz
 
-linux-amd64: $(LINUX_AMD64_DONE)
-	@echo "export PATH=\"$(LINUX_AMD64_DIR)/bin:\$$PATH\""
+LINUX_TARGETS := linux-amd64 linux-arm64 linux-armel linux-armhf \
+                 linux-i386 linux-ppc64el linux-riscv64 linux-s390x
 
-$(LINUX_AMD64_DONE): Makefile.toolchain
-	@rm -rf $(LINUX_AMD64_DIR)
-	@echo "Downloading and installing linux-amd64 toolchain..." >&2
-	@mkdir -p $(LINUX_AMD64_DIR)
-	@curl -fL $(LINUX_AMD64_URL) | tar -xz -C $(LINUX_AMD64_DIR) --strip-components=1
-	@touch $(LINUX_AMD64_DONE)
+.PHONY: $(LINUX_TARGETS)
 
-# ---------------------------------------------------------------------------
-# linux-arm64
-# ---------------------------------------------------------------------------
+$(LINUX_TARGETS): linux-%: $(CURDIR)/toolchains/linux-%/.done
+	@echo "export PATH=\"$(CURDIR)/toolchains/linux-$*/bin:\$$PATH\""
 
-LINUX_ARM64_URL  := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/aarch64-linux-musl-cross.tgz
-LINUX_ARM64_DIR  := $(CURDIR)/toolchains/linux-arm64
-LINUX_ARM64_DONE := $(LINUX_ARM64_DIR)/.done
-
-linux-arm64: $(LINUX_ARM64_DONE)
-	@echo "export PATH=\"$(LINUX_ARM64_DIR)/bin:\$$PATH\""
-
-$(LINUX_ARM64_DONE): Makefile.toolchain
-	@rm -rf $(LINUX_ARM64_DIR)
-	@echo "Downloading and installing linux-arm64 toolchain..." >&2
-	@mkdir -p $(LINUX_ARM64_DIR)
-	@curl -fL $(LINUX_ARM64_URL) | tar -xz -C $(LINUX_ARM64_DIR) --strip-components=1
-	@touch $(LINUX_ARM64_DONE)
+$(CURDIR)/toolchains/linux-%/.done: Makefile.toolchain
+	@rm -rf $(@D)
+	@echo "Downloading and installing linux-$* toolchain..." >&2
+	@mkdir -p $(@D)
+	@curl -fL $(linux-$*-URL) | tar -xz -C $(@D) --strip-components=1
+	@touch $@
 
 # ---------------------------------------------------------------------------
-# linux-armel
-# ---------------------------------------------------------------------------
-
-LINUX_ARMEL_URL  := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/arm-linux-musleabi-cross.tgz
-LINUX_ARMEL_DIR  := $(CURDIR)/toolchains/linux-armel
-LINUX_ARMEL_DONE := $(LINUX_ARMEL_DIR)/.done
-
-linux-armel: $(LINUX_ARMEL_DONE)
-	@echo "export PATH=\"$(LINUX_ARMEL_DIR)/bin:\$$PATH\""
-
-$(LINUX_ARMEL_DONE): Makefile.toolchain
-	@rm -rf $(LINUX_ARMEL_DIR)
-	@echo "Downloading and installing linux-armel toolchain..." >&2
-	@mkdir -p $(LINUX_ARMEL_DIR)
-	@curl -fL $(LINUX_ARMEL_URL) | tar -xz -C $(LINUX_ARMEL_DIR) --strip-components=1
-	@touch $(LINUX_ARMEL_DONE)
-
-# ---------------------------------------------------------------------------
-# linux-armhf
-# ---------------------------------------------------------------------------
-
-LINUX_ARMHF_URL  := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/arm-linux-musleabihf-cross.tgz
-LINUX_ARMHF_DIR  := $(CURDIR)/toolchains/linux-armhf
-LINUX_ARMHF_DONE := $(LINUX_ARMHF_DIR)/.done
-
-linux-armhf: $(LINUX_ARMHF_DONE)
-	@echo "export PATH=\"$(LINUX_ARMHF_DIR)/bin:\$$PATH\""
-
-$(LINUX_ARMHF_DONE): Makefile.toolchain
-	@rm -rf $(LINUX_ARMHF_DIR)
-	@echo "Downloading and installing linux-armhf toolchain..." >&2
-	@mkdir -p $(LINUX_ARMHF_DIR)
-	@curl -fL $(LINUX_ARMHF_URL) | tar -xz -C $(LINUX_ARMHF_DIR) --strip-components=1
-	@touch $(LINUX_ARMHF_DONE)
-
-# ---------------------------------------------------------------------------
-# linux-i386
-# ---------------------------------------------------------------------------
-
-LINUX_I386_URL  := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/i686-linux-musl-cross.tgz
-LINUX_I386_DIR  := $(CURDIR)/toolchains/linux-i386
-LINUX_I386_DONE := $(LINUX_I386_DIR)/.done
-
-linux-i386: $(LINUX_I386_DONE)
-	@echo "export PATH=\"$(LINUX_I386_DIR)/bin:\$$PATH\""
-
-$(LINUX_I386_DONE): Makefile.toolchain
-	@rm -rf $(LINUX_I386_DIR)
-	@echo "Downloading and installing linux-i386 toolchain..." >&2
-	@mkdir -p $(LINUX_I386_DIR)
-	@curl -fL $(LINUX_I386_URL) | tar -xz -C $(LINUX_I386_DIR) --strip-components=1
-	@touch $(LINUX_I386_DONE)
-
-# ---------------------------------------------------------------------------
-# linux-ppc64el
-# ---------------------------------------------------------------------------
-
-LINUX_PPC64EL_URL  := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/powerpc64le-linux-musl-cross.tgz
-LINUX_PPC64EL_DIR  := $(CURDIR)/toolchains/linux-ppc64el
-LINUX_PPC64EL_DONE := $(LINUX_PPC64EL_DIR)/.done
-
-linux-ppc64el: $(LINUX_PPC64EL_DONE)
-	@echo "export PATH=\"$(LINUX_PPC64EL_DIR)/bin:\$$PATH\""
-
-$(LINUX_PPC64EL_DONE): Makefile.toolchain
-	@rm -rf $(LINUX_PPC64EL_DIR)
-	@echo "Downloading and installing linux-ppc64el toolchain..." >&2
-	@mkdir -p $(LINUX_PPC64EL_DIR)
-	@curl -fL $(LINUX_PPC64EL_URL) | tar -xz -C $(LINUX_PPC64EL_DIR) --strip-components=1
-	@touch $(LINUX_PPC64EL_DONE)
-
-# ---------------------------------------------------------------------------
-# linux-riscv64
-# ---------------------------------------------------------------------------
-
-LINUX_RISCV64_URL  := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/riscv64-linux-musl-cross.tgz
-LINUX_RISCV64_DIR  := $(CURDIR)/toolchains/linux-riscv64
-LINUX_RISCV64_DONE := $(LINUX_RISCV64_DIR)/.done
-
-linux-riscv64: $(LINUX_RISCV64_DONE)
-	@echo "export PATH=\"$(LINUX_RISCV64_DIR)/bin:\$$PATH\""
-
-$(LINUX_RISCV64_DONE): Makefile.toolchain
-	@rm -rf $(LINUX_RISCV64_DIR)
-	@echo "Downloading and installing linux-riscv64 toolchain..." >&2
-	@mkdir -p $(LINUX_RISCV64_DIR)
-	@curl -fL $(LINUX_RISCV64_URL) | tar -xz -C $(LINUX_RISCV64_DIR) --strip-components=1
-	@touch $(LINUX_RISCV64_DONE)
-
-# ---------------------------------------------------------------------------
-# linux-s390x
-# ---------------------------------------------------------------------------
-
-LINUX_S390X_URL  := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/s390x-linux-musl-cross.tgz
-LINUX_S390X_DIR  := $(CURDIR)/toolchains/linux-s390x
-LINUX_S390X_DONE := $(LINUX_S390X_DIR)/.done
-
-linux-s390x: $(LINUX_S390X_DONE)
-	@echo "export PATH=\"$(LINUX_S390X_DIR)/bin:\$$PATH\""
-
-$(LINUX_S390X_DONE): Makefile.toolchain
-	@rm -rf $(LINUX_S390X_DIR)
-	@echo "Downloading and installing linux-s390x toolchain..." >&2
-	@mkdir -p $(LINUX_S390X_DIR)
-	@curl -fL $(LINUX_S390X_URL) | tar -xz -C $(LINUX_S390X_DIR) --strip-components=1
-	@touch $(LINUX_S390X_DONE)
-
-# ---------------------------------------------------------------------------
-# llvm-mingw — shared by the three windows-* targets below.
+# Windows — one llvm-mingw tarball, shared by all three windows-* targets.
 # ---------------------------------------------------------------------------
 
 LLVM_MINGW_URL  := https://github.com/mstorsjo/llvm-mingw/releases/download/20251216/llvm-mingw-20251216-msvcrt-ubuntu-22.04-x86_64.tar.xz
@@ -203,16 +88,9 @@ $(LLVM_MINGW_DONE): Makefile.toolchain
 	@curl -fL $(LLVM_MINGW_URL) | tar -xJ -C $(LLVM_MINGW_DIR) --strip-components=1
 	@touch $(LLVM_MINGW_DONE)
 
-# All three windows-* targets share the single llvm-mingw install above;
-# they differ only in which CC basename the user passes on the make
-# command line (x86_64-w64-mingw32-gcc, i686-w64-mingw32-gcc, or
-# aarch64-w64-mingw32-gcc — all present in $(LLVM_MINGW_DIR)/bin).
+WINDOWS_TARGETS := windows-amd64 windows-i386 windows-arm64
 
-windows-amd64: $(LLVM_MINGW_DONE)
-	@echo "export PATH=\"$(LLVM_MINGW_DIR)/bin:\$$PATH\""
+.PHONY: $(WINDOWS_TARGETS)
 
-windows-i386: $(LLVM_MINGW_DONE)
-	@echo "export PATH=\"$(LLVM_MINGW_DIR)/bin:\$$PATH\""
-
-windows-arm64: $(LLVM_MINGW_DONE)
+$(WINDOWS_TARGETS): $(LLVM_MINGW_DONE)
 	@echo "export PATH=\"$(LLVM_MINGW_DIR)/bin:\$$PATH\""
