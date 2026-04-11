@@ -8,8 +8,8 @@
 #
 # Layout:
 #
-#     toolchains/<install-dir>/    — extracted tree
-#     toolchains/<target>.done     — stamp: fetch + extract ok
+#     toolchains/<target>/         — extracted tree
+#     toolchains/<target>/.done    — stamp: fetch + extract ok
 #
 # The archive is streamed from curl directly into tar, so there is
 # no on-disk tarball cache: clearing an extracted tree and re-running
@@ -50,12 +50,12 @@ help:
 	@echo '    linux-s390x              CC=s390x-linux-musl-gcc'
 	@echo ''
 	@echo 'WINDOWS TARGETS (llvm-mingw, gcc/clang):'
-	@echo '    windows-amd64-msvcrt     CC=x86_64-w64-mingw32-gcc    (msvcrt runtime, XP+)'
-	@echo '    windows-i386-msvcrt      CC=i686-w64-mingw32-gcc      (msvcrt runtime, XP+)'
-	@echo '    windows-arm64-msvcrt     CC=aarch64-w64-mingw32-gcc   (msvcrt runtime, XP+)'
-	@echo '    windows-amd64-ucrt       CC=x86_64-w64-mingw32-gcc    (ucrt runtime, Win10+)'
-	@echo '    windows-i386-ucrt        CC=i686-w64-mingw32-gcc      (ucrt runtime, Win10+)'
-	@echo '    windows-arm64-ucrt       CC=aarch64-w64-mingw32-gcc   (ucrt runtime, Win10+)'
+	@echo '    llvm-mingw-msvcrt        CC=x86_64-w64-mingw32-gcc    (msvcrt runtime, XP+)'
+	@echo '                             CC=i686-w64-mingw32-gcc'
+	@echo '                             CC=aarch64-w64-mingw32-gcc'
+	@echo '    llvm-mingw-ucrt          CC=x86_64-w64-mingw32-gcc    (ucrt runtime, Win10+)'
+	@echo '                             CC=i686-w64-mingw32-gcc'
+	@echo '                             CC=aarch64-w64-mingw32-gcc'
 
 clean:
 	@rm -rf $(CURDIR)/toolchains
@@ -69,80 +69,45 @@ TOOLCHAINS_DIR := $(CURDIR)/toolchains
 # ---------------------------------------------------------------------------
 # Per-target configuration.
 #
-# Each target T declares two variables:
+# Each target T declares a single variable T-url, the upstream URL to
+# fetch.  The extraction directory is always $(TOOLCHAINS_DIR)/T.
 #
-#     T-url    — upstream URL to fetch
-#     T-dir    — local path the extracted tree lives in
-#
-# For Linux, -dir matches the target name one-to-one.  For Windows, the
-# three arch-specific targets of a given runtime flavour (msvcrt, ucrt)
-# all point -dir at the same llvm-mingw-<flavour> install; each arch
-# target still has its own -url/-dir pair, so each one fetches and
-# extracts the shared install independently (3× cost, one per target).
-# That's fine — in CI each matrix job runs exactly one target, and
-# developers almost never build more than one Windows arch locally.
+# For Linux, one musl.cc tarball = one arch = one compiler.  For Windows,
+# one llvm-mingw tarball bundles all three cross compilers (x86_64, i686,
+# aarch64), so a single llvm-mingw-<flavour> target serves all arches;
+# users pick the compiler via CC.
 # ---------------------------------------------------------------------------
 
 # ----- Linux (musl.cc) -----
 
-linux-amd64-url   := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/x86_64-linux-musl-cross.tgz
-linux-amd64-dir   := $(TOOLCHAINS_DIR)/linux-amd64
-
-linux-arm64-url   := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/aarch64-linux-musl-cross.tgz
-linux-arm64-dir   := $(TOOLCHAINS_DIR)/linux-arm64
-
-linux-armel-url   := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/arm-linux-musleabi-cross.tgz
-linux-armel-dir   := $(TOOLCHAINS_DIR)/linux-armel
-
-linux-armhf-url   := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/arm-linux-musleabihf-cross.tgz
-linux-armhf-dir   := $(TOOLCHAINS_DIR)/linux-armhf
-
-linux-i386-url    := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/i686-linux-musl-cross.tgz
-linux-i386-dir    := $(TOOLCHAINS_DIR)/linux-i386
-
+linux-amd64-url    := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/x86_64-linux-musl-cross.tgz
+linux-arm64-url    := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/aarch64-linux-musl-cross.tgz
+linux-armel-url    := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/arm-linux-musleabi-cross.tgz
+linux-armhf-url    := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/arm-linux-musleabihf-cross.tgz
+linux-i386-url     := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/i686-linux-musl-cross.tgz
 linux-ppc64el-url  := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/powerpc64le-linux-musl-cross.tgz
-linux-ppc64el-dir  := $(TOOLCHAINS_DIR)/linux-ppc64el
-
 linux-riscv64-url  := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/riscv64-linux-musl-cross.tgz
-linux-riscv64-dir  := $(TOOLCHAINS_DIR)/linux-riscv64
-
-linux-s390x-url   := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/s390x-linux-musl-cross.tgz
-linux-s390x-dir   := $(TOOLCHAINS_DIR)/linux-s390x
+linux-s390x-url    := https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/s390x-linux-musl-cross.tgz
 
 # ----- Windows (llvm-mingw, msvcrt runtime) -----
 
-windows-amd64-msvcrt-url  := https://github.com/mstorsjo/llvm-mingw/releases/download/20251216/llvm-mingw-20251216-msvcrt-ubuntu-22.04-x86_64.tar.xz
-windows-amd64-msvcrt-dir  := $(TOOLCHAINS_DIR)/llvm-mingw-msvcrt
-
-windows-i386-msvcrt-url   := https://github.com/mstorsjo/llvm-mingw/releases/download/20251216/llvm-mingw-20251216-msvcrt-ubuntu-22.04-x86_64.tar.xz
-windows-i386-msvcrt-dir   := $(TOOLCHAINS_DIR)/llvm-mingw-msvcrt
-
-windows-arm64-msvcrt-url  := https://github.com/mstorsjo/llvm-mingw/releases/download/20251216/llvm-mingw-20251216-msvcrt-ubuntu-22.04-x86_64.tar.xz
-windows-arm64-msvcrt-dir  := $(TOOLCHAINS_DIR)/llvm-mingw-msvcrt
+llvm-mingw-msvcrt-url := https://github.com/mstorsjo/llvm-mingw/releases/download/20251216/llvm-mingw-20251216-msvcrt-ubuntu-22.04-x86_64.tar.xz
 
 # ----- Windows (llvm-mingw, ucrt runtime) -----
 
-windows-amd64-ucrt-url    := https://github.com/mstorsjo/llvm-mingw/releases/download/20251216/llvm-mingw-20251216-ucrt-ubuntu-22.04-x86_64.tar.xz
-windows-amd64-ucrt-dir    := $(TOOLCHAINS_DIR)/llvm-mingw-ucrt
-
-windows-i386-ucrt-url     := https://github.com/mstorsjo/llvm-mingw/releases/download/20251216/llvm-mingw-20251216-ucrt-ubuntu-22.04-x86_64.tar.xz
-windows-i386-ucrt-dir     := $(TOOLCHAINS_DIR)/llvm-mingw-ucrt
-
-windows-arm64-ucrt-url    := https://github.com/mstorsjo/llvm-mingw/releases/download/20251216/llvm-mingw-20251216-ucrt-ubuntu-22.04-x86_64.tar.xz
-windows-arm64-ucrt-dir    := $(TOOLCHAINS_DIR)/llvm-mingw-ucrt
+llvm-mingw-ucrt-url   := https://github.com/mstorsjo/llvm-mingw/releases/download/20251216/llvm-mingw-20251216-ucrt-ubuntu-22.04-x86_64.tar.xz
 
 TOOLCHAINS := linux-amd64 linux-arm64 linux-armel linux-armhf \
               linux-i386 linux-ppc64el linux-riscv64 linux-s390x \
-              windows-amd64-msvcrt windows-i386-msvcrt windows-arm64-msvcrt \
-              windows-amd64-ucrt windows-i386-ucrt windows-arm64-ucrt
+              llvm-mingw-msvcrt llvm-mingw-ucrt
 
 .PHONY: $(TOOLCHAINS)
 
 $(TOOLCHAINS_DIR):
 	@mkdir -p $@
 
-$(TOOLCHAINS): %: $(TOOLCHAINS_DIR)/%.done
-	@echo "export PATH=\"$($*-dir)/bin:\$$PATH\""
+$(TOOLCHAINS): %: $(TOOLCHAINS_DIR)/%/.done
+	@echo "export PATH=\"$(TOOLCHAINS_DIR)/$*/bin:\$$PATH\""
 
 # Fetch and extract.  The archive is streamed from curl into tar, so
 # nothing is cached on disk — re-running a target re-downloads.  The
@@ -153,14 +118,14 @@ $(TOOLCHAINS): %: $(TOOLCHAINS_DIR)/%.done
 # otherwise "succeed" on an empty pipe.  The stamp depends on
 # Makefile.toolchain so editing any URL here auto-invalidates the
 # affected toolchain on the next invocation.
-$(TOOLCHAINS_DIR)/%.done: Makefile.toolchain | $(TOOLCHAINS_DIR)
+$(TOOLCHAINS_DIR)/%/.done: Makefile.toolchain | $(TOOLCHAINS_DIR)
 	@echo "Fetching $($*-url)..." >&2
-	@rm -rf "$($*-dir)"
-	@mkdir -p "$($*-dir)"
+	@rm -rf "$(TOOLCHAINS_DIR)/$*"
+	@mkdir -p "$(TOOLCHAINS_DIR)/$*"
 	@set -o pipefail; case "$($*-url)" in \
-	    *.tgz|*.tar.gz)   curl -fsSL "$($*-url)" | tar -xzf - -C "$($*-dir)" --strip-components=1 ;; \
-	    *.tbz2|*.tar.bz2) curl -fsSL "$($*-url)" | tar -xjf - -C "$($*-dir)" --strip-components=1 ;; \
-	    *.txz|*.tar.xz)   curl -fsSL "$($*-url)" | tar -xJf - -C "$($*-dir)" --strip-components=1 ;; \
+	    *.tgz|*.tar.gz)   curl -fsSL "$($*-url)" | tar -xzf - -C "$(TOOLCHAINS_DIR)/$*" --strip-components=1 ;; \
+	    *.tbz2|*.tar.bz2) curl -fsSL "$($*-url)" | tar -xjf - -C "$(TOOLCHAINS_DIR)/$*" --strip-components=1 ;; \
+	    *.txz|*.tar.xz)   curl -fsSL "$($*-url)" | tar -xJf - -C "$(TOOLCHAINS_DIR)/$*" --strip-components=1 ;; \
 	    *) echo "Unknown archive format: $($*-url)" >&2; exit 1 ;; \
 	esac
 	@touch $@
