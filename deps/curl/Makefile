@@ -20,8 +20,8 @@ $(PREFIX)/lib/libcurl.a: $(TARBALL)
 	@tar xf $(TARBALL)
 	@cd $(SRC) && \
 		CC="$(CC)" \
-		CFLAGS="-I$(PREFIX)/include $(CFLAGS)" \
-		LDFLAGS="-L$(PREFIX)/lib -L$(PREFIX)/lib64 $(CROSS_STATIC)" \
+		CFLAGS="-I$(PREFIX)/include" \
+		LDFLAGS="-L$(PREFIX)/lib -L$(PREFIX)/lib64" \
 		LIBS="$(MBEDTLS_LIBS)" \
 		./configure --prefix=$(PREFIX) $(CONFIGURE_HOST) \
 			--disable-shared --enable-static \

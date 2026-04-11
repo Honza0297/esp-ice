@@ -50,119 +50,107 @@ jobs:
       matrix:
         include:
           # ----------------------------------------------------------
-          # Linux: cross-compiled on ubuntu-latest.
-          # Fully static binaries via musl + vendored deps.
+          # Linux: cross-compiled on ubuntu-latest via musl.cc
+          # toolchains fetched by Makefile.toolchain.
           # ----------------------------------------------------------
           - name: linux-amd64
             runner: ubuntu-latest
-            cc: x86_64-linux-gnu-gcc
-            apt: gcc-x86-64-linux-gnu
+            cc: x86_64-linux-musl-gcc
             dist: targz-pkg
 
           - name: linux-arm64
             runner: ubuntu-latest
-            cc: aarch64-linux-gnu-gcc
-            apt: gcc-aarch64-linux-gnu
+            cc: aarch64-linux-musl-gcc
             dist: targz-pkg
 
           - name: linux-armel
             runner: ubuntu-latest
-            cc: arm-linux-gnueabi-gcc
-            apt: gcc-arm-linux-gnueabi
+            cc: arm-linux-musleabi-gcc
             dist: targz-pkg
 
           - name: linux-armhf
             runner: ubuntu-latest
-            cc: arm-linux-gnueabihf-gcc
-            apt: gcc-arm-linux-gnueabihf
-            dist: targz-pkg
-
-          - name: linux-ppc64el
-            runner: ubuntu-latest
-            cc: powerpc64le-linux-gnu-gcc
-            apt: gcc-powerpc64le-linux-gnu
-            dist: targz-pkg
-
-          - name: linux-riscv64
-            runner: ubuntu-latest
-            cc: riscv64-linux-gnu-gcc
-            apt: gcc-riscv64-linux-gnu
+            cc: arm-linux-musleabihf-gcc
             dist: targz-pkg
 
           - name: linux-i386
             runner: ubuntu-latest
-            cc: i686-linux-gnu-gcc
-            apt: gcc-i686-linux-gnu
+            cc: i686-linux-musl-gcc
+            dist: targz-pkg
+
+          - name: linux-ppc64el
+            runner: ubuntu-latest
+            cc: powerpc64le-linux-musl-gcc
+            dist: targz-pkg
+
+          - name: linux-riscv64
+            runner: ubuntu-latest
+            cc: riscv64-linux-musl-gcc
             dist: targz-pkg
 
           - name: linux-s390x
             runner: ubuntu-latest
-            cc: s390x-linux-gnu-gcc
-            apt: gcc-s390x-linux-gnu
+            cc: s390x-linux-musl-gcc
             dist: targz-pkg
 
           # ----------------------------------------------------------
-          # Windows: cross-compiled on ubuntu-latest.
-          # amd64/i386 use gcc-mingw-w64 from apt;
-          # arm64 uses llvm-mingw (fetched via Makefile.llvm-mingw).
+          # Windows: cross-compiled on ubuntu-latest via llvm-mingw
+          # fetched by Makefile.toolchain.
           # ----------------------------------------------------------
           - name: windows-amd64
             runner: ubuntu-latest
             cc: x86_64-w64-mingw32-gcc
-            apt: gcc-mingw-w64-x86-64
             dist: zip-pkg
 
           - name: windows-i386
             runner: ubuntu-latest
             cc: i686-w64-mingw32-gcc
-            apt: gcc-mingw-w64-i686
             dist: zip-pkg
 
           - name: windows-arm64
             runner: ubuntu-latest
-            cc: aarch64-w64-mingw32-clang
-            llvm_mingw: true
+            cc: aarch64-w64-mingw32-gcc
             dist: zip-pkg
 
           # ----------------------------------------------------------
-          # macOS: on native runners (cross-compiling Darwin needs
-          # the Apple SDK).  Static deps, dynamic system frameworks.
+          # macOS: on native runners (Darwin cross-compilation from
+          # Linux needs the Apple SDK and is not supported).
           # ----------------------------------------------------------
           - name: macos-arm64
             runner: macos-latest
             cc: clang
-            brew: coreutils cmake
             dist: targz-pkg
 
           - name: macos-amd64
             runner: macos-15-intel
             cc: clang
-            brew: coreutils cmake
             dist: targz-pkg
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: install (apt)
-        if: matrix.apt
+      # --- Linux/Windows: fetch toolchain via Makefile.toolchain ---
+
+      - name: cache toolchain
+        if: startsWith(matrix.runner, 'ubuntu')
+        uses: actions/cache@v4
+        with:
+          path: toolchains/${{ matrix.name }}
+          key: toolchain-${{ matrix.name }}-${{ hashFiles('Makefile.toolchain') }}
+
+      - name: build (cross)
+        if: startsWith(matrix.runner, 'ubuntu')
         run: |
-          sudo apt-get update
-          sudo apt-get install -y make cmake curl bzip2 file zip ${{ matrix.apt }}
+          eval "$(make -f Makefile.toolchain ${{ matrix.name }})"
+          make STATIC=1 CC=${{ matrix.cc }} ${{ matrix.dist }}
 
-      - name: install (llvm-mingw)
-        if: matrix.llvm_mingw
+      # --- macOS: native build ---
+
+      - name: build (macos)
+        if: startsWith(matrix.runner, 'macos')
         run: |
-          sudo apt-get update
-          sudo apt-get install -y make cmake curl bzip2 file zip
-          make -f Makefile.llvm-mingw
-          echo "$PWD/llvm-mingw/bin" >> $GITHUB_PATH
-
-      - name: install (brew)
-        if: matrix.brew
-        run: brew install ${{ matrix.brew }}
-
-      - name: build
-        run: make STATIC=1 CC=${{ matrix.cc }} ${{ matrix.dist }}
+          brew install coreutils cmake
+          make STATIC=1 CC=${{ matrix.cc }} ${{ matrix.dist }}
 
       - name: verify
         run: file build/ice*

@@ -12,7 +12,7 @@ $(PREFIX)/lib/libz.a: $(TARBALL)
 	@echo "Building zlib $(VERSION)..."
 	@tar xf $(TARBALL)
 	@cd $(SRC) && \
-		$(if $(HOST_TRIPLE),CHOST=$(HOST_TRIPLE)) \
+		$(if $(CROSS),CHOST=$(TRIPLE)) \
 		CC="$(CC)" ./configure --prefix=$(PREFIX) --static \
 			--disable-crcvx && \
 		$(MAKE) -j$(NPROC) libz.a && \

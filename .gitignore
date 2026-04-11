@@ -5,8 +5,8 @@
 /deps/*/zlib-*/
 /deps/*/mbedtls-*/
 /deps/*/curl-*/
-/deps/*/musl-*/
 /deps/*/*.tar.*
+/toolchains/
 dist/
 stage/
 t_out/

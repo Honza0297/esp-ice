@@ -11,11 +11,18 @@ T ?= t/
 PFLAGS ?=
 T_OUT ?= t_out
 
-# Original user-provided CC (preserved before the musl-gcc override
-# below, used to build musl in the deps tree).
-HOST_CC := $(CC)
-
-CROSS_COMPILE := $(subst $(lastword $(subst -, ,$(CC))),,$(CC))
+# Target triple.  Prefer the CC name's prefix (e.g. aarch64-w64-mingw32-clang
+# → aarch64-w64-mingw32) over $(CC) -dumpmachine, because llvm-mingw's clang
+# reports its triple as "aarch64-w64-windows-gnu" which autotools config.sub
+# rejects.  Unprefixed compilers (gcc/clang/cc) fall back to -dumpmachine.
+CC_PREFIX := $(patsubst %-,%,$(subst $(lastword $(subst -, ,$(CC))),,$(CC)))
+ifneq ($(CC_PREFIX),)
+TRIPLE := $(CC_PREFIX)
+CROSS_COMPILE := $(CC_PREFIX)-
+else
+TRIPLE := $(shell $(CC) -dumpmachine 2>/dev/null)
+CROSS_COMPILE :=
+endif
 WINDRES := $(CROSS_COMPILE)windres
 
 BUILD_CFLAGS = $(CFLAGS) $(CFLAGS_APPEND)
@@ -25,43 +32,41 @@ BUILD_DEFINES := -DVERSION=\"$(VERSION)\"
 COMPILER_VERSION := $(shell $(CC) --version)
 CONTEXT := "$(COMPILER_VERSION) $(CFLAGS) $(LDFLAGS)"
 
-DUMPMACHINE := $(shell $(CC) -dumpmachine)
-
-ifneq ($(findstring x86_64,$(DUMPMACHINE)),)
+ifneq ($(findstring x86_64,$(TRIPLE)),)
 	ARCH := amd64
-else ifneq ($(findstring i686,$(DUMPMACHINE)),)
+else ifneq ($(findstring i686,$(TRIPLE)),)
 	ARCH := i386
-else ifneq ($(findstring aarch64,$(DUMPMACHINE)),)
+else ifneq ($(findstring aarch64,$(TRIPLE)),)
 	ARCH := arm64
-else ifneq ($(findstring arm64,$(DUMPMACHINE)),)
+else ifneq ($(findstring arm64,$(TRIPLE)),)
 	ARCH := arm64
-else ifneq ($(findstring arm,$(DUMPMACHINE)),)
+else ifneq ($(findstring arm,$(TRIPLE)),)
 	# Check for Hard Float vs Soft Float
-	ifneq ($(findstring gnueabihf,$(DUMPMACHINE)),)
+	ifneq ($(findstring gnueabihf,$(TRIPLE))$(findstring musleabihf,$(TRIPLE)),)
 		ARCH := armhf
 	else
 		ARCH := armel
 	endif
-else ifneq ($(findstring powerpc64le,$(DUMPMACHINE)),)
+else ifneq ($(findstring powerpc64le,$(TRIPLE)),)
 	ARCH := ppc64el
-else ifneq ($(findstring s390x,$(DUMPMACHINE)),)
+else ifneq ($(findstring s390x,$(TRIPLE)),)
 	ARCH := s390x
-else ifneq ($(findstring riscv64,$(DUMPMACHINE)),)
+else ifneq ($(findstring riscv64,$(TRIPLE)),)
 	ARCH := riscv64
 endif
 
-ifneq ($(findstring mingw,$(DUMPMACHINE)),)
+ifneq ($(findstring mingw,$(TRIPLE)),)
 	S ?= win
-else ifneq ($(findstring windows,$(DUMPMACHINE)),)
+else ifneq ($(findstring windows,$(TRIPLE)),)
 	S ?= win
-else ifneq ($(findstring apple,$(DUMPMACHINE)),)
+else ifneq ($(findstring apple,$(TRIPLE)),)
 	S ?= macos
 else
 	S ?= linux
 endif
 
 # Cross-compilation: target triple != build machine triple.
-ifneq ($(DUMPMACHINE),$(shell cc -dumpmachine 2>/dev/null))
+ifneq ($(TRIPLE),$(shell cc -dumpmachine 2>/dev/null))
 CROSS := 1
 endif
 
@@ -76,33 +81,17 @@ SRCS := ice.c \
 	svec.c \
 	http.c
 
-# STATIC=1: use vendored deps from deps/ (fully self-contained)
-# Linux: fully static via musl (zero runtime deps)
-# macOS: static deps, dynamic system frameworks
-# Windows: fully static via MinGW
-# otherwise: use system libcurl (for development)
+# STATIC=1: use vendored deps from deps/ (fully self-contained).
+# The user is expected to provide a CC that targets musl on Linux
+# (e.g. x86_64-linux-musl-gcc, fetched via Makefile.toolchain), MinGW
+# on Windows (e.g. x86_64-w64-mingw32-gcc), or the system clang on macOS.
 ifdef STATIC
 DEPS_PREFIX := $(CURDIR)/deps/install
 DEPS_STAMP := $(CURDIR)/deps/.stamp
 BUILD_CFLAGS += -I$(DEPS_PREFIX)/include -DCURL_STATICLIB
 LIBS := -L$(DEPS_PREFIX)/lib -L$(DEPS_PREFIX)/lib64 -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -ltfpsacrypto -lz
 ifeq ($(S),linux)
-# Override so that CC passed on the command line (for cross-compiling)
-# is still substituted with musl-gcc for the final binary link.  HOST_CC
-# above captures the user's original CC for building musl itself.
-override CC := $(DEPS_PREFIX)/bin/musl-gcc
 LDFLAGS += -static
-MUSL := 1
-# ppc64le: musl requires 64-bit long double (not IEEE 128-bit)
-ifeq ($(ARCH),ppc64el)
-BUILD_CFLAGS += -mlong-double-64
-endif
-# i386: musl's cross-compiled libc.a doesn't provide __stack_chk_fail_local
-ifdef CROSS
-ifeq ($(ARCH),i386)
-BUILD_CFLAGS += -fno-stack-protector
-endif
-endif
 endif
 ifeq ($(S),macos)
 LIBS += -framework CoreFoundation -framework SystemConfiguration
@@ -186,7 +175,7 @@ $(O)/%.o: cmd/build/%.c Makefile $(O)/context | $(O)
 ifdef STATIC
 $(OBJS): | $(DEPS_STAMP)
 $(DEPS_STAMP):
-	$(MAKE) -C deps S=$(S) $(if $(MUSL),MUSL=1) HOST_CC="$(HOST_CC)"
+	$(MAKE) -C deps S=$(S) TRIPLE=$(TRIPLE) $(if $(CROSS),CROSS=1)
 endif
 
 $(BINARY): $(OBJS) | $(O)
@@ -226,7 +215,7 @@ $(DIST)/$(PKG_NAME).zip: $(STAGE) | $(DIST)
 	cd $(STAGE) && zip -r $(abspath $@) $(NAME)-$(VERSION)
 
 deps:
-	$(MAKE) -C deps S=$(S) $(if $(MUSL),MUSL=1) HOST_CC="$(HOST_CC)"
+	$(MAKE) -C deps S=$(S) TRIPLE=$(TRIPLE) $(if $(CROSS),CROSS=1)
 
 clean:
 	rm -rf $(O) $(DIST) $(STAGE) $(T_OUT)
@@ -240,7 +229,7 @@ clang-format:
 # Lint checks and WarningsAsErrors: see .clang-tidy in this directory.
 clang-tidy:
 	clang-tidy \
-		--extra-arg="--target=$(DUMPMACHINE)" \
+		--extra-arg="--target=$(TRIPLE)" \
 		$(SRCS) \
 		-- \
 		$(BUILD_DEFINES) \
