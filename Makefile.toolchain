@@ -150,6 +150,14 @@ TOOLCHAINS := linux-amd64 linux-arm64 linux-armel linux-armhf \
 
 .PHONY: $(TOOLCHAINS)
 
+# Keep the .downloaded and .unpacked stamps around after they've been
+# used.  Without this, Make considers them intermediate files of the
+# chain reaching the phony target and auto-removes them at end of run,
+# printing a `rm <path>` message on stdout.  That message then gets
+# captured by `eval "$(make -f Makefile.toolchain …)"` and re-executed
+# as a shell command, failing because the file is already gone.
+.SECONDARY:
+
 # ---------------------------------------------------------------------------
 # Pipeline: phony target → .unpacked stamp → .downloaded stamp → curl
 # ---------------------------------------------------------------------------
