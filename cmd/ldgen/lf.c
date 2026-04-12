@@ -19,16 +19,6 @@
 /*  Helpers                                                           */
 /* ================================================================== */
 
-#define VEC_PUSH(v, n, cap)                                            \
-	do {                                                           \
-		if ((n) >= (cap)) {                                    \
-			(cap) = (cap) ? (cap) * 2 : 4;                \
-			(v) = realloc((v), (cap) * sizeof(*(v)));      \
-			if (!(v))                                      \
-				die_errno("realloc");                  \
-		}                                                      \
-	} while (0)
-
 static int is_name_start(int c)
 {
 	return isalpha(c) || c == '_' || c == '.';
@@ -310,7 +300,7 @@ static void parse_cond(struct lexer *l,
 		       struct lf_stmt **v, int *n, int *cap,
 		       stmt_parser_fn inner)
 {
-	VEC_PUSH(*v, *n, *cap);
+	ALLOC_GROW(*v, *n + 1, *cap);
 	struct lf_stmt *s = &(*v)[(*n)++];
 	memset(s, 0, sizeof(*s));
 	s->is_cond = 1;
@@ -323,7 +313,7 @@ static void parse_cond(struct lexer *l,
 	char *expr = read_cond(l);
 	expect(l, TOK_NL);
 
-	VEC_PUSH(branches, nb, bcap);
+	ALLOC_GROW(branches, nb + 1, bcap);
 	struct lf_branch *b = &branches[nb++];
 	memset(b, 0, sizeof(*b));
 	b->expr = expr;
@@ -339,7 +329,7 @@ static void parse_cond(struct lexer *l,
 		expr = read_cond(l);
 		expect(l, TOK_NL);
 
-		VEC_PUSH(branches, nb, bcap);
+		ALLOC_GROW(branches, nb + 1, bcap);
 		b = &branches[nb++];
 		memset(b, 0, sizeof(*b));
 		b->expr = expr;
@@ -357,7 +347,7 @@ static void parse_cond(struct lexer *l,
 		expect(l, TOK_COLON);
 		expect(l, TOK_NL);
 
-		VEC_PUSH(branches, nb, bcap);
+		ALLOC_GROW(branches, nb + 1, bcap);
 		b = &branches[nb++];
 		memset(b, 0, sizeof(*b));
 
@@ -387,7 +377,7 @@ static void parse_sec_stmts(struct lexer *l,
 		if (is_kw(l, "elif") || is_kw(l, "else"))
 			break;
 
-		VEC_PUSH(*v, *n, *cap);
+		ALLOC_GROW(*v, *n + 1, *cap);
 		struct lf_stmt *s = &(*v)[(*n)++];
 		memset(s, 0, sizeof(*s));
 		s->u.entry.name = expect_name(l);
@@ -406,7 +396,7 @@ static void parse_sch_stmts(struct lexer *l,
 		if (is_kw(l, "elif") || is_kw(l, "else"))
 			break;
 
-		VEC_PUSH(*v, *n, *cap);
+		ALLOC_GROW(*v, *n + 1, *cap);
 		struct lf_stmt *s = &(*v)[(*n)++];
 		memset(s, 0, sizeof(*s));
 		s->u.entry.name = expect_name(l);
@@ -457,7 +447,7 @@ static void parse_map_stmts(struct lexer *l,
 		char *scheme = expect_name(l);
 		expect(l, TOK_RPAREN);
 
-		VEC_PUSH(*v, *n, *cap);
+		ALLOC_GROW(*v, *n + 1, *cap);
 		struct lf_stmt *s = &(*v)[(*n)++];
 		memset(s, 0, sizeof(*s));
 		s->u.entry.name = name;
@@ -481,7 +471,7 @@ static void parse_frags(struct lexer *l,
 static void parse_frag_cond(struct lexer *l,
 			    struct lf_frag **v, int *n, int *cap)
 {
-	VEC_PUSH(*v, *n, *cap);
+	ALLOC_GROW(*v, *n + 1, *cap);
 	struct lf_frag *f = &(*v)[(*n)++];
 	memset(f, 0, sizeof(*f));
 	f->kind = LF_FRAG_COND;
@@ -494,7 +484,7 @@ static void parse_frag_cond(struct lexer *l,
 	char *expr = read_cond(l);
 	expect(l, TOK_NL);
 
-	VEC_PUSH(branches, nb, bcap);
+	ALLOC_GROW(branches, nb + 1, bcap);
 	struct lf_frag_branch *b = &branches[nb++];
 	memset(b, 0, sizeof(*b));
 	b->expr = expr;
@@ -509,7 +499,7 @@ static void parse_frag_cond(struct lexer *l,
 	while (is_kw(l, "elif")) {
 		expr = read_cond(l);
 		expect(l, TOK_NL);
-		VEC_PUSH(branches, nb, bcap);
+		ALLOC_GROW(branches, nb + 1, bcap);
 		b = &branches[nb++];
 		memset(b, 0, sizeof(*b));
 		b->expr = expr;
@@ -525,7 +515,7 @@ static void parse_frag_cond(struct lexer *l,
 		lf_next(l);
 		expect(l, TOK_COLON);
 		expect(l, TOK_NL);
-		VEC_PUSH(branches, nb, bcap);
+		ALLOC_GROW(branches, nb + 1, bcap);
 		b = &branches[nb++];
 		memset(b, 0, sizeof(*b));
 		fcap = 0;
@@ -571,7 +561,7 @@ static void parse_sections(struct lexer *l,
 	int ns = 0, scap = 0;
 	parse_entries(l, parse_sec_stmts, &stmts, &ns, &scap);
 
-	VEC_PUSH(*v, *n, *cap);
+	ALLOC_GROW(*v, *n + 1, *cap);
 	struct lf_frag *f = &(*v)[(*n)++];
 	memset(f, 0, sizeof(*f));
 	f->kind = LF_SECTIONS;
@@ -593,7 +583,7 @@ static void parse_scheme(struct lexer *l,
 	int ns = 0, scap = 0;
 	parse_entries(l, parse_sch_stmts, &stmts, &ns, &scap);
 
-	VEC_PUSH(*v, *n, *cap);
+	ALLOC_GROW(*v, *n + 1, *cap);
 	struct lf_frag *f = &(*v)[(*n)++];
 	memset(f, 0, sizeof(*f));
 	f->kind = LF_SCHEME;
@@ -613,7 +603,7 @@ static void parse_archive_stmts(struct lexer *l,
 		if (is_kw(l, "elif") || is_kw(l, "else"))
 			break;
 
-		VEC_PUSH(*v, *n, *cap);
+		ALLOC_GROW(*v, *n + 1, *cap);
 		struct lf_stmt *s = &(*v)[(*n)++];
 		memset(s, 0, sizeof(*s));
 		if (l->tok == TOK_STAR) {
@@ -646,7 +636,7 @@ static void parse_mapping(struct lexer *l,
 
 	if (l->tok == TOK_NAME || l->tok == TOK_STAR) {
 		/* inline value */
-		VEC_PUSH(archive, na, acap);
+		ALLOC_GROW(archive, na + 1, acap);
 		struct lf_stmt *s = &archive[na++];
 		memset(s, 0, sizeof(*s));
 		if (l->tok == TOK_STAR) {
@@ -670,7 +660,7 @@ static void parse_mapping(struct lexer *l,
 	int ne = 0, ecap = 0;
 	parse_entries(l, parse_map_stmts, &entries, &ne, &ecap);
 
-	VEC_PUSH(*v, *n, *cap);
+	ALLOC_GROW(*v, *n + 1, *cap);
 	struct lf_frag *f = &(*v)[(*n)++];
 	memset(f, 0, sizeof(*f));
 	f->kind = LF_MAPPING;

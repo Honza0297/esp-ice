@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "alloc.h"
 #include "color.h"
 #include "error.h"
 #include "http.h"

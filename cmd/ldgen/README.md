@@ -1,22 +1,23 @@
 # ldgen -- Linker Fragment Parser
 
 Parses ESP-IDF linker fragment files (`.lf`).  The grammar below is
-extracted directly from the pyparsing definitions in
-`tools/ldgen/ldgen/fragments.py`.
+extracted from the pyparsing definitions in
+`tools/ldgen/ldgen/fragments.py` (`class Fragment`, `class Sections`,
+`class Scheme`, `class Mapping`, `parse_fragment_file()`).
 
 ## Lexical elements
 
 Four distinct name classes are used in different positions:
 
-    IDENT    = [a-zA-Z_] [a-zA-Z0-9_]*            (fragments.py:45)
-    ENTITY   = [a-zA-Z0-9.\-_$+]+                  (fragments.py:46)
-    SEC_NAME = [a-zA-Z_.] [a-zA-Z0-9._-]* '+'?     (fragments.py:70, Combine)
-    OBJ_NAME = [a-zA-Z_] [a-zA-Z0-9\-_]*           (fragments.py:322)
+    IDENT    = [a-zA-Z_] [a-zA-Z0-9_]*             Fragment.IDENTIFIER
+    ENTITY   = [a-zA-Z0-9.\-_$+]+                  Fragment.ENTITY
+    SEC_NAME = [a-zA-Z_.] [a-zA-Z0-9._-]* '+'?     Sections.ENTRY (Combine)
+    OBJ_NAME = [a-zA-Z_] [a-zA-Z0-9\-_]*           Mapping._obj
 
 Other terminals:
 
     NUM      = [0-9]+
-    EXPR     = [^:\n]+                              (SkipTo(':'), fragments.py:425)
+    EXPR     = [^:\n]+                              SkipTo(':') in get_conditional_stmt()
     SORT_KEY = 'name' | 'alignment' | 'init_priority'
 
 Our lexer unifies the four name classes into a single NAME token
@@ -33,14 +34,12 @@ indentation — they neither set nor break a block level.
 
 ## Productions
 
-Source references are to `fragments.py` in `tools/ldgen/ldgen/`.
-
-### File (line 474-476)
+### File
 
     file        = { fragment }
     fragment    = sections | scheme | mapping | cond(fragment)
 
-### Sections (lines 57-70, 449-452)
+### Sections
 
     sections    = '[sections:' IDENT ']' NL
                   'entries:' suite(sec_stmt)
@@ -48,7 +47,7 @@ Source references are to `fragments.py` in `tools/ldgen/ldgen/`.
     sec_stmt    = SEC_NAME NL
                 | cond(sec_stmt)
 
-### Scheme (lines 109-121, 455-458)
+### Scheme
 
     scheme      = '[scheme:' IDENT ']' NL
                   'entries:' suite(sch_stmt)
@@ -56,7 +55,7 @@ Source references are to `fragments.py` in `tools/ldgen/ldgen/`.
     sch_stmt    = IDENT '->' IDENT NL
                 | cond(sch_stmt)
 
-### Mapping (lines 300-343, 460-472)
+### Mapping
 
     mapping     = '[mapping:' IDENT ']'
                   'archive:' suite(archive_stmt)
@@ -71,38 +70,36 @@ Source references are to `fragments.py` in `tools/ldgen/ldgen/`.
 
     map_entry   = (OBJ_NAME [ ':' IDENT ] | '*') '(' IDENT ')'
 
-Note: `parse_archive` (line 351) enforces that the archive suite
+Note: `Mapping.parse_archive()` enforces that the archive suite
 resolves to exactly one value after conditional evaluation.
 
-### Flags (lines 141-274, 343)
+### Flags
 
-    flag_list   = flag_item { ',' flag_item }       (DelimitedList)
-    flag_item   = IDENT '->' IDENT flag { flag }    (line 274, OneOrMore)
-    flag        = 'KEEP()'                          (Keyword, line 218)
+    flag_list   = flag_item { ',' flag_item }       DelimitedList in Mapping.ENTRY_WITH_FLAG
+    flag_item   = IDENT '->' IDENT flag { flag }    Flag.FLAG (OneOrMore)
+    flag        = 'KEEP()'                          Keep.KEEP (single Keyword)
                 | 'ALIGN' '(' NUM [',' 'pre'] [',' 'post'] ')'
-                                                    (line 185, order matters)
+                                                    Align.ALIGN (order matters: pre before post)
                 | 'SORT' '(' [ SORT_KEY [',' SORT_KEY] ] ')'
-                                                    (lines 241-247)
-                | 'SURROUND' '(' IDENT ')'          (line 154)
+                                                    Sort.SORT
+                | 'SURROUND' '(' IDENT ')'          Surround.SURROUND
 
-`KEEP()` is a single keyword in pyparsing, not three tokens.
-`ALIGN` arguments are ordered: `pre` must precede `post`.
-
-### Conditionals (lines 424-434)
+### Conditionals
 
     cond(S)     = 'if' EXPR ':' suite({ S })
                   { 'elif' EXPR ':' suite({ S }) }
                   [ 'else:' suite({ S }) ]
 
-`else:` is a single literal (Literal('else:'), line 430), not two tokens.
+`else:` is a single literal (`Literal('else:')` in `get_conditional_stmt()`),
+not two tokens.
 
-### Suite (lines 436-440)
+### Suite
 
     suite(S)    = IndentedBlock(S | comment | cond(S))
 
-A suite is an indented block.  The first content line sets the indent
-level; subsequent lines must be at the same or deeper level.  The block
-ends when a line appears at a shallower level.
+A suite is an indented block built by `get_suite()`.  The first content
+line sets the indent level; subsequent lines must be at the same or
+deeper level.  The block ends when a line appears at a shallower level.
 
 ## LL(1) decision points
 
