@@ -22,38 +22,68 @@ make
 ```
 
 This links dynamically against the system libcurl for fast iteration.
+Override `CC` to pick a different compiler (e.g. `make CC=clang`).
 
 ### Static build (release)
 
-Requires a C compiler, `make`, `cmake`, `curl`, and `bzip2`. All
-libraries (musl, zlib, mbedTLS, curl) are built from source automatically.
-The resulting binary is fully static with zero runtime dependencies.
+All vendored libraries (zlib, mbedTLS, curl, libyaml) are built from
+source automatically.  The resulting binary is fully static with zero
+runtime dependencies.
 
 ```bash
-# Debian/Ubuntu
-sudo apt-get install gcc make cmake curl bzip2
-
-make STATIC=1
-```
-
-### Windows
-
-Building on Windows requires [MSYS2](https://www.msys2.org/). Native
-MSVC builds are not supported.
-
-```bash
-# In MSYS2 MINGW64 shell
-pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake make curl bzip2
-
-make STATIC=1
-```
-
-### macOS
-
-```bash
+# macOS
 brew install cmake
 make STATIC=1
+
+# Windows (MSYS2 MINGW64 shell)
+pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake make curl bzip2
+make STATIC=1
+
+# Linux — requires a musl toolchain (see Cross-compilation below)
+eval "$(make -f Makefile.toolchain linux-amd64)"
+make STATIC=1 CC=x86_64-linux-musl-gcc
 ```
+
+On Linux, `STATIC=1` requires a musl-based compiler.  glibc static
+linking is not truly portable (NSS uses `dlopen` at runtime), so the
+build will error if `CC` does not target musl.
+
+### Cross-compilation
+
+Release binaries for all supported platforms are cross-compiled from a
+Linux host.  `Makefile.toolchain` manages prebuilt toolchains — it
+downloads them on first use and prints `export PATH=…` on stdout.
+Wrapping the call in `eval "$(…)"` executes that output in the
+current shell, adding the toolchain's `bin/` directory to `PATH` so
+the cross-compiler is available for subsequent commands:
+
+```bash
+# List available toolchains and their CC values
+make -f Makefile.toolchain help
+
+# Fetch a single toolchain
+eval "$(make -f Makefile.toolchain linux-arm64)"
+make STATIC=1 CC=aarch64-linux-musl-gcc targz-pkg
+
+# Or fetch all toolchains at once
+eval "$(make -f Makefile.toolchain all)"
+make STATIC=1 CC=x86_64-w64-mingw32-gcc zip-pkg
+```
+
+Each toolchain's build artifacts are scoped by the compiler triple, so
+multiple targets can coexist in the same checkout without colliding.
+
+### Build variables
+
+| Variable | Description |
+|----------|-------------|
+| `CC` | Compiler to use (default: `cc`). Determines the target triple, output directory, and deps install path. |
+| `STATIC=1` | Build vendored deps from source and link statically. |
+| `O` | Output directory (default: `build/<triple>`). |
+
+Run `make help` for the full list of variables, targets, and their
+current values.  Run `make -f Makefile.toolchain help` for the
+catalogue of available cross-compilation toolchains.
 
 ### Useful targets
 
@@ -63,8 +93,8 @@ make STATIC=1
 | `make STATIC=1` | Fully static release build |
 | `make deps` | Build vendored deps only |
 | `make test` | Run tests |
-| `make clean` | Remove build artifacts |
-| `make mrproper` | Remove build artifacts and vendored deps |
+| `make clean` | Remove build artifacts for the current triple |
+| `make mrproper` | Remove all build artifacts and vendored deps |
 | `make help` | Show all build variables and targets |
 
 ## Contributing
