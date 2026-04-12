@@ -20,6 +20,7 @@ struct cmd_struct {
 
 static struct cmd_struct commands[] = {
 	{"build", cmd_build},
+	{"ldgen", cmd_ldgen},
 };
 
 static struct cmd_struct *find_command(const char *name)

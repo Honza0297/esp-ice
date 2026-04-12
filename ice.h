@@ -31,7 +31,8 @@
 #include "sbuf.h"
 #include "svec.h"
 
-/* Subcommands (defined in builtin/) */
+/* Subcommands */
 int cmd_build(int argc, const char **argv);
+int cmd_ldgen(int argc, const char **argv);
 
 #endif /* ICE_H */

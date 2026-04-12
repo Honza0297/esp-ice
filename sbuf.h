@@ -97,4 +97,10 @@ ssize_t sbuf_read_file(struct sbuf *sb, const char *path);
 /** Remove trailing whitespace. */
 void sbuf_rtrim(struct sbuf *sb);
 
+/** Duplicate a NUL-terminated string. Caller must free(). Dies on OOM. */
+char *sbuf_strdup(const char *s);
+
+/** Duplicate at most @p n bytes of @p s. Caller must free(). Dies on OOM. */
+char *sbuf_strndup(const char *s, size_t n);
+
 #endif /* SBUF_H */

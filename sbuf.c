@@ -154,3 +154,22 @@ void sbuf_rtrim(struct sbuf *sb)
 		sb->len--;
 	sb->buf[sb->len] = '\0';
 }
+
+char *sbuf_strdup(const char *s)
+{
+	struct sbuf sb = SBUF_INIT;
+
+	sbuf_addstr(&sb, s);
+	return sbuf_detach(&sb);
+}
+
+char *sbuf_strndup(const char *s, size_t n)
+{
+	struct sbuf sb = SBUF_INIT;
+	size_t len = strlen(s);
+
+	if (len > n)
+		len = n;
+	sbuf_add(&sb, s, len);
+	return sbuf_detach(&sb);
+}

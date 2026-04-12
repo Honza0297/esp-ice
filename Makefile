@@ -74,6 +74,8 @@ PKG_NAME := $(NAME)-$(VERSION)-$(S)-$(ARCH)$(PKG_SUFFIX)
 
 SRCS := ice.c \
 	cmd/build/build.c \
+	cmd/ldgen/ldgen.c \
+	cmd/ldgen/lf.c \
 	color.c \
 	error.c \
 	options.c \
@@ -174,6 +176,9 @@ $(O)/%.o: platform/win/%.c Makefile $(O)/context | $(O)
 	$(CC) $(BUILD_DEFINES) $(BUILD_CFLAGS) -MD -MP -o $@ -c $<
 
 $(O)/%.o: cmd/build/%.c Makefile $(O)/context | $(O)
+	$(CC) $(BUILD_DEFINES) $(BUILD_CFLAGS) -MD -MP -o $@ -c $<
+
+$(O)/%.o: cmd/ldgen/%.c Makefile $(O)/context | $(O)
 	$(CC) $(BUILD_DEFINES) $(BUILD_CFLAGS) -MD -MP -o $@ -c $<
 
 ifdef STATIC
