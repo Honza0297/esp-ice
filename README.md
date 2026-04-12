@@ -61,17 +61,22 @@ the cross-compiler is available for subsequent commands:
 # List available toolchains and their CC values
 make -f Makefile.toolchain help
 
-# Fetch a single toolchain
+# Fetch a single toolchain and build for Linux ARM64
 eval "$(make -f Makefile.toolchain linux-arm64)"
 make STATIC=1 CC=aarch64-linux-musl-gcc targz-pkg
 
-# Or fetch all toolchains at once
+# Fetch all toolchains at once and build for multiple targets
 eval "$(make -f Makefile.toolchain all)"
+make STATIC=1 CC=x86_64-linux-musl-gcc targz-pkg
+make STATIC=1 CC=aarch64-linux-musl-gcc targz-pkg
 make STATIC=1 CC=x86_64-w64-mingw32-gcc zip-pkg
 ```
 
-Each toolchain's build artifacts are scoped by the compiler triple, so
-multiple targets can coexist in the same checkout without colliding.
+`CC` selects the cross-compiler, which in turn determines the target
+platform, architecture, output directory (`build/<triple>`), and deps
+install path (`deps/install/<triple>`).  Build artifacts are scoped by
+the compiler triple, so multiple targets can coexist in the same
+checkout without colliding.
 
 ### Build variables
 
