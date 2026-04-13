@@ -46,10 +46,10 @@ static void md5_block(struct md5_ctx *ctx, const uint8_t *block)
 	uint32_t i;
 
 	for (i = 0; i < 16; i++)
-		m[i] = (uint32_t)block[i * 4] |
-		       ((uint32_t)block[i * 4 + 1] << 8) |
-		       ((uint32_t)block[i * 4 + 2] << 16) |
-		       ((uint32_t)block[i * 4 + 3] << 24);
+		m[i] = (uint32_t)block[(size_t)i * 4] |
+		       ((uint32_t)block[(size_t)i * 4 + 1] << 8) |
+		       ((uint32_t)block[(size_t)i * 4 + 2] << 16) |
+		       ((uint32_t)block[(size_t)i * 4 + 3] << 24);
 
 	for (i = 0; i < 64; i++) {
 		uint32_t f, g;
@@ -131,9 +131,9 @@ void md5_final(struct md5_ctx *ctx, uint8_t digest[16])
 	md5_update(ctx, bits, 8);
 
 	for (i = 0; i < 4; i++) {
-		digest[i * 4] = (uint8_t)(ctx->state[i]);
-		digest[i * 4 + 1] = (uint8_t)(ctx->state[i] >> 8);
-		digest[i * 4 + 2] = (uint8_t)(ctx->state[i] >> 16);
-		digest[i * 4 + 3] = (uint8_t)(ctx->state[i] >> 24);
+		digest[(size_t)i * 4] = (uint8_t)(ctx->state[i]);
+		digest[(size_t)i * 4 + 1] = (uint8_t)(ctx->state[i] >> 8);
+		digest[(size_t)i * 4 + 2] = (uint8_t)(ctx->state[i] >> 16);
+		digest[(size_t)i * 4 + 3] = (uint8_t)(ctx->state[i] >> 24);
 	}
 }

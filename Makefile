@@ -202,6 +202,8 @@ else
 LIB_SRCS += platform/posix/posix_io.c platform/posix/posix_process.c platform/posix/posix_exe.c
 SRCS     := $(MAIN_SRCS) $(LIB_SRCS)
 BINARY := $(O)/$(NAME)
+# readlink() requires _POSIX_C_SOURCE >= 200112L under -std=c99
+CFLAGS_APPEND += -D_POSIX_C_SOURCE=200112L
 
 endif
 

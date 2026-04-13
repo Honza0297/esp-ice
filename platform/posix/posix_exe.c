@@ -12,11 +12,6 @@
  * macOS:  _NSGetExecutablePath()
  */
 
-/* readlink() requires _POSIX_C_SOURCE >= 200112L under -std=c99. */
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 200112L
-#endif
-
 #include "../../ice.h"
 
 #ifdef __APPLE__

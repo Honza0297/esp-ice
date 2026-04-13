@@ -30,40 +30,40 @@ static const struct {
 		  {NULL, 0}};
 
 static const struct {
-	uint8_t type;
 	const char *name;
+	uint8_t type;
 	uint8_t val;
 } subtype_names[] = {
     /* app */
-    {PT_TYPE_APP, "factory", 0x00},
-    {PT_TYPE_APP, "test", 0x20},
+    {"factory", PT_TYPE_APP, 0x00},
+    {"test", PT_TYPE_APP, 0x20},
     /* app ota_0..ota_15 handled specially */
     /* app tee_0..tee_1 handled specially */
 
     /* data */
-    {PT_TYPE_DATA, "ota", 0x00},
-    {PT_TYPE_DATA, "phy", 0x01},
-    {PT_TYPE_DATA, "nvs", 0x02},
-    {PT_TYPE_DATA, "coredump", 0x03},
-    {PT_TYPE_DATA, "nvs_keys", 0x04},
-    {PT_TYPE_DATA, "efuse", 0x05},
-    {PT_TYPE_DATA, "undefined", 0x06},
-    {PT_TYPE_DATA, "esphttpd", 0x80},
-    {PT_TYPE_DATA, "fat", 0x81},
-    {PT_TYPE_DATA, "spiffs", 0x82},
-    {PT_TYPE_DATA, "littlefs", 0x83},
-    {PT_TYPE_DATA, "tee_ota", 0x90},
+    {"ota", PT_TYPE_DATA, 0x00},
+    {"phy", PT_TYPE_DATA, 0x01},
+    {"nvs", PT_TYPE_DATA, 0x02},
+    {"coredump", PT_TYPE_DATA, 0x03},
+    {"nvs_keys", PT_TYPE_DATA, 0x04},
+    {"efuse", PT_TYPE_DATA, 0x05},
+    {"undefined", PT_TYPE_DATA, 0x06},
+    {"esphttpd", PT_TYPE_DATA, 0x80},
+    {"fat", PT_TYPE_DATA, 0x81},
+    {"spiffs", PT_TYPE_DATA, 0x82},
+    {"littlefs", PT_TYPE_DATA, 0x83},
+    {"tee_ota", PT_TYPE_DATA, 0x90},
 
     /* bootloader */
-    {PT_TYPE_BOOT, "primary", 0x00},
-    {PT_TYPE_BOOT, "ota", 0x01},
-    {PT_TYPE_BOOT, "recovery", 0x02},
+    {"primary", PT_TYPE_BOOT, 0x00},
+    {"ota", PT_TYPE_BOOT, 0x01},
+    {"recovery", PT_TYPE_BOOT, 0x02},
 
     /* partition_table */
-    {PT_TYPE_PTABLE, "primary", 0x00},
-    {PT_TYPE_PTABLE, "ota", 0x01},
+    {"primary", PT_TYPE_PTABLE, 0x00},
+    {"ota", PT_TYPE_PTABLE, 0x01},
 
-    {0, NULL, 0}};
+    {NULL, 0, 0}};
 
 /* ------------------------------------------------------------------ */
 /* Integer / string parsing helpers                                    */
@@ -351,16 +351,14 @@ int pt_parse_csv(const char *path, struct pt_entry *entries, int *count,
 
 			/* offset */
 			if (off_f[0]) {
-				/* bootloader/ptable offsets are overridden */
-				if (e->type == PT_TYPE_BOOT &&
-				    e->subtype == 0x00 /* primary */) {
-					/* use --primary-bootloader-offset */
-				} else if (e->type == PT_TYPE_BOOT &&
-					   e->subtype == 0x02 /* recovery */) {
-					/* use --recovery-bootloader-offset */
-				} else if (e->type == PT_TYPE_PTABLE &&
-					   e->subtype == 0x00 /* primary */) {
-					/* use --offset */
+				/* bootloader/ptable offsets are overridden by
+				 * CLI */
+				if ((e->type == PT_TYPE_BOOT &&
+				     (e->subtype == 0x00 /* primary */ ||
+				      e->subtype == 0x02 /* recovery */)) ||
+				    (e->type == PT_TYPE_PTABLE &&
+				     e->subtype == 0x00 /* primary */)) {
+					/* offset set by --*-offset option */
 				} else {
 					uint32_t v;
 					if (parse_int(off_f, &v) != 0) {

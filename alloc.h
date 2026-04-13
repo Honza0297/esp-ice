@@ -36,10 +36,10 @@
  */
 #define REALLOC_ARRAY(x, alloc)                                                \
 	do {                                                                   \
-		void *_p = realloc((x), (alloc) * sizeof(*(x)));               \
-		if (!_p)                                                       \
+		void *realloc_tmp_ = realloc((x), (alloc) * sizeof(*(x)));     \
+		if (!realloc_tmp_)                                             \
 			die_errno("realloc");                                  \
-		(x) = _p;                                                      \
+		(x) = realloc_tmp_;                                            \
 	} while (0)
 
 /**
