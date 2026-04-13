@@ -18,7 +18,8 @@
  *   @g{...}  green        @G{...}  bold green
  *   @y{...}  yellow       @Y{...}  bold yellow
  *   @b{...}  bold         @c{...}  cyan
- *   @[sgr]{...}  arbitrary SGR code, e.g. @[38;5;208]{orange}
+ *   @[sgr]{...}     numeric SGR, e.g. @[38;5;208]{orange}
+ *   @[name]{...}    named color, e.g. @[COLOR_RED]{red}
  *   @@       literal @
  *   }}       literal } inside a color block
  *
