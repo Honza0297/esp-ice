@@ -351,6 +351,117 @@ out:
 	return rc;
 }
 
+/* ------------------------------------------------------------------ */
+/*  build.ninja patching (gen_esp32part.py → ice partition-table)    */
+/* ------------------------------------------------------------------ */
+
+static const char *mem_find(const char *p, const char *end, const char *needle,
+			    size_t nlen)
+{
+	for (; p + nlen <= end; p++)
+		if (!memcmp(p, needle, nlen))
+			return p;
+	return NULL;
+}
+
+static void patch_command_line(struct sbuf *out, const char *line, size_t len)
+{
+	static const char needle[] = "gen_esp32part.py";
+	static const size_t nlen = sizeof(needle) - 1;
+	const char *p = line;
+	const char *end = line + len;
+	int occurrence = 0;
+
+	while (p < end) {
+		const char *found = mem_find(p, end, needle, nlen);
+		if (!found) {
+			sbuf_add(out, p, end - p);
+			return;
+		}
+
+		const char *script_start = found;
+		while (script_start > p && script_start[-1] != ' ')
+			script_start--;
+
+		const char *python_start = script_start;
+		if (python_start > p)
+			python_start--;
+		while (python_start > p && python_start[-1] != ' ')
+			python_start--;
+
+		sbuf_add(out, p, python_start - p);
+
+		/*
+		 * IDF calls gen_esp32part.py twice per COMMAND line:
+		 *   1st call: generate  -- replace with ice partition-table
+		 *   2nd call: display   -- replace with true
+		 */
+		if (occurrence == 0) {
+			sbuf_addstr(out,
+				    ice_executable ? ice_executable : "ice");
+			sbuf_addstr(out, " partition-table");
+		} else {
+			sbuf_addstr(out, "true");
+		}
+		occurrence++;
+
+		p = found + nlen;
+	}
+}
+
+static void patch_ninja(const char *build_dir)
+{
+	static const char needle[] = "gen_esp32part.py";
+	static const size_t nlen = sizeof(needle) - 1;
+	struct sbuf ninja_path = SBUF_INIT;
+	struct sbuf content = SBUF_INIT;
+	struct sbuf out = SBUF_INIT;
+	const char *p, *end, *nl;
+	int modified = 0;
+	FILE *fp;
+
+	sbuf_addf(&ninja_path, "%s/build.ninja", build_dir);
+
+	if (sbuf_read_file(&content, ninja_path.buf) < 0)
+		goto done;
+
+	p = content.buf;
+	end = content.buf + content.len;
+
+	while (p < end) {
+		nl = memchr(p, '\n', end - p);
+		if (!nl)
+			nl = end;
+
+		size_t line_len = (size_t)(nl - p);
+
+		if (line_len > 11 && !memcmp(p, "  COMMAND =", 11) &&
+		    mem_find(p, nl, needle, nlen)) {
+			patch_command_line(&out, p, line_len);
+			modified = 1;
+		} else {
+			sbuf_add(&out, p, line_len);
+		}
+
+		if (nl < end)
+			sbuf_addch(&out, '\n');
+		p = nl + (nl < end ? 1 : 0);
+	}
+
+	if (modified) {
+		fp = fopen(ninja_path.buf, "w");
+		if (fp) {
+			fwrite(out.buf, 1, out.len, fp);
+			fclose(fp);
+		}
+	}
+
+done:
+	sbuf_release(&ninja_path);
+	sbuf_release(&content);
+	sbuf_release(&out);
+}
+
 int run_cmake_target(const char *target, const char *label, int interactive)
 {
 	const char *build_dir;
@@ -363,6 +474,10 @@ int run_cmake_target(const char *target, const char *label, int interactive)
 		return rc;
 
 	build_dir = config_get("core.build-dir");
+
+	/* Replace gen_esp32part.py with ice partition-table on every build. */
+	patch_ninja(build_dir);
+
 	config_get_bool("core.verbose", &verbose);
 
 	const char *argv[] = {"cmake",	  "--build", build_dir,
