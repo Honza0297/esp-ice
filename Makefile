@@ -130,6 +130,7 @@ LIB_SRCS := \
 	cmd/ldgen/ldgen.c \
 	cmd/ldgen/lf.c \
 	cmd/menuconfig/menuconfig.c \
+	cmd/partition_table/part_cmd.c \
 	cmd/reconfigure/reconfigure.c \
 	cmd/set-target/set-target.c \
 	cmd/size/chip.c \
@@ -138,12 +139,14 @@ LIB_SRCS := \
 	ice.c \
 	json.c \
 	map.c \
+	md5.c \
 	term.c \
 	elf.c \
 	error.c \
 	help.c \
 	pager.c \
 	options.c \
+	partition_table.c \
 	sbuf.c \
 	svec.c \
 	http.c

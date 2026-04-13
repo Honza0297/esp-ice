@@ -73,6 +73,7 @@ int cmd_config(int argc, const char **argv);
 int cmd_configdep(int argc, const char **argv);
 int cmd_help(int argc, const char **argv);
 int cmd_ldgen(int argc, const char **argv);
+int cmd_partition_table(int argc, const char **argv);
 int cmd_size(int argc, const char **argv);
 
 /*
