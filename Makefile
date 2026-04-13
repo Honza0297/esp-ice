@@ -81,7 +81,7 @@ SRCS := ice.c \
 	cmd/size/chip.c \
 	cmd/size/size.c \
 	map.c \
-	color.c \
+	term.c \
 	elf.c \
 	error.c \
 	options.c \

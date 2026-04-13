@@ -5,8 +5,8 @@
  */
 
 /**
- * @file color.c
- * @brief Terminal color support -- shared logic.
+ * @file term.c
+ * @brief Terminal presentation support -- shared logic.
  *
  * Provides the color token expander (expand_colors) used by the
  * platform fprintf overrides, and the global color/VT flags.
@@ -44,6 +44,22 @@ void expand_colors(struct sbuf *out, const char *fmt)
 			sbuf_addch(out, '@');
 			fmt += 2;
 			continue;
+		}
+
+		/* @[sgr]{ -> arbitrary SGR code, e.g. @[38;5;208]{ */
+		if (*fmt == '@' && fmt[1] == '[') {
+			const char *end = strchr(fmt + 2, ']');
+			if (end && end[1] == '{') {
+				if (use_color) {
+					sbuf_addstr(out, "\033[");
+					sbuf_add(out, fmt + 2,
+						 (size_t)(end - (fmt + 2)));
+					sbuf_addch(out, 'm');
+				}
+				fmt = end + 2;
+				depth++;
+				continue;
+			}
 		}
 
 		/* @x{ -> start color (only for recognized letters) */

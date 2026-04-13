@@ -29,20 +29,89 @@
 
 /**
  * @brief Map an ANSI SGR code to a Windows console text attribute.
+ *
+ * Handles all single-parameter SGR codes that the Console API can
+ * express.  Extended color sequences (38;5;N, 48;5;N, 38;2;R;G;B,
+ * 48;2;R;G;B) are handled by the caller (skip_extended_color).
  */
 static WORD ansi_to_attr(WORD attr, int code, WORD defattr)
 {
+	/* Foreground color table: index 0-7 maps SGR 30-37 and 90-97. */
+	static const WORD fg[] = {
+		0,                                          /* 0: black */
+		FOREGROUND_RED,                             /* 1: red */
+		FOREGROUND_GREEN,                           /* 2: green */
+		FOREGROUND_RED | FOREGROUND_GREEN,           /* 3: yellow */
+		FOREGROUND_BLUE,                            /* 4: blue */
+		FOREGROUND_RED | FOREGROUND_BLUE,            /* 5: magenta */
+		FOREGROUND_GREEN | FOREGROUND_BLUE,          /* 6: cyan */
+		FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE, /* 7: white */
+	};
+
 	switch (code) {
-	case 0:  return defattr;
-	case 1:  return attr | FOREGROUND_INTENSITY;
-	case 31: return (attr & ~0x07) | FOREGROUND_RED;
-	case 32: return (attr & ~0x07) | FOREGROUND_GREEN;
-	case 33: return (attr & ~0x07) | FOREGROUND_RED | FOREGROUND_GREEN;
-	case 34: return (attr & ~0x07) | FOREGROUND_BLUE;
-	case 35: return (attr & ~0x07) | FOREGROUND_RED | FOREGROUND_BLUE;
-	case 36: return (attr & ~0x07) | FOREGROUND_GREEN | FOREGROUND_BLUE;
+	case 0:  return defattr;                            /* reset */
+	case 1:  return attr | FOREGROUND_INTENSITY;        /* bold */
+	case 4:  return attr | COMMON_LVB_UNDERSCORE;       /* underline */
+	case 7:  return attr | COMMON_LVB_REVERSE_VIDEO;    /* reverse */
+	case 22: return attr & ~FOREGROUND_INTENSITY;        /* normal */
+	case 24: return attr & ~(WORD)COMMON_LVB_UNDERSCORE; /* no underline */
+	case 27: return attr & ~(WORD)COMMON_LVB_REVERSE_VIDEO; /* no reverse */
+	case 39: return (attr & ~0x0F) | (defattr & 0x0F);  /* default fg */
+	case 49: return (attr & ~0xF0) | (defattr & 0xF0);  /* default bg */
 	}
-	return attr;
+
+	/* Foreground: 30-37 */
+	if (code >= 30 && code <= 37)
+		return (attr & ~0x07) | fg[code - 30];
+	/* Background: 40-47 */
+	if (code >= 40 && code <= 47)
+		return (attr & ~0x70) | (fg[code - 40] << 4);
+	/* Bright foreground: 90-97 */
+	if (code >= 90 && code <= 97)
+		return (attr & ~0x0F) | fg[code - 90] | FOREGROUND_INTENSITY;
+	/* Bright background: 100-107 */
+	if (code >= 100 && code <= 107)
+		return (attr & ~0xF0) | (fg[code - 100] << 4) |
+		       BACKGROUND_INTENSITY;
+
+	return attr; /* unknown code: ignore */
+}
+
+/**
+ * @brief Skip sub-parameters of an extended color sequence.
+ *
+ * Called when the SGR parser sees code 38 (fg) or 48 (bg).
+ * Peeks at the next parameter: if 5, skips 1 more (256-color);
+ * if 2, skips 3 more (RGB).  Returns the updated pointer.
+ */
+static const char *skip_extended_color(const char *p)
+{
+	int sub, skip, i;
+
+	if (*p != ';')
+		return p;
+	p++;
+
+	/* Parse the sub-command: 5 = 256-color, 2 = RGB */
+	sub = 0;
+	while (*p >= '0' && *p <= '9')
+		sub = sub * 10 + (*p++ - '0');
+
+	if (sub == 5)
+		skip = 1; /* 38;5;N */
+	else if (sub == 2)
+		skip = 3; /* 38;2;R;G;B */
+	else
+		return p;
+
+	for (i = 0; i < skip; i++) {
+		if (*p != ';')
+			break;
+		p++;
+		while (*p >= '0' && *p <= '9')
+			p++;
+	}
+	return p;
 }
 
 /**
@@ -88,7 +157,11 @@ static int console_write_legacy(HANDLE h, const char *buf)
 				int code = 0;
 				while (*p >= '0' && *p <= '9')
 					code = code * 10 + (*p++ - '0');
-				attr = ansi_to_attr(attr, code, defattr);
+				if (code == 38 || code == 48)
+					p = skip_extended_color(p);
+				else
+					attr = ansi_to_attr(attr, code,
+							    defattr);
 				if (*p == ';')
 					p++;
 			}

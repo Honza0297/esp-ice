@@ -24,7 +24,7 @@
 
 #include "alloc.h"
 #include "ar.h"
-#include "color.h"
+#include "term.h"
 #include "elf.h"
 #include "error.h"
 #include "http.h"

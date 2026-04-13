@@ -5,8 +5,8 @@
  */
 
 /**
- * @file color.h
- * @brief Terminal color support.
+ * @file term.h
+ * @brief Terminal presentation support (colors, box-drawing).
  *
  * Colored output uses inline tokens in printf format strings:
  *
@@ -18,6 +18,7 @@
  *   @g{...}  green        @G{...}  bold green
  *   @y{...}  yellow       @Y{...}  bold yellow
  *   @b{...}  bold         @c{...}  cyan
+ *   @[sgr]{...}  arbitrary SGR code, e.g. @[38;5;208]{orange}
  *   @@       literal @
  *   }}       literal } inside a color block
  *
@@ -30,8 +31,8 @@
  * Windows, colors are rendered via the Console API
  * (SetConsoleTextAttribute) as a fallback.
  */
-#ifndef COLOR_H
-#define COLOR_H
+#ifndef TERM_H
+#define TERM_H
 
 #include <stddef.h>
 
@@ -85,4 +86,19 @@ void color_init(int fd);
  */
 void expand_colors(struct sbuf *out, const char *fmt);
 
-#endif /* COLOR_H */
+/* Box-drawing characters (UTF-8) matching Rich's heavy-head style. */
+#define TL "\xe2\x94\x8f" /* ┏ */
+#define TM "\xe2\x94\xb3" /* ┳ */
+#define TR "\xe2\x94\x93" /* ┓ */
+#define ML "\xe2\x94\xa1" /* ┡ */
+#define MM "\xe2\x95\x87" /* ╇ */
+#define MR "\xe2\x94\xa9" /* ┩ */
+#define BL "\xe2\x94\x94" /* └ */
+#define BM "\xe2\x94\xb4" /* ┴ */
+#define BR "\xe2\x94\x98" /* ┘ */
+#define HH "\xe2\x94\x81" /* ━ heavy horizontal */
+#define HL "\xe2\x94\x80" /* ─ light horizontal */
+#define VH "\xe2\x94\x83" /* ┃ heavy vertical */
+#define VL "\xe2\x94\x82" /* │ light vertical */
+
+#endif /* TERM_H */
