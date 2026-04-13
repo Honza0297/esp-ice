@@ -78,6 +78,9 @@ SRCS := ice.c \
 	cmd/configdep/configdep.c \
 	cmd/ldgen/ldgen.c \
 	cmd/ldgen/lf.c \
+	cmd/size/chip.c \
+	cmd/size/size.c \
+	map.c \
 	color.c \
 	elf.c \
 	error.c \
@@ -185,6 +188,9 @@ $(O)/%.o: cmd/configdep/%.c Makefile $(O)/context | $(O)
 	$(CC) $(BUILD_DEFINES) $(BUILD_CFLAGS) -MD -MP -o $@ -c $<
 
 $(O)/%.o: cmd/ldgen/%.c Makefile $(O)/context | $(O)
+	$(CC) $(BUILD_DEFINES) $(BUILD_CFLAGS) -MD -MP -o $@ -c $<
+
+$(O)/%.o: cmd/size/%.c Makefile $(O)/context | $(O)
 	$(CC) $(BUILD_DEFINES) $(BUILD_CFLAGS) -MD -MP -o $@ -c $<
 
 ifdef STATIC

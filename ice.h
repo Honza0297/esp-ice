@@ -28,6 +28,7 @@
 #include "elf.h"
 #include "error.h"
 #include "http.h"
+#include "map.h"
 #include "options.h"
 #include "platform.h"
 #include "process.h"
@@ -38,5 +39,6 @@
 int cmd_build(int argc, const char **argv);
 int cmd_configdep(int argc, const char **argv);
 int cmd_ldgen(int argc, const char **argv);
+int cmd_size(int argc, const char **argv);
 
 #endif /* ICE_H */

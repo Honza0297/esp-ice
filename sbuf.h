@@ -31,13 +31,13 @@
 extern char sbuf_empty[];
 
 struct sbuf {
-	char *buf;	/**< NUL-terminated buffer (never NULL). */
-	size_t len;	/**< Current string length (excluding NUL). */
-	size_t alloc;	/**< Allocated bytes (0 = not owned). */
+	char *buf;    /**< NUL-terminated buffer (never NULL). */
+	size_t len;   /**< Current string length (excluding NUL). */
+	size_t alloc; /**< Allocated bytes (0 = not owned). */
 };
 
 /** Static initializer. */
-#define SBUF_INIT { .buf = sbuf_empty, .len = 0, .alloc = 0 }
+#define SBUF_INIT {.buf = sbuf_empty, .len = 0, .alloc = 0}
 
 /** Initialize an sbuf (equivalent to SBUF_INIT assignment). */
 void sbuf_init(struct sbuf *sb);
@@ -102,5 +102,37 @@ char *sbuf_strdup(const char *s);
 
 /** Duplicate at most @p n bytes of @p s. Caller must free(). Dies on OOM. */
 char *sbuf_strndup(const char *s, size_t n);
+
+/**
+ * @brief Read the next line from a buffer, NUL-terminating in-place.
+ *
+ * Replaces the first '\\n' (and any preceding '\\r') with NUL, advances
+ * @p *pos past the line, and returns a pointer to the line start.
+ * Returns NULL when @p *pos >= @p len (end of buffer).
+ *
+ * The last line is handled correctly even without a trailing newline,
+ * provided the buffer is NUL-terminated (as sbuf_read_file() guarantees).
+ *
+ * @param buf  buffer contents (modified in-place)
+ * @param len  buffer length
+ * @param pos  current read position (updated past the line)
+ * @return     pointer to the NUL-terminated line, or NULL at end
+ */
+char *sbuf_getline(char *buf, size_t len, size_t *pos);
+
+/**
+ * @brief Split a string into whitespace-separated tokens in-place.
+ *
+ * Replaces whitespace delimiters with NUL and stores a pointer to each
+ * token in @p tok.  At most @p max tokens are produced; the last token
+ * receives the entire remainder of the string (preserving any internal
+ * spaces).  Returns the number of tokens found.
+ *
+ * @param s    NUL-terminated string (modified in-place)
+ * @param tok  output array of token pointers (must hold @p max entries)
+ * @param max  maximum number of tokens to produce
+ * @return     number of tokens found (0 to @p max)
+ */
+int sbuf_split(char *s, char **tok, int max);
 
 #endif /* SBUF_H */

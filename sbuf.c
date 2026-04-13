@@ -78,10 +78,7 @@ void sbuf_add(struct sbuf *sb, const void *data, size_t len)
 	sb->buf[sb->len] = '\0';
 }
 
-void sbuf_addstr(struct sbuf *sb, const char *s)
-{
-	sbuf_add(sb, s, strlen(s));
-}
+void sbuf_addstr(struct sbuf *sb, const char *s) { sbuf_add(sb, s, strlen(s)); }
 
 void sbuf_vaddf(struct sbuf *sb, const char *fmt, va_list ap)
 {
@@ -172,4 +169,50 @@ char *sbuf_strndup(const char *s, size_t n)
 		len = n;
 	sbuf_add(&sb, s, len);
 	return sbuf_detach(&sb);
+}
+
+char *sbuf_getline(char *buf, size_t len, size_t *pos)
+{
+	char *line, *nl;
+
+	if (*pos >= len)
+		return NULL;
+
+	line = buf + *pos;
+	nl = memchr(line, '\n', len - *pos);
+	if (nl) {
+		*nl = '\0';
+		*pos = (size_t)(nl - buf) + 1;
+		if (nl > line && nl[-1] == '\r')
+			nl[-1] = '\0';
+	} else {
+		*pos = len;
+	}
+
+	return line;
+}
+
+int sbuf_split(char *s, char **tok, int max)
+{
+	int n = 0;
+
+	while (*s && n < max) {
+		while (*s == ' ' || *s == '\t')
+			s++;
+		if (!*s)
+			break;
+
+		tok[n] = s;
+		if (n == max - 1) {
+			n++;
+			break;
+		}
+
+		while (*s && *s != ' ' && *s != '\t')
+			s++;
+		if (*s)
+			*s++ = '\0';
+		n++;
+	}
+	return n;
 }
