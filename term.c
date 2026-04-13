@@ -122,14 +122,14 @@ void expand_colors(struct sbuf *out, const char *fmt)
 			const char *code = NULL;
 
 			switch (fmt[1]) {
-			case 'r': code = COLOR_RED; break;
-			case 'g': code = COLOR_GREEN; break;
-			case 'y': code = COLOR_YELLOW; break;
-			case 'b': code = COLOR_BOLD; break;
-			case 'c': code = COLOR_CYAN; break;
-			case 'R': code = COLOR_BOLD_RED; break;
-			case 'G': code = COLOR_BOLD_GREEN; break;
-			case 'Y': code = COLOR_BOLD_YELLOW; break;
+			case 'r': code = "\033[31m"; break;
+			case 'g': code = "\033[32m"; break;
+			case 'y': code = "\033[33m"; break;
+			case 'b': code = "\033[1m"; break;
+			case 'c': code = "\033[36m"; break;
+			case 'R': code = "\033[1;31m"; break;
+			case 'G': code = "\033[1;32m"; break;
+			case 'Y': code = "\033[1;33m"; break;
 			}
 
 			if (code) {
@@ -152,7 +152,7 @@ void expand_colors(struct sbuf *out, const char *fmt)
 		/* } -> close color block */
 		if (*fmt == '}' && depth > 0) {
 			if (use_color)
-				sbuf_addstr(out, COLOR_RESET);
+				sbuf_addstr(out, "\033[0m");
 			depth--;
 			fmt++;
 			continue;
