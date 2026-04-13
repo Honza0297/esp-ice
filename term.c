@@ -56,17 +56,119 @@ static const struct {
 	{"COLOR_BG_MAGENTA",   "\033[45m"},
 	{"COLOR_BG_CYAN",      "\033[46m"},
 	{"COLOR_BG_WHITE",     "\033[47m"},
+	{ NULL },
 };
 
 static const char *find_color_name(const char *name, size_t len)
 {
 	size_t i;
-	for (i = 0; i < sizeof(color_names) / sizeof(color_names[0]); i++) {
+	for (i = 0; color_names[i].name; i++) {
 		if (strlen(color_names[i].name) == len &&
 		    !memcmp(color_names[i].name, name, len))
 			return color_names[i].code;
 	}
 	return NULL;
+}
+
+void color_text(struct sbuf *out, const char *text, size_t len,
+		const struct color_rule *rules)
+{
+	const char *p = text;
+	const char *end = text + len;
+
+	while (p < end) {
+		/* Check caller-supplied keyword rules. */
+		int matched = 0;
+		for (size_t i = 0; rules && rules[i].keyword; i++) {
+			if (end - p >= rules[i].len &&
+			    !memcmp(p, rules[i].keyword, rules[i].len)) {
+				sbuf_addf(out, "@[%s]{", rules[i].color);
+				sbuf_add(out, p, rules[i].len);
+				sbuf_addch(out, '}');
+				p += rules[i].len;
+				matched = 1;
+				break;
+			}
+		}
+		if (matched)
+			continue;
+
+		/* Quoted strings: 'x', `x`, "x" → bold (skip \" etc.) */
+		if ((*p == '\'' || *p == '`' || *p == '"') &&
+		    p + 1 < end) {
+			char q = *p;
+			const char *s = p + 1;
+			const char *close = NULL;
+			while (s < end) {
+				if (*s == '\\' && s + 1 < end) {
+					s += 2;
+					continue;
+				}
+				if (*s == q) {
+					close = s;
+					break;
+				}
+				s++;
+			}
+			if (close && close - p < 80) {
+				sbuf_addf(out, "@b{%c", q);
+				sbuf_add(out, p + 1, close - p - 1);
+				sbuf_addf(out, "%c}", q);
+				p = close + 1;
+				continue;
+			}
+		}
+
+		/* GCC caret+range: ^~~~~~~~~ → red */
+		if (*p == '^' && p + 1 < end && *(p + 1) == '~') {
+			const char *s = p;
+			p++;
+			while (p < end && *p == '~')
+				p++;
+			sbuf_addstr(out, "@r{");
+			sbuf_add(out, s, p - s);
+			sbuf_addch(out, '}');
+			continue;
+		}
+
+		/* Numbers: 0x1a2b, 0777, 42 → cyan (only whitespace-bounded) */
+		if (*p >= '0' && *p <= '9' &&
+		    (p == text || isspace((unsigned char)*(p - 1)))) {
+			const char *s = p;
+			if (*p == '0' && p + 1 < end &&
+			    (*(p + 1) == 'x' || *(p + 1) == 'X')) {
+				p += 2;
+				while (p < end && ((*p >= '0' && *p <= '9') ||
+				       (*p >= 'a' && *p <= 'f') ||
+				       (*p >= 'A' && *p <= 'F')))
+					p++;
+			} else {
+				while (p < end && *p >= '0' && *p <= '9')
+					p++;
+			}
+			if (p == end || isspace((unsigned char)*p)) {
+				sbuf_addstr(out, "@c{");
+				sbuf_add(out, s, p - s);
+				sbuf_addch(out, '}');
+				continue;
+			}
+			p = s;
+		}
+
+		/* Escape @ and } for color token safety. */
+		if (*p == '@') {
+			sbuf_addstr(out, "@@");
+			p++;
+			continue;
+		}
+		if (*p == '}') {
+			sbuf_addstr(out, "}}");
+			p++;
+			continue;
+		}
+
+		sbuf_addch(out, *p++);
+	}
 }
 
 /**

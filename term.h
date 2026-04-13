@@ -74,6 +74,39 @@ void color_init(int fd);
  */
 void expand_colors(struct sbuf *out, const char *fmt);
 
+/**
+ * @brief Rule for keyword-based colorization in color_text().
+ *
+ * When a keyword is found in the text, it is wrapped with the
+ * corresponding @x{...} color token.
+ */
+struct color_rule {
+	const char *keyword;
+	int         len;
+	const char *color;	/* named color, e.g. "COLOR_BOLD_RED" */
+};
+
+#define COLOR_RULE(kw, color) { (kw), sizeof(kw) - 1, (color) }
+
+/**
+ * @brief Colorize plain text using @x{...} tokens.
+ *
+ * Wraps recognized patterns with color tokens suitable for
+ * expand_colors():
+ *   - Keywords from the caller-supplied rule table.
+ *   - Quoted strings ('...', `...`, "...") → bold.
+ *   - GCC caret ranges (^~~~) → red.
+ *   - Standalone numbers (decimal, hex) → cyan.
+ *   - Escapes @ and } so the result is safe for expand_colors().
+ *
+ * @param out    Destination sbuf for tokenized text.
+ * @param text   Input buffer (not necessarily NUL-terminated).
+ * @param len    Length of @p text in bytes.
+ * @param rules  NULL-terminated keyword→color rule table (may be NULL).
+ */
+void color_text(struct sbuf *out, const char *text, size_t len,
+		const struct color_rule *rules);
+
 /* Box-drawing characters (UTF-8) matching Rich's heavy-head style. */
 #define TL "\xe2\x94\x8f" /* ┏ */
 #define TM "\xe2\x94\xb3" /* ┳ */

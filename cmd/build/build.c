@@ -42,127 +42,23 @@ static const char *fmt_time(time_t start, struct sbuf *buf)
 	return buf->buf;
 }
 
-/**
- * @brief Colorize a compiler output line using @x{...} tokens.
- *
- * Wraps known patterns with color tokens:
- *   "error:"   → red bold
- *   "warning:" → yellow bold
- *   "note:"    → cyan
- *   "FAILED:"  → red bold
- *   '...'      → bold (single-quoted strings)
- *   `...`      → bold (backtick-quoted)
- */
-/** Keyword → color mapping for compiler/build output. */
-static const struct {
-	const char *keyword;
-	int len;
-	const char *color;
-} keywords[] = {
+/** Keyword → color rules for compiler/build output. */
+static const struct color_rule color_rules[] = {
 	/* Order matters: longer matches first. */
-	{"fatal error:",          12, "@R{"},
-	{"undefined reference to", 22, "@r{"},
-	{"multiple definition of", 22, "@r{"},
-	{"In file included from",  21, "@c{"},
-	{"In function",            11, "@c{"},
-	{"CMake Error",            11, "@r{"},
-	{"CMake Warning",          13, "@y{"},
-	{"FAILED:",                7,  "@R{"},
-	{"warning:",               8,  "@Y{"},
-	{"error:",                 6,  "@R{"},
-	{"note:",                  5,  "@c{"},
-	{"***",                    3,  "@r{"},
+	COLOR_RULE("fatal error:",          "COLOR_BOLD_RED"),
+	COLOR_RULE("undefined reference to", "COLOR_RED"),
+	COLOR_RULE("multiple definition of", "COLOR_RED"),
+	COLOR_RULE("In file included from",  "COLOR_CYAN"),
+	COLOR_RULE("In function",            "COLOR_CYAN"),
+	COLOR_RULE("CMake Error",            "COLOR_RED"),
+	COLOR_RULE("CMake Warning",          "COLOR_YELLOW"),
+	COLOR_RULE("FAILED:",                "COLOR_BOLD_RED"),
+	COLOR_RULE("warning:",               "COLOR_BOLD_YELLOW"),
+	COLOR_RULE("error:",                 "COLOR_BOLD_RED"),
+	COLOR_RULE("note:",                  "COLOR_CYAN"),
+	COLOR_RULE("***",                    "COLOR_RED"),
+	{ NULL },
 };
-
-#define NKEYWORDS (sizeof(keywords) / sizeof(keywords[0]))
-
-static void colorize_line(struct sbuf *out, const char *line, size_t len)
-{
-	const char *p = line;
-	const char *end = line + len;
-
-	while (p < end) {
-		/* Check keyword table. */
-		int matched = 0;
-		for (size_t i = 0; i < NKEYWORDS; i++) {
-			if (end - p >= keywords[i].len &&
-			    !memcmp(p, keywords[i].keyword, keywords[i].len)) {
-				sbuf_addstr(out, keywords[i].color);
-				sbuf_add(out, p, keywords[i].len);
-				sbuf_addch(out, '}');
-				p += keywords[i].len;
-				matched = 1;
-				break;
-			}
-		}
-		if (matched)
-			continue;
-
-		/* Quoted strings: 'x', `x`, "x" → bold */
-		if ((*p == '\'' || *p == '`' || *p == '"') &&
-		    p + 1 < end) {
-			char q = *p;
-			const char *close = memchr(p + 1, q, end - p - 1);
-			if (close && close - p < 80) {
-				sbuf_addf(out, "@b{%c", q);
-				sbuf_add(out, p + 1, close - p - 1);
-				sbuf_addf(out, "%c}", q);
-				p = close + 1;
-				continue;
-			}
-		}
-
-		/* GCC caret+range: ^~~~~~~~~ → red */
-		if (*p == '^' && p + 1 < end && *(p + 1) == '~') {
-			const char *s = p;
-			p++;
-			while (p < end && *p == '~')
-				p++;
-			sbuf_addstr(out, "@r{");
-			sbuf_add(out, s, p - s);
-			sbuf_addch(out, '}');
-			continue;
-		}
-
-		/* Numbers: 0x1a2b, 0777, 42 → cyan (only whitespace-bounded) */
-		if (*p >= '0' && *p <= '9' &&
-		    (p == line || isspace((unsigned char)*(p - 1)))) {
-			const char *s = p;
-			if (*p == '0' && p + 1 < end &&
-			    (*(p + 1) == 'x' || *(p + 1) == 'X')) {
-				p += 2;
-				while (p < end && ((*p >= '0' && *p <= '9') ||
-				       (*p >= 'a' && *p <= 'f') ||
-				       (*p >= 'A' && *p <= 'F')))
-					p++;
-			} else {
-				while (p < end && *p >= '0' && *p <= '9')
-					p++;
-			}
-			if (p == end || isspace((unsigned char)*p)) {
-				sbuf_addstr(out, "@c{");
-				sbuf_add(out, s, p - s);
-				sbuf_addch(out, '}');
-				continue;
-			}
-			p = s;
-		}
-
-		/* Escape @ and } for color token safety. */
-		if (*p == '@') {
-			sbuf_addstr(out, "@@");
-			p++;
-			continue;
-		}
-		if (*p == '}') {
-			sbuf_addstr(out, "}}");
-			p++;
-			continue;
-		}
-
-		sbuf_addch(out, *p++);
-	}
-}
 
 /**
  * @brief Show the last TAIL_LINES non-progress lines from the log,
@@ -192,7 +88,7 @@ static void show_tail(const char *logpath)
 		 * cmake --) */
 		if (*p != '[' && *p != '-') {
 			struct sbuf colored = SBUF_INIT;
-			colorize_line(&colored, p, nl - p);
+			color_text(&colored, p, nl - p, color_rules);
 			sbuf_addstr(&filtered, colored.buf);
 			sbuf_addch(&filtered, '\n');
 			sbuf_release(&colored);
