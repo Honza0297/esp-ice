@@ -102,4 +102,16 @@ int putenv(char *);
  */
 int term_width(int fd);
 
+/**
+ * @brief Return the absolute path of the running executable.
+ *
+ * Uses the platform's native mechanism (/proc/self/exe on Linux,
+ * _NSGetExecutablePath on macOS, GetModuleFileNameA on Windows).
+ * Falls back to @p argv0 if the native query fails.
+ *
+ * @param argv0  argv[0] from main(), used as fallback.
+ * @return Pointer to a static buffer holding the path.
+ */
+const char *get_executable_path(const char *argv0);
+
 #endif /* PLATFORM_H */
