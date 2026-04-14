@@ -22,8 +22,8 @@ jobs:
       - run: python -m pip install pre-commit
       - run: pre-commit run --all-files --show-diff-on-failure
 
-  lint-linux:
-    name: lint linux
+  test-linux:
+    name: test linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -36,8 +36,11 @@ jobs:
       - name: lint
         run: make CC=clang clang-tidy
 
-  lint-windows:
-    name: lint windows
+      - name: test
+        run: make CC=clang test
+
+  test-windows:
+    name: test windows
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -53,13 +56,18 @@ jobs:
             mingw-w64-clang-x86_64-curl
             make
             diffutils
+            perl
 
       - name: lint
         shell: msys2 {0}
         run: make CC=clang clang-tidy
 
-  lint-macos:
-    name: lint macos
+      - name: test
+        shell: msys2 {0}
+        run: make CC=clang test
+
+  test-macos:
+    name: test macos
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
@@ -72,14 +80,17 @@ jobs:
       - name: lint
         run: make CC=clang clang-tidy
 
+      - name: test
+        run: make CC=clang test
+
   dist:
     runs-on: ${{ matrix.runner }}
     name: dist ${{ matrix.name }}
     needs:
       - format
-      - lint-linux
-      - lint-windows
-      - lint-macos
+      - test-linux
+      - test-windows
+      - test-macos
     strategy:
       fail-fast: false
       matrix:
