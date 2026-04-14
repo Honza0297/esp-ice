@@ -9,15 +9,26 @@
 O="$T_OUT/$(basename "$0" .t)"
 rm -rf "$O" && mkdir -p "$O"
 
-# Windows would need its own platform sources and a -municode-aware
-# entry point; out of scope for v1.
+# Pick the platform sources matching what the build targets.  When
+# cross-compiling Windows binaries from a non-Windows host the
+# resulting .exe cannot run here -- skip cleanly in that case.  Native
+# MSYS2 / MinGW / Cygwin (S=win on a Windows host) proceeds normally.
 case "$S" in
 win)
-	echo "1..0 # SKIP C unit tests are POSIX-only for now"
-	exit 0
+	case "$(uname -s 2>/dev/null)" in
+	MINGW*|MSYS*|CYGWIN*) ;;
+	*)
+		echo "1..0 # SKIP S=win binary cannot run on $(uname -s)"
+		exit 0
+		;;
+	esac
+	PLATFORM="platform/win/io.c platform/win/wconv.c"
+	;;
+*)
+	PLATFORM="platform/posix/posix_io.c"
 	;;
 esac
 
-DEPS="sbuf.c error.c term.c pager.c platform/posix/posix_io.c"
+DEPS="sbuf.c error.c term.c pager.c $PLATFORM"
 $CC -std=c99 -I. -It -o "$O/test_sbuf" t/test_sbuf.c $DEPS || exit 1
 cd "$O" && ./test_sbuf
