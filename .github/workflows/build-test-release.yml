@@ -39,6 +39,14 @@ jobs:
       - name: test
         run: make CC=clang test
 
+      - name: upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: t_out-linux
+          path: t_out/
+          retention-days: 7
+
   test-windows:
     name: test windows
     runs-on: windows-latest
@@ -66,6 +74,14 @@ jobs:
         shell: msys2 {0}
         run: make CC=clang test
 
+      - name: upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: t_out-windows
+          path: t_out/
+          retention-days: 7
+
   test-macos:
     name: test macos
     runs-on: macos-latest
@@ -82,6 +98,14 @@ jobs:
 
       - name: test
         run: make CC=clang test
+
+      - name: upload test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: t_out-macos
+          path: t_out/
+          retention-days: 7
 
   dist:
     runs-on: ${{ matrix.runner }}
