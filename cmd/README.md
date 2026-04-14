@@ -195,6 +195,14 @@ make test T=cmd/greet/t/0001-basic.t             # a single file
 a real end-to-end example exercising `ice completion <shell>` and the
 hidden `__complete` backend.
 
+C unit tests for the utility modules in the project root (sbuf, svec,
+json, cmakecache, ...) live in the top-level [`../t/`](../t/) instead
+of under `cmd/<name>/t/`, since they are not tied to any subcommand.
+Each is a small `.t` shell wrapper that compiles a sibling `test_*.c`
+file linked against the relevant project sources, then runs the
+resulting binary; see [`../t/0001-sbuf.t`](../t/0001-sbuf.t) and
+[`../t/test_sbuf.c`](../t/test_sbuf.c) for the canonical pair.
+
 ## Templates to copy
 
 - [`build/build.c`](build/build.c) / [`flash/flash.c`](flash/flash.c) --
