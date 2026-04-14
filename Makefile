@@ -13,7 +13,10 @@ LDFLAGS ?=
 #   make test T=cmd/completion/t
 #   make test T=cmd/completion/t/0001-completion.t
 T ?= $(wildcard cmd/*/t) t
-PFLAGS ?=
+
+# Run prove with one worker per core by default; override PFLAGS to
+# re-serialize (PFLAGS=-j1) or to add verbosity (PFLAGS="-j4 -v").
+PFLAGS ?= -j$(JOBS)
 T_OUT ?= t_out
 
 # Default parallel build on the host running make.  Try nproc (Linux
@@ -47,6 +50,21 @@ BUILD_DEFINES := -DVERSION=\"$(VERSION)\"
 # up with "../../ice.h".  Quoted-form includes still find sibling
 # headers (e.g. cmd/ldgen/lf.h) in the source file's own directory.
 BUILD_CFLAGS += -I$(CURDIR)
+
+# SANITIZE=1: enable AddressSanitizer for the whole build (libice,
+# ice, and the test binaries via SAN_FLAGS below).  Incompatible with
+# STATIC=1 because libasan is dynamically linked; release builds
+# shouldn't ship it anyway.  Append `-fsanitize=undefined` to SAN_FLAGS
+# manually if you also have libubsan available -- not all distros
+# ship it by default (Fedora packages it separately, for example).
+ifdef SANITIZE
+ifdef STATIC
+$(error SANITIZE=1 is incompatible with STATIC=1; sanitizers need a dynamic libasan runtime)
+endif
+SAN_FLAGS := -fsanitize=address -fno-omit-frame-pointer
+BUILD_CFLAGS  += $(SAN_FLAGS)
+BUILD_LDFLAGS += $(SAN_FLAGS)
+endif
 
 COMPILER_VERSION := $(shell $(CC) --version)
 CONTEXT := "$(COMPILER_VERSION) $(CFLAGS) $(LDFLAGS)"
@@ -320,8 +338,19 @@ clang-tidy:
 		$(BUILD_CFLAGS)
 
 BINARY_ABS := $(abspath $(BINARY))
+
+# ASan defaults to running LeakSanitizer at process exit; for a CLI
+# tool that legitimately keeps state in static storage until exit
+# (alias-expansion tokens, the global config, ...) this would flag
+# benign "leaks" on every run.  Disable it by default and rely on
+# the still-active checks (use-after-free, overflow, double-free,
+# stack/heap buffer over/underflow) -- a strict leak audit is a
+# follow-up that needs explicit atexit cleanup of those globals.
+SAN_TEST_ENV := LSAN_OPTIONS=detect_leaks=0
+
 test: $(BINARY) $(LIBICE)
 	T_OUT=$(T_OUT) BINARY=$(BINARY_ABS) LIBICE=$(LIBICE_ABS) \
+		SAN_FLAGS="$(SAN_FLAGS)" $(if $(SANITIZE),$(SAN_TEST_ENV)) \
 		CC=${CC} S=$(S) prove $(PFLAGS) $(T)
 
 
@@ -346,6 +375,7 @@ help:
 	@echo ' CFLAGS_APPEND    - additional compiler options to append after CFLAGS'
 	@echo ' LDFLAGS_APPEND   - additional linker options to append after LDFLAGS'
 	@echo ' JOBS             - parallel build jobs; `-j N` on the command line wins (default: $(JOBS))'
+	@echo ' SANITIZE         - SANITIZE=1 enables AddressSanitizer + UBSan (incompatible with STATIC=1)'
 	@echo ''
 	@echo 'test variables:'
 	@echo ' T                - test path(s) passed to prove; override to run a subset,'
