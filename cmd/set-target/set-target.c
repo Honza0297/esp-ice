@@ -8,7 +8,7 @@
  * @file cmd/set-target/set-target.c
  * @brief The "ice set-target" subcommand -- switch the chip target.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 /*
  * Mirrors esp-idf/tools/idf_py_actions/constants.py.  Preview targets

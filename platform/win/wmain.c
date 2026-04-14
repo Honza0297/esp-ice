@@ -24,7 +24,7 @@
 #include <wchar.h>
 #include <windows.h>
 
-#include "../../ice.h"
+#include "ice.h"
 #include "wconv.h"
 
 extern int main(int argc, char **argv);

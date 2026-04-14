@@ -8,7 +8,7 @@
  * @file cmd/reconfigure/reconfigure.c
  * @brief The "ice reconfigure" subcommand -- re-run cmake from scratch.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 /* clang-format off */
 static const struct cmd_manual manual = {

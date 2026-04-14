@@ -29,6 +29,12 @@ BUILD_CFLAGS = $(CFLAGS) $(CFLAGS_APPEND)
 BUILD_LDFLAGS = $(LDFLAGS) $(LDFLAGS_APPEND)
 BUILD_DEFINES := -DVERSION=\"$(VERSION)\"
 
+# Project root on the include search path so sources under cmd/<name>/
+# and platform/<os>/ can #include "ice.h" directly instead of reaching
+# up with "../../ice.h".  Quoted-form includes still find sibling
+# headers (e.g. cmd/ldgen/lf.h) in the source file's own directory.
+BUILD_CFLAGS += -I$(CURDIR)
+
 COMPILER_VERSION := $(shell $(CC) --version)
 CONTEXT := "$(COMPILER_VERSION) $(CFLAGS) $(LDFLAGS)"
 

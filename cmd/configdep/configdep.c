@@ -18,7 +18,7 @@
  *     files (.cdep), so that a source is only rebuilt when the
  *     specific options it uses change.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 /* clang-format off */
 static const struct cmd_manual manual = {

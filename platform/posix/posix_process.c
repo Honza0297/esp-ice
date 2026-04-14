@@ -11,7 +11,7 @@
  * Implements process_start() and process_finish() using
  * fork()/execvp()/waitpid() with optional pipe redirection.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 #include <sys/wait.h>
 

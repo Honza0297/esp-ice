@@ -8,7 +8,7 @@
  * @file cmd/clean/clean.c
  * @brief The "ice clean" subcommand -- invoke the cmake "clean" target.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 /* clang-format off */
 static const struct cmd_manual manual = {

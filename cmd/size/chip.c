@@ -12,7 +12,7 @@
  * Each array entry is {name, primary_addr, length, secondary_addr}.
  */
 #include "chip.h"
-#include "../../ice.h"
+#include "ice.h"
 
 /* ---- esp32 ---------------------------------------------------------- */
 

@@ -9,7 +9,7 @@
  * @brief The "ice menuconfig" subcommand -- invoke the cmake "menuconfig"
  * target.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 /* clang-format off */
 static const struct cmd_manual manual = {

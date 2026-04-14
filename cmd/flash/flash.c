@@ -8,7 +8,7 @@
  * @file cmd/flash/flash.c
  * @brief The "ice flash" subcommand -- invoke the cmake "flash" target.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 /* clang-format off */
 static const struct cmd_manual manual = {

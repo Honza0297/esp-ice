@@ -33,7 +33,7 @@ Create `cmd/greet/greet.c`:
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "../../ice.h"
+#include "ice.h"
 
 static const struct cmd_manual manual = {
 	.description =

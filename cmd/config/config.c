@@ -19,7 +19,7 @@
  * (~/.iceconfig).  Config files are whole-rewritten on every write;
  * comments and blank lines in the existing file are lost.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 static const char *usage[] = {
     "ice config [--list]",

@@ -21,7 +21,7 @@
 static int (*real_vfprintf)(FILE *, const char *, va_list) = vfprintf;
 static int (*real_fputs)(const char *, FILE *) = fputs;
 
-#include "../../ice.h"
+#include "ice.h"
 
 /**
  * @brief Color-aware vfprintf for POSIX.

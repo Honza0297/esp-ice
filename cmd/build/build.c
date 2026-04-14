@@ -8,7 +8,7 @@
  * @file cmd/build/build.c
  * @brief The "ice build" subcommand -- build the default "all" target.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 /* clang-format off */
 static const struct cmd_manual manual = {

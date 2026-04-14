@@ -10,7 +10,7 @@
  */
 #include <dirent.h>
 
-#include "../../ice.h"
+#include "ice.h"
 
 /* clang-format off */
 static const struct cmd_manual manual = {

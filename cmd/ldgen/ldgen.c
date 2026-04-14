@@ -8,7 +8,7 @@
  * @file ldgen.c
  * @brief Linker script generation from fragment files.
  */
-#include "../../ice.h"
+#include "ice.h"
 #include "lf.h"
 
 /* clang-format off */

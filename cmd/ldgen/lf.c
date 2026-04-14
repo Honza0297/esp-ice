@@ -21,7 +21,7 @@
  *           types through a function-pointer callback (@c stmt_parser_fn).
  */
 #include "lf.h"
-#include "../../ice.h"
+#include "ice.h"
 
 /* ================================================================== */
 /*  Character classification                                          */

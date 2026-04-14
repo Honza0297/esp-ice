@@ -13,7 +13,7 @@
  * subcommand with `--help` appended, so `ice help config` and
  * `ice config --help` produce the same output.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 int cmd_help(int argc, const char **argv)
 {

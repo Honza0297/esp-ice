@@ -36,7 +36,7 @@ static int (*vfprintf_raw)(FILE *, const char *, va_list) = vfprintf;
 #include <windows.h>
 #include <winerror.h>
 
-#include "../../ice.h"
+#include "ice.h"
 #include "wconv.h"
 
 /**

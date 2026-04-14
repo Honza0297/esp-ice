@@ -17,7 +17,7 @@
  * menuconfig TUI, etc.) is visible directly.  Use "ice build" if you
  * want the captured progress display for a full build.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 /* clang-format off */
 static const struct cmd_manual manual = {

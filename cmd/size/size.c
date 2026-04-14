@@ -24,8 +24,8 @@
  *   4. Build the memory map: compute available size per type from
  *      regions (with DIRAM alias detection), then assign sections.
  */
-#include "../../ice.h"
 #include "chip.h"
+#include "ice.h"
 
 /* clang-format off */
 static const struct cmd_manual manual = {

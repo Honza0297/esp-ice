@@ -31,7 +31,7 @@
  * knowledge (subcommands, option names, aliases, targets, config keys)
  * lives in C and stays in sync with the binary by construction.
  */
-#include "../../ice.h"
+#include "ice.h"
 
 /* ---- small helpers -------------------------------------------------- */
 
