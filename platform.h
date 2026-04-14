@@ -51,6 +51,8 @@ int fputs_p(const char *, FILE *);
 #define fputs fputs_p
 #define puts(s) fputs_p(s "\n", stdout)
 
+#include <sys/stat.h>
+
 #ifdef _WIN32
 
 typedef ptrdiff_t ssize_t;
@@ -85,7 +87,6 @@ int mkdir_w(const char *, int);
 /** End-of-line sequence (LF on POSIX). */
 #define EOL "\n"
 
-#include <sys/stat.h>
 #include <unistd.h>
 
 /* putenv exists in libc but is not declared in C99 <stdlib.h>. */

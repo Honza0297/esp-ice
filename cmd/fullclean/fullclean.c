@@ -12,9 +12,6 @@
 
 #include "../../ice.h"
 
-/* lstat is POSIX, not declared in C99 <sys/stat.h> under -pedantic. */
-int lstat(const char *, struct stat *);
-
 static const struct cmd_manual manual = {
 	.description =
 	H_PARA("Deletes every file and subdirectory inside the configured "
@@ -83,7 +80,7 @@ static int rmtree(const char *path, int verbose)
 
 		sbuf_addf(&child, "%s/%s", path, names.v[i]);
 
-		if (lstat(child.buf, &st) < 0) {
+		if (stat(child.buf, &st) < 0) {
 			warn_errno("cannot stat '%s'", child.buf);
 			rc = -1;
 			sbuf_release(&child);

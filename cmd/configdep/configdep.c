@@ -227,7 +227,7 @@ static int scan_file(struct sdk_opts *cfg, const char *path)
 		if (!c || (size_t)(end - c) < 7)
 			break;
 
-		if (memcmp(c, "CONFIG_", 7)) {
+		if (memcmp(c, "CONFIG_", 7) != 0) {
 			c++;
 			continue;
 		}

@@ -251,7 +251,7 @@ static int cache_needs_configure(const struct cmakecache *cache,
 			sbuf_add(&key, entry, eq - entry);
 
 		cached = cmakecache_get(cache, key.buf);
-		differs = !cached || strcmp(cached, eq + 1);
+		differs = !cached || strcmp(cached, eq + 1) != 0;
 
 		sbuf_release(&key);
 		if (differs)
@@ -302,7 +302,7 @@ int ensure_build_directory(int force)
 		const char *cached_gen = cmakecache_get(&cache,
 							"CMAKE_GENERATOR");
 
-		if (cached_gen && strcmp(cached_gen, generator))
+		if (cached_gen && strcmp(cached_gen, generator) != 0)
 			die("build is configured for generator '%s' "
 			    "not '%s' -- run 'ice reconfigure' or "
 			    "remove '%s'",

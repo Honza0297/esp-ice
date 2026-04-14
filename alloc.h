@@ -36,9 +36,10 @@
  */
 #define REALLOC_ARRAY(x, alloc)                                        \
 	do {                                                           \
-		(x) = realloc((x), (alloc) * sizeof(*(x)));           \
-		if (!(x))                                              \
+		void *_p = realloc((x), (alloc) * sizeof(*(x)));       \
+		if (!_p)                                               \
 			die_errno("realloc");                          \
+		(x) = _p;                                              \
 	} while (0)
 
 /**

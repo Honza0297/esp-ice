@@ -156,7 +156,6 @@ static int split_regions(const struct map_file *mf,
 						sr[nr].attrs = reg->attrs;
 						sr[nr].type = sr[k].type;
 						nr++;
-						remaining = 0;
 						found = 1;
 						break;
 					}
@@ -276,7 +275,7 @@ static void compute_sizes(struct memmap *mm,
 		/* Check against previously counted regions. */
 		int is_alias = 0;
 		for (int k = 0; k < i; k++) {
-			if (strcmp(regions[k].type->name, sr->type->name))
+			if (strcmp(regions[k].type->name, sr->type->name) != 0)
 				continue;
 			uint64_t a = regions[k].origin;
 			uint64_t b = sr->origin;
@@ -364,6 +363,8 @@ static void memmap_build(struct memmap *mm, const char *target,
 	int nr_ranges = 0;
 	while (chip->ranges[nr_ranges].name)
 		nr_ranges++;
+	if (nr_ranges == 0)
+		die("chip '%s' has no memory ranges", target);
 
 	mm->entries = calloc(nr_ranges, sizeof(*mm->entries));
 	if (!mm->entries)
@@ -382,12 +383,14 @@ static void memmap_build(struct memmap *mm, const char *target,
 	struct split_region *regions;
 	int nr_regions = split_regions(mf, chip, &regions);
 
-	/* Sort for deterministic section-to-region assignment. */
-	qsort(regions, nr_regions, sizeof(regions[0]), region_cmp);
+	if (nr_regions > 0) {
+		/* Sort for deterministic section-to-region assignment. */
+		qsort(regions, nr_regions, sizeof(regions[0]), region_cmp);
 
-	/* Populate sizes and assign sections. */
-	compute_sizes(mm, regions, nr_regions);
-	assign_sections(mm, mf, regions, nr_regions);
+		/* Populate sizes and assign sections. */
+		compute_sizes(mm, regions, nr_regions);
+		assign_sections(mm, mf, regions, nr_regions);
+	}
 
 	free(regions);
 }
@@ -480,8 +483,9 @@ static void output_table(struct memmap *mm)
 		struct memmap_entry *e = &mm->entries[i];
 		if (!e->size && !e->used)
 			continue;
-		qsort(e->sections, e->nr_sections,
-		      sizeof(e->sections[0]), cmp_section_size);
+		if (e->nr_sections > 0)
+			qsort(e->sections, e->nr_sections,
+			      sizeof(e->sections[0]), cmp_section_size);
 		sorted[n++] = e;
 	}
 	qsort(sorted, n, sizeof(sorted[0]), cmp_entry_used);

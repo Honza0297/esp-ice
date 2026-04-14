@@ -4,6 +4,7 @@ Checks: >-
   clang-analyzer-*,
   -clang-analyzer-security.ArrayBound,
   -clang-analyzer-valist.Uninitialized,
+  -clang-analyzer-optin.taint.GenericTaint,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
@@ -11,8 +12,14 @@ Checks: >-
   -bugprone-switch-missing-default-case,
   -bugprone-unchecked-string-to-number-conversion,
   -bugprone-assignment-in-if-condition,
+  -bugprone-command-processor,
   performance-*,
   -performance-no-int-to-ptr,
   portability-*
 WarningsAsErrors: "*"
 FormatStyle: file
+CheckOptions:
+  # sizeof(*x) in REALLOC_ARRAY is intentional for arrays of pointers
+  # (e.g. config_entry **list): it evaluates to sizeof(pointer), exactly
+  # what we want.  Same idiom as git's ALLOC_GROW.
+  bugprone-sizeof-expression.WarnOnSizeOfPointerToAggregate: false

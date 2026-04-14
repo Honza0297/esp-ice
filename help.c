@@ -82,7 +82,11 @@ static size_t visible_len(const char *s, size_t len)
 	size_t depth = 0;
 
 	while (i < len) {
-		if (s[i] == '@' && i + 1 < len && s[i + 1] == '@') {
+		/* "@@" (anywhere) or "}}" (inside a token) -- doubled char
+		 * that stands for one literal, visible character. */
+		if ((s[i] == '@' && i + 1 < len && s[i + 1] == '@') ||
+		    (depth > 0 && s[i] == '}' && i + 1 < len &&
+		     s[i + 1] == '}')) {
 			vw++;
 			i += 2;
 		} else if (s[i] == '@' && i + 2 < len && s[i + 2] == '{') {
@@ -100,11 +104,6 @@ static size_t visible_len(const char *s, size_t len)
 				i++;
 				depth++;
 			}
-		} else if (depth > 0 && s[i] == '}' && i + 1 < len &&
-			   s[i + 1] == '}') {
-			/* "}}" -- literal } inside a token */
-			vw++;
-			i += 2;
 		} else if (depth > 0 && s[i] == '}') {
 			depth--;
 			i++;

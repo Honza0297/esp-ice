@@ -56,13 +56,14 @@ void pager_start(void)
 	if (!isatty(STDOUT_FILENO))
 		return;
 
-	cmd = resolve_pager();
-
 	/*
 	 * Configure `less` sensibly when the user hasn't:
 	 *   F -- exit immediately if output fits on one screen
 	 *   R -- pass raw ANSI colour sequences through
 	 *   X -- don't clear the screen on start/exit
+	 *
+	 * Done before resolve_pager() so setenv() can't invalidate the
+	 * getenv("PAGER") pointer we use below.
 	 */
 #ifdef _WIN32
 	if (!getenv("LESS"))
@@ -70,6 +71,8 @@ void pager_start(void)
 #else
 	setenv("LESS", "FRX", 0);
 #endif
+
+	cmd = resolve_pager();
 
 	pager_pipe = popen(cmd, "w");
 	if (!pager_pipe)

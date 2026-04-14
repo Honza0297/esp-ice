@@ -81,7 +81,7 @@ const char *config_get(const char *key)
 	enum config_scope best = CONFIG_SCOPE_DEFAULT;
 
 	for (int i = 0; i < config.nr; i++) {
-		if (strcmp(config.entries[i].key, key))
+		if (strcmp(config.entries[i].key, key) != 0)
 			continue;
 		if (!value || config.entries[i].scope >= best) {
 			value = config.entries[i].value;
@@ -109,7 +109,7 @@ int config_get_all(const char *key, struct config_entry ***out)
 	int n = 0, alloc = 0;
 
 	for (int i = 0; i < config.nr; i++) {
-		if (strcmp(config.entries[i].key, key))
+		if (strcmp(config.entries[i].key, key) != 0)
 			continue;
 		ALLOC_GROW(list, n + 1, alloc);
 		list[n++] = &config.entries[i];
@@ -133,7 +133,7 @@ enum config_scope config_source(const char *key)
 	int found = 0;
 
 	for (int i = 0; i < config.nr; i++) {
-		if (strcmp(config.entries[i].key, key))
+		if (strcmp(config.entries[i].key, key) != 0)
 			continue;
 		if (!found || config.entries[i].scope > best)
 			best = config.entries[i].scope;
