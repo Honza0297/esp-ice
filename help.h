@@ -64,20 +64,37 @@ struct cmd_manual {
 	int list_aliases;
 };
 
-/** Paragraph: 4-space indent, trailing blank line. */
-#define H_PARA(t)     "    " t "\n\n"
+/*
+ * Reflow markers: invisible control bytes the renderer uses to know
+ * which regions of text should be word-wrapped.
+ *
+ *   H_R_BEG <indent>  start a reflow region with the given left indent
+ *   H_R_END           end it
+ *
+ * Only paragraph and definition-value macros emit them.  Every other
+ * macro (H_LINE, H_RAW, H_EXAMPLE, H_SECTION) stays verbatim -- the
+ * author controls the exact layout.
+ */
+#define H_R_BEG "\x02"
+#define H_R_END "\x03"
 
-/** Single indented line, no trailing blank. */
+/** Paragraph: 4-space indent, reflowable, trailing blank line. */
+#define H_PARA(t)     H_R_BEG "\x04" t H_R_END "\n\n"
+
+/** Single indented line, verbatim (no reflow). */
 #define H_LINE(t)     "    " t "\n"
 
-/** Raw line -- no indent, author controls everything. */
+/** Raw line -- no indent, verbatim. */
 #define H_RAW(t)      t "\n"
 
-/** Shell example: indented, colored prompt + bold command. */
+/** Shell example: indented, colored prompt + bold command, verbatim. */
 #define H_EXAMPLE(c)  "    @y{$} @b{" c "}\n"
 
-/** Definition-list entry: key/value pair, man-style two-line form. */
-#define H_ITEM(k, v)  "    @b{" k "}\n        " v "\n\n"
+/**
+ * Definition-list entry: bold key at indent 4, description reflowed
+ * at indent 8 (man-style two-line form).
+ */
+#define H_ITEM(k, v)  "    @b{" k "}\n" H_R_BEG "\x08" v H_R_END "\n\n"
 
 /** Section heading for use inside .extras (NAME/SYNOPSIS/OPTIONS are auto). */
 #define H_SECTION(n)  "@b{" n "}\n"

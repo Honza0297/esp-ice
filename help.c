@@ -14,8 +14,7 @@
 #include <fcntl.h>
 #endif
 
-#define INDENT   "    "
-#define INDENT_N 4
+#define INDENT    "    "
 #define MIN_WIDTH 40
 
 static int is_bool_opt(enum option_type t)
@@ -127,7 +126,8 @@ static size_t visible_len(const char *s, size_t len)
  */
 static const char *word_end(const char *p)
 {
-	while (*p && *p != ' ' && *p != '\t' && *p != '\n') {
+	while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+	       *p != '\x02' && *p != '\x03') {
 		if (*p == '@' && p[1] == '@') {
 			p += 2;
 		} else if (*p == '@' && p[1] && p[2] == '{') {
@@ -169,98 +169,109 @@ static const char *word_end(const char *p)
 	return p;
 }
 
-static void emit_line(const struct sbuf *line)
-{
-	fputs(INDENT, stdout);
-	fputs(line->buf, stdout);
-	fputs("\n", stdout);
-}
-
 /*
- * Word-wrap @p text to the current terminal width, indenting every
- * output line by INDENT_N spaces.  Paragraph breaks (two consecutive
- * newlines in the source) are preserved as blank lines.  @x{...}
- * color tokens pass through to fputs and are expanded there.
+ * Word-wrap the bytes between H_R_BEG...H_R_END into @p out, at the
+ * indent encoded right after H_R_BEG.  Advances @p *pp past H_R_END
+ * (or to the terminating NUL if the region is unterminated).
  */
-static void print_reflowed(const char *text)
+static void reflow_region(struct sbuf *out, const char **pp, int width)
 {
-	struct sbuf line = SBUF_INIT;
-	size_t line_vw = 0;
-	int width = render_width();
-	int content_w = width - INDENT_N;
-	int need_blank = 0;
-	const char *p = text;
+	const char *p = *pp;
+	int indent = (unsigned char)*p;
+	int content_w;
+	int col = 0;
+	int first = 1;
 
-	while (*p) {
-		int nls = 0;
+	if (!indent) {
+		*pp = p;
+		return;
+	}
+	p++;  /* skip the indent byte */
 
-		while (*p == ' ' || *p == '\t' || *p == '\n') {
-			if (*p == '\n')
-				nls++;
+	content_w = width - indent;
+	if (content_w < 10)
+		content_w = 10;
+
+	while (*p && *p != '\x03') {
+		while (*p == ' ' || *p == '\t' || *p == '\n')
 			p++;
-		}
-		if (!*p)
+		if (!*p || *p == '\x03')
 			break;
-
-		if (nls >= 2 && line.len > 0) {
-			emit_line(&line);
-			sbuf_reset(&line);
-			line_vw = 0;
-			need_blank = 1;
-		}
-
-		if (need_blank && line.len == 0) {
-			fputs("\n", stdout);
-			need_blank = 0;
-		}
 
 		const char *ws = p;
 		const char *we = word_end(p);
 		size_t wlen = we - ws;
 		size_t vw = visible_len(ws, wlen);
-		int needs_space = line.len > 0;
 
-		if (needs_space &&
-		    (int)(line_vw + 1 + vw) > content_w) {
-			emit_line(&line);
-			sbuf_reset(&line);
-			line_vw = 0;
-			needs_space = 0;
+		if (first) {
+			for (int i = 0; i < indent; i++)
+				sbuf_addch(out, ' ');
+			sbuf_add(out, ws, wlen);
+			col = vw;
+			first = 0;
+		} else if (col + 1 + (int)vw > content_w) {
+			sbuf_addch(out, '\n');
+			for (int i = 0; i < indent; i++)
+				sbuf_addch(out, ' ');
+			sbuf_add(out, ws, wlen);
+			col = vw;
+		} else {
+			sbuf_addch(out, ' ');
+			sbuf_add(out, ws, wlen);
+			col += 1 + (int)vw;
 		}
 
-		if (needs_space) {
-			sbuf_addch(&line, ' ');
-			line_vw += 1;
-		}
-		sbuf_add(&line, ws, wlen);
-		line_vw += vw;
 		p = we;
 	}
 
-	if (line.len > 0)
-		emit_line(&line);
-	sbuf_release(&line);
+	if (*p == '\x03')
+		p++;
+	*pp = p;
 }
 
 /*
- * Ensure a section body emits a trailing blank line, so the next
- * heading is visually separated without us needing to micromanage
- * spacing in every H_* macro.
+ * Render a body section to stdout.  Bytes outside the H_R_BEG..H_R_END
+ * markers are copied verbatim; bytes inside are word-wrapped to the
+ * terminal width at the indent carried by the marker.  Both modes run
+ * through fputs so @x{...} color tokens are expanded normally.
+ *
+ * One renderer covers .description, .examples, and .extras -- authors
+ * opt into wrapping via H_PARA / H_ITEM and get verbatim layout from
+ * H_LINE / H_RAW / H_EXAMPLE.
  */
-static void print_body(const char *body)
+static void print_text(const char *body)
 {
-	size_t len;
+	struct sbuf out = SBUF_INIT;
+	const char *p = body;
+	int width;
 
 	if (!body || !*body)
 		return;
 
-	fputs(body, stdout);
+	width = render_width();
 
-	len = strlen(body);
-	if (body[len - 1] != '\n')
-		fputs("\n\n", stdout);
-	else if (len < 2 || body[len - 2] != '\n')
-		fputs("\n", stdout);
+	while (*p) {
+		if (*p == '\x02') {
+			p++;
+			reflow_region(&out, &p, width);
+		} else {
+			sbuf_addch(&out, *p);
+			p++;
+		}
+	}
+
+	/*
+	 * Guarantee one blank line after the section so the next heading
+	 * is visually separated without every macro managing its own
+	 * trailing newlines.
+	 */
+	if (out.len == 0 || out.buf[out.len - 1] != '\n')
+		sbuf_add(&out, "\n\n", 2);
+	else if (out.len < 2 || out.buf[out.len - 2] != '\n')
+		sbuf_addch(&out, '\n');
+
+	fputs(out.buf, stdout);
+	sbuf_release(&out);
 }
 
 static void print_options_body(const struct option *opts)
@@ -402,11 +413,10 @@ void print_manual(const char *cmd_name,
 		fputs("\n", stdout);
 	}
 
-	/* DESCRIPTION -- prose, reflowed to terminal width. */
+	/* DESCRIPTION */
 	if (m && m->description) {
 		fputs("@b{DESCRIPTION}\n", stdout);
-		print_reflowed(m->description);
-		fputs("\n", stdout);
+		print_text(m->description);
 	}
 
 	/* OPTIONS -- auto-generated from the option table. */
@@ -433,13 +443,13 @@ void print_manual(const char *cmd_name,
 		svec_clear(&names);
 	}
 
-	/* EXAMPLES -- verbatim, indented. */
+	/* EXAMPLES */
 	if (m && m->examples) {
 		fputs("@b{EXAMPLES}\n", stdout);
-		print_body(m->examples);
+		print_text(m->examples);
 	}
 
-	/* EXTRAS -- verbatim, author-structured. */
+	/* EXTRAS -- author-structured sections. */
 	if (m && m->extras)
-		print_body(m->extras);
+		print_text(m->extras);
 }
