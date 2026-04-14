@@ -24,6 +24,7 @@
 
 #include "alloc.h"
 #include "ar.h"
+#include "cmake.h"
 #include "cmakecache.h"
 #include "config.h"
 #include "term.h"
@@ -38,9 +39,10 @@
 #include "sbuf.h"
 #include "svec.h"
 
-/* Subcommands -- cmake targets (cmd/cmake/) */
+/* Subcommands -- cmake wrappers (see cmake.h) */
 int cmd_build(int argc, const char **argv);
 int cmd_clean(int argc, const char **argv);
+int cmd_cmake(int argc, const char **argv);
 int cmd_flash(int argc, const char **argv);
 int cmd_menuconfig(int argc, const char **argv);
 int cmd_reconfigure(int argc, const char **argv);

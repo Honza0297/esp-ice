@@ -21,6 +21,7 @@ struct cmd_struct {
 static struct cmd_struct commands[] = {
 	{"build", cmd_build},
 	{"clean", cmd_clean},
+	{"cmake", cmd_cmake},
 	{"config", cmd_config},
 	{"configdep", cmd_configdep},
 	{"flash", cmd_flash},
