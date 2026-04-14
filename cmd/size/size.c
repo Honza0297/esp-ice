@@ -27,6 +27,37 @@
 #include "../../ice.h"
 #include "chip.h"
 
+static const struct cmd_manual manual = {
+	.description =
+	H_PARA("Reads a GCC/LD linker map file and prints a table of "
+	       "memory usage per chip memory region (IRAM, DRAM, Flash, "
+	       "RTC fast/slow, CACHE, ...), with a per-section "
+	       "breakdown (@b{.text}, @b{.data}, @b{.bss}, "
+	       "@b{.rodata}, ...).")
+	H_PARA("The target chip is auto-detected from the map file "
+	       "when possible; @b{--target} overrides.  Linker regions "
+	       "that straddle a chip memory boundary "
+	       "(e.g. @b{iram0_0_seg} on ESP32-S3, spanning IRAM + "
+	       "DIRAM) are split so the @b{used} / @b{remain} columns "
+	       "reflect the physical banks, not virtual windows.  "
+	       "Aliased DIRAM addresses are detected and counted only "
+	       "once.")
+	H_PARA("Flash and cache regions are shown with the @b{used} "
+	       "figure only; their total is a window size rather than a "
+	       "physical bank, so percentage and @b{remain} would be "
+	       "misleading."),
+
+	.examples =
+	H_EXAMPLE("ice size build/hello-world.map")
+	H_EXAMPLE("ice size --target esp32s3 build/app.map")
+	H_EXAMPLE("ice size --format table build/app.map"),
+
+	.extras =
+	H_SECTION("SEE ALSO")
+	H_ITEM("ice cmake size",
+	       "Invoke ESP-IDF's native size target (different format)."),
+};
+
 /* ---- helpers -------------------------------------------------------- */
 
 static int has_suffix(const char *s, size_t len, const char *suffix)
@@ -546,7 +577,7 @@ int cmd_size(int argc, const char **argv)
 		NULL,
 	};
 
-	argc = parse_options(argc, argv, opts, usage);
+	argc = parse_options_manual(argc, argv, opts, usage, &manual);
 	if (argc < 1)
 		die("no map file; see 'ice size --help'");
 

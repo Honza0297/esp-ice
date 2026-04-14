@@ -19,12 +19,40 @@
  */
 #include "../../ice.h"
 
+static const struct cmd_manual manual = {
+	.description =
+	H_PARA("Low-level escape hatch: configures the build directory "
+	       "on demand and then runs any cmake @b{<target>} verbatim.  "
+	       "An unknown target is rejected by cmake, not by ice.")
+	H_PARA("Output streams straight to the terminal, which is the "
+	       "right behaviour for interactive or report-style targets "
+	       "(@b{menuconfig}, @b{size}, @b{partition-table}, "
+	       "@b{bootloader}, @b{erase-flash}, ...).  Use @b{ice build} "
+	       "instead when you want ice's captured progress display "
+	       "around a full compilation."),
+
+	.examples =
+	H_EXAMPLE("ice cmake app")
+	H_EXAMPLE("ice cmake bootloader")
+	H_EXAMPLE("ice cmake partition-table")
+	H_EXAMPLE("ice cmake erase-flash"),
+
+	.extras =
+	H_SECTION("SEE ALSO")
+	H_ITEM("ice build",
+	       "Captured progress display for the default target.")
+	H_ITEM("ice menuconfig",
+	       "Shortcut for @b{ice cmake menuconfig}.")
+	H_ITEM("ice flash",
+	       "Shortcut for @b{ice cmake flash}."),
+};
+
 int cmd_cmake(int argc, const char **argv)
 {
 	const char *usage[] = { "ice cmake <target>", NULL };
 	struct option opts[] = { OPT_END() };
 
-	argc = parse_options(argc, argv, opts, usage);
+	argc = parse_options_manual(argc, argv, opts, usage, &manual);
 
 	if (argc < 1)
 		die("missing target argument");

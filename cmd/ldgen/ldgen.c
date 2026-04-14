@@ -11,6 +11,31 @@
 #include "../../ice.h"
 #include "lf.h"
 
+static const struct cmd_manual manual = {
+	.description =
+	H_PARA("Parses ESP-IDF linker fragment (@b{.lf}) files and "
+	       "reports the number of @b{sections}, @b{schemes}, and "
+	       "@b{mappings} found in each.  Use @b{--dump} to print "
+	       "the parsed AST for debugging.")
+	H_PARA("This is currently an analysis helper -- useful for "
+	       "validating @b{.lf} syntax before a full build -- and "
+	       "does not yet emit a final linker script.  A fragment is "
+	       "a declarative description of which object/archive "
+	       "sections land in which memory region; ESP-IDF's linker "
+	       "pipeline merges them into a single generated @b{.ld}."),
+
+	.examples =
+	H_EXAMPLE("ice ldgen components/freertos/linker.lf")
+	H_EXAMPLE("ice ldgen --dump app.lf")
+	H_EXAMPLE("ice ldgen app.lf bootloader.lf"),
+
+	.extras =
+	H_SECTION("SEE ALSO")
+	H_ITEM("ice build",
+	       "Runs the full build pipeline including ESP-IDF's own "
+	       "linker-fragment merger."),
+};
+
 int cmd_ldgen(int argc, const char **argv)
 {
 	int dump = 0;
@@ -24,7 +49,7 @@ int cmd_ldgen(int argc, const char **argv)
 		NULL,
 	};
 
-	argc = parse_options(argc, argv, opts, usage);
+	argc = parse_options_manual(argc, argv, opts, usage, &manual);
 	if (argc < 1)
 		die("no input files; see 'ice ldgen --help'");
 

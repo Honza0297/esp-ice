@@ -16,15 +16,15 @@
 const struct cmd_struct ice_commands[] = {
 	{"build",       cmd_build,       "build the default target"},
 	{"clean",       cmd_clean,       "remove build artifacts"},
-	{"cmake",       cmd_cmake,       "run a raw cmake target"},
-	{"config",      cmd_config,      "inspect and modify ice configuration"},
-	{"configdep",   cmd_configdep,   "print config build dependencies"},
+	{"cmake",       cmd_cmake,       "run an arbitrary cmake target"},
+	{"config",      cmd_config,      "inspect and modify configuration entries"},
+	{"configdep",   cmd_configdep,   "sdkconfig-aware compiler wrapper"},
 	{"flash",       cmd_flash,       "flash firmware to the device"},
 	{"help",        cmd_help,        "show help for a subcommand"},
-	{"ldgen",       cmd_ldgen,       "generate the linker script"},
+	{"ldgen",       cmd_ldgen,       "analyse linker fragment (.lf) files"},
 	{"menuconfig",  cmd_menuconfig,  "open the project configuration UI"},
 	{"reconfigure", cmd_reconfigure, "regenerate the build system"},
-	{"size",        cmd_size,        "summarize firmware size by section"},
+	{"size",        cmd_size,        "analyse firmware memory usage by region"},
 	{NULL, NULL, NULL},
 };
 

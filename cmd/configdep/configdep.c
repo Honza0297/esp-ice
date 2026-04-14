@@ -20,6 +20,38 @@
  */
 #include "../../ice.h"
 
+static const struct cmd_manual manual = {
+	.description =
+	H_PARA("Compiler wrapper that rewrites GCC-style dependency "
+	       "files (@b{-MF}) so a translation unit only rebuilds "
+	       "when the specific @b{CONFIG_*} options it actually "
+	       "references change -- not every time @b{sdkconfig} is "
+	       "touched.")
+	H_PARA("Not intended for direct use: the cmake toolchain is "
+	       "configured to invoke the real compiler through this "
+	       "wrapper.  The command is documented here so the build "
+	       "system's behaviour is discoverable.")
+	H_PARA("Mechanism: the wrapper first runs the real compiler "
+	       "with the arguments it was given.  If a @b{-MF} "
+	       "dependency file was produced, it parses that file, "
+	       "removes @b{sdkconfig.h} from the prerequisite list, "
+	       "scans the remaining prerequisite files for "
+	       "@b{CONFIG_*} identifiers, and rewrites the dependency "
+	       "file with one per-option @b{.cdep} marker file per "
+	       "referenced option.  Those marker files are touched "
+	       "only when the corresponding option changes, so Make / "
+	       "Ninja recompile precisely the affected sources."),
+
+	.examples =
+	H_EXAMPLE("ice configdep cc -c foo.c -o foo.o -MF foo.d"),
+
+	.extras =
+	H_SECTION("SEE ALSO")
+	H_ITEM("ice menuconfig",
+	       "Edit @b{sdkconfig} interactively; subsequent builds "
+	       "pick up only the actually-affected sources."),
+};
+
 /* ------------------------------------------------------------------ */
 /*  Parsed dependency file                                            */
 /* ------------------------------------------------------------------ */
@@ -339,6 +371,22 @@ int cmd_configdep(int argc, const char **argv)
 	struct sdk_opts cfg = {0};
 	const char *dep_fn;
 	int rc;
+
+	/*
+	 * All args after argv[0] are forwarded verbatim to the real
+	 * compiler, so we can't call parse_options_manual here -- flags
+	 * like -c, -MF etc. are not ours.  Intercept --help/-h manually
+	 * at the head of the argv before forwarding takes over.
+	 */
+	if (argc >= 2 && (!strcmp(argv[1], "--help") ||
+			  !strcmp(argv[1], "-h"))) {
+		const char *usage[] = {
+			"ice configdep <compiler> [<arg>...]",
+			NULL,
+		};
+		print_manual("configdep", &manual, NULL, usage);
+		return EXIT_SUCCESS;
+	}
 
 	/* argv[0] = "configdep", argv[1..] = compiler command */
 	if (argc < 2)

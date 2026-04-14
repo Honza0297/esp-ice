@@ -33,16 +33,21 @@ static const char *usage[] = {
 static const struct cmd_manual manual = {
 	.description =
 	H_PARA("@b{ice config} reads and writes configuration entries "
-	       "across scopes.  The effective value of a key is resolved in "
-	       "precedence order: @b{cli > env > project > local > user > "
-	       "defaults}.")
-	H_PARA("Without flags, one positional argument prints the effective "
-	       "value of that key (exits non-zero if unset).  Two positional "
-	       "arguments set the key in the target scope.")
-	H_PARA("The target scope for writes is @b{--local} (./.iceconfig) by "
-	       "default; pass @b{--user} to write ~/.iceconfig.  The "
-	       "@b{--list} and @b{--add}/@b{--unset} modes are mutually "
-	       "exclusive."),
+	       "across a stack of cascading scopes.  The effective value "
+	       "of a key is resolved in precedence order: @b{cli > env > "
+	       "project > local > user > defaults}.")
+	H_PARA("With no flags: one positional argument prints the "
+	       "effective value of that key (exits non-zero if unset), "
+	       "and two positional arguments set the key in the target "
+	       "scope.  The target scope for writes is @b{--local} "
+	       "(./.iceconfig) by default; pass @b{--user} to write "
+	       "~/.iceconfig.")
+	H_PARA("@b{--list} dumps every entry in the active configuration "
+	       "together with the scope it came from.  @b{--add} appends "
+	       "an entry for keys with multi-value semantics "
+	       "(e.g. @b{cmake.define}).  @b{--unset} removes every "
+	       "entry for a key at the target scope.  These three modes "
+	       "are mutually exclusive."),
 
 	.examples =
 	H_EXAMPLE("ice config --list")
@@ -55,23 +60,88 @@ static const struct cmd_manual manual = {
 	.extras =
 	H_SECTION("SCOPES")
 	H_ITEM("cli",
-	       "Options passed on the command line (highest precedence).")
+	       "Flags and @b{-D} entries passed on the command line "
+	       "(highest precedence).")
 	H_ITEM("env",
 	       "Variables named @b{ICE_<SECTION>_<KEY>}, e.g. "
-	       "@b{ICE_CORE_BUILD_DIR}.")
+	       "@b{ICE_CORE_BUILD_DIR} or @b{ICE_SERIAL_PORT}.  Legacy "
+	       "@b{ESPPORT} and @b{ESPBAUD} are also mapped to "
+	       "@b{serial.port} and @b{serial.baud} for idf.py "
+	       "compatibility.")
 	H_ITEM("project",
-	       "Values derived from the active build tree "
-	       "(e.g. CMakeCache.txt).")
+	       "Auto-derived from build artifacts in @b{<build-dir>} -- "
+	       "@b{target} from CMakeCache.txt, @b{mapfile} / @b{elf} "
+	       "from project_description.json.  Best-effort; silently "
+	       "skipped when the build tree is not yet configured.")
 	H_ITEM("local",
 	       "@b{./.iceconfig} in the current working directory.")
 	H_ITEM("user",
 	       "@b{~/.iceconfig} in the user's home directory.")
 	H_ITEM("defaults",
-	       "Built-in fallbacks (lowest precedence).")
+	       "Built-in fallbacks (@b{core.build-dir=build}, "
+	       "@b{core.generator=Ninja}, @b{core.verbose=false}).")
 
 	H_SECTION("FILES")
-	H_ITEM("./.iceconfig",    "Local (project) configuration.")
-	H_ITEM("~/.iceconfig",    "User configuration."),
+	H_ITEM("./.iceconfig",
+	       "Local project configuration (--local scope).")
+	H_ITEM("~/.iceconfig",
+	       "User configuration (--user scope).")
+
+	H_SECTION("FILE FORMAT")
+	H_PARA("Config files are plain text in an INI-like format.  "
+	       "Sections introduce the key namespace; keys inside a "
+	       "@b{[section]} header are stored as @b{section.key}.")
+	H_LINE("")
+	H_LINE("    @b{[core]}")
+	H_LINE("    build-dir = build")
+	H_LINE("    generator = Ninja")
+	H_LINE("    verbose = false")
+	H_LINE("")
+	H_LINE("    @b{[cmake]}")
+	H_LINE("    define = MY_OPT=ON")
+	H_LINE("    define = ANOTHER=1")
+	H_LINE("")
+	H_LINE("    @b{[alias]}")
+	H_LINE("    b = build -v")
+	H_LINE("    ll = !ls -la")
+	H_LINE("")
+	H_PARA("Rules:")
+	H_LINE("  - Section names and keys allow @b{[A-Za-z0-9_-]}.")
+	H_LINE("  - Values are trimmed of surrounding whitespace; wrap "
+	       "in double")
+	H_LINE("    quotes to preserve leading/trailing spaces or "
+	       "embedded @b{#} / @b{;}.")
+	H_LINE("  - Lines starting with @b{#} or @b{;} are comments.")
+	H_LINE("  - Blank lines are ignored.")
+	H_LINE("  - Multi-value keys (e.g. @b{cmake.define}): use "
+	       "@b{--add} to append;")
+	H_LINE("    direct assignment replaces every entry at that "
+	       "scope.")
+	H_LINE("  - Files are rewritten whole on every write; existing "
+	       "comments")
+	H_LINE("    and blank lines are @b{not} preserved.")
+	H_LINE("")
+
+	H_SECTION("ALIASES")
+	H_PARA("Aliases live under the @b{alias.<name>} config key.  "
+	       "When @b{<name>} is typed as the subcommand, the alias "
+	       "value replaces it and parsing continues from the "
+	       "expanded argv; subsequent arguments on the original "
+	       "command line are preserved after the expansion.")
+	H_PARA("A command alias (the common case) is a shell-like "
+	       "string that is split on whitespace into replacement "
+	       "tokens.  A @b{shell alias} is a value that begins with "
+	       "@b{!} -- everything after the bang is passed to "
+	       "@b{/bin/sh -c} (or @b{cmd.exe /c} on Windows) and @b{ice} "
+	       "exits with that command's status.  Global options are "
+	       "not re-parsed through aliases.")
+	H_PARA("Alias expansion loops (with a cycle-breaking depth cap) "
+	       "so one alias may resolve to another.")
+	H_EXAMPLE("ice config --user alias.b \"build -v\"")
+	H_EXAMPLE("ice b                    # runs: ice build -v")
+	H_EXAMPLE("ice config alias.ll \"!ls -la\"")
+	H_EXAMPLE("ice ll                   # runs: /bin/sh -c 'ls -la'")
+	H_LINE(""),
 };
 
 static enum config_scope target_scope(int user, int local)
