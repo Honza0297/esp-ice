@@ -117,6 +117,7 @@ LIB_SRCS := \
 	cmd/size/chip.c \
 	cmd/size/size.c \
 	config.c \
+	ice.c \
 	json.c \
 	map.c \
 	term.c \
@@ -132,7 +133,7 @@ LIB_SRCS := \
 # MAIN_SRCS provide the program entry point.  Excluded from libice.a
 # so that unit tests (and any future external libice consumer) can
 # supply their own main().
-MAIN_SRCS := ice.c
+MAIN_SRCS := main.c
 
 SRCS := $(MAIN_SRCS) $(LIB_SRCS)
 
