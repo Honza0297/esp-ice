@@ -13,7 +13,7 @@ tap_setup
 # ~/.iceconfig, and clear env vars the binary maps to config keys
 # so tests are deterministic regardless of the host environment.
 mkdir -p home
-export HOME="$PWD/home"
+export HOME="$PWD/home" USERPROFILE="$PWD/home"
 unset ESPPORT ESPBAUD IDF_TARGET
 
 # get on an unset key exits non-zero with no output on stdout.

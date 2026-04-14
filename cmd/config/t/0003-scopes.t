@@ -12,7 +12,7 @@
 tap_setup
 
 mkdir -p home
-export HOME="$PWD/home"
+export HOME="$PWD/home" USERPROFILE="$PWD/home"
 unset ESPPORT ESPBAUD IDF_TARGET
 
 # --user writes to ~/.iceconfig; --local to ./.iceconfig.
