@@ -13,11 +13,6 @@
  */
 #include "ice.h"
 
-const char *opt_build_dir = "build";
-const char *opt_generator = "Ninja";
-struct svec opt_define = SVEC_INIT;
-int opt_verbose;
-
 struct cmd_struct {
 	const char *name;
 	int (*fn)(int argc, const char **argv);
@@ -55,27 +50,90 @@ static const char *global_usage[] = {
 	NULL,
 };
 
+/*
+ * Tiny hand-rolled scan for -C and -B before the full parse.  The
+ * values are needed early: -C to chdir before loading the local
+ * config, -B to feed config_load_project() the right build directory.
+ *
+ * Unknown options are skipped; the full parse_options() pass handles
+ * errors and sets CLI-scope entries.  Only -C is removed from argv
+ * (to avoid a second chdir attempt against the already-changed cwd);
+ * -B stays so the full parse can record it at CLI scope.
+ */
+static void pre_parse_location(int *argcp, const char **argv,
+			       const char **out_chdir,
+			       const char **out_build)
+{
+	int argc = *argcp;
+	int dst = 1;
+	int i = 1;
+
+	*out_chdir = NULL;
+	*out_build = NULL;
+
+	while (i < argc) {
+		const char *a = argv[i];
+		int drop = 0;
+		int step = 1;
+
+		if (!strcmp(a, "--") || a[0] != '-' || a[1] == '\0')
+			break;
+
+		if (!strcmp(a, "-C") && i + 1 < argc) {
+			*out_chdir = argv[i + 1];
+			drop = 1;
+			step = 2;
+		} else if (!strncmp(a, "-C", 2) && a[2]) {
+			*out_chdir = a + 2;
+			drop = 1;
+		} else if ((!strcmp(a, "-B") || !strcmp(a, "--build-dir")) &&
+			   i + 1 < argc) {
+			*out_build = argv[i + 1];
+		} else if (!strncmp(a, "-B", 2) && a[2]) {
+			*out_build = a + 2;
+		} else if (!strncmp(a, "--build-dir=", 12)) {
+			*out_build = a + 12;
+		}
+
+		if (!drop) {
+			for (int j = 0; j < step; j++) {
+				if (dst != i + j)
+					argv[dst] = argv[i + j];
+				dst++;
+			}
+		}
+		i += step;
+	}
+
+	while (i < argc) {
+		if (dst != i)
+			argv[dst] = argv[i];
+		dst++;
+		i++;
+	}
+	argv[dst] = NULL;
+	*argcp = dst;
+}
+
 int main(int argc, const char **argv)
 {
-	const char *dir = NULL;
+	const char *chdir_to = NULL;
+	const char *build_override = NULL;
 	int no_color = 0;
+	int version = 0;
 	struct cmd_struct *cmd;
 
-	int version = 0;
-
 	struct option global_opts[] = {
-		OPT_STRING('B', "build-dir", &opt_build_dir, "path",
+		OPT_CONFIG('B', "build-dir", "core.build-dir", "path",
 			   "build directory (default: build)"),
-		OPT_STRING('C', NULL, &dir, "dir",
-			   "change to directory before doing anything"),
-		OPT_STRING_LIST('D', "define", &opt_define, "key=val",
-			   "cmake cache entry (repeatable)"),
-		OPT_STRING('G', "generator", &opt_generator, "name",
+		OPT_CONFIG_LIST('D', "define", "cmake.define", "key=val",
+				"cmake cache entry (repeatable)"),
+		OPT_CONFIG('G', "generator", "core.generator", "name",
 			   "cmake generator (default: Ninja)"),
 		OPT_BOOL(0, "no-color", &no_color,
 			 "disable colored output"),
-		OPT_BOOL('v', "verbose", &opt_verbose,
-			 "show full command output"),
+		OPT_CONFIG_BOOL('v', "verbose", "core.verbose",
+				"show full command output"),
 		OPT_BOOL(0, "version", &version,
 			 "show version"),
 		OPT_END(),
@@ -83,6 +141,19 @@ int main(int argc, const char **argv)
 
 	/* Enable color early so die() in parse_options is colored. */
 	color_init(STDERR_FILENO);
+
+	config_load_defaults(&config);
+	config_load_file(&config, CONFIG_SCOPE_USER, user_config_path());
+
+	pre_parse_location(&argc, argv, &chdir_to, &build_override);
+	if (chdir_to && chdir(chdir_to))
+		die_errno("cannot change to '%s'", chdir_to);
+
+	config_load_file(&config, CONFIG_SCOPE_LOCAL, local_config_path());
+	config_load_project(&config,
+			    build_override ? build_override
+					   : config_get("core.build-dir"));
+	config_load_env(&config);
 
 	argc = parse_options(argc, argv, global_opts, global_usage);
 
@@ -94,9 +165,6 @@ int main(int argc, const char **argv)
 		       VERSION);
 		return EXIT_SUCCESS;
 	}
-
-	if (dir && chdir(dir))
-		die_errno("cannot change to '%s'", dir);
 
 	if (argc < 1) {
 		list_commands();

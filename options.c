@@ -10,6 +10,11 @@
  */
 #include "ice.h"
 
+static int is_bool_opt(enum option_type t)
+{
+	return t == OPTION_BOOL || t == OPTION_CONFIG_BOOL;
+}
+
 static void print_usage(const struct option *opts, const char **usage)
 {
 	fprintf(stderr, "usage: ");
@@ -30,7 +35,7 @@ static void print_usage(const struct option *opts, const char **usage)
 				 o->short_opt);
 
 		if (o->long_opt) {
-			if (o->type == OPTION_BOOL)
+			if (is_bool_opt(o->type))
 				snprintf(long_str, sizeof(long_str), "--%s",
 					 o->long_opt);
 			else
@@ -98,6 +103,18 @@ static int set_value(const struct option *o, const char *val)
 	case OPTION_INT:
 		*(int *)o->value = atoi(val);
 		return 0;
+	case OPTION_CONFIG:
+		config_set(&config, (const char *)o->value, val,
+			   CONFIG_SCOPE_CLI);
+		return 0;
+	case OPTION_CONFIG_BOOL:
+		config_set(&config, (const char *)o->value,
+			   val ? val : "true", CONFIG_SCOPE_CLI);
+		return 0;
+	case OPTION_CONFIG_LIST:
+		config_add(&config, (const char *)o->value, val,
+			   CONFIG_SCOPE_CLI);
+		return 0;
 	default:
 		return -1;
 	}
@@ -137,7 +154,7 @@ int parse_options(int argc, const char **argv, const struct option *opts,
 			if (!o)
 				die("unknown option: %s", arg);
 
-			if (o->type != OPTION_BOOL && !val) {
+			if (!is_bool_opt(o->type) && !val) {
 				if (i + 1 >= argc)
 					die("option '%s' requires a value",
 					    arg);
@@ -154,7 +171,7 @@ int parse_options(int argc, const char **argv, const struct option *opts,
 		if (!o)
 			die("unknown option: %s", arg);
 
-		if (o->type == OPTION_BOOL) {
+		if (is_bool_opt(o->type)) {
 			set_value(o, NULL);
 			continue;
 		}

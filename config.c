@@ -1,0 +1,543 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file config.c
+ * @brief Git-style cascading configuration store implementation.
+ */
+#include "ice.h"
+
+#include <limits.h>
+
+struct config config = CONFIG_INIT;
+
+void config_init(struct config *c)
+{
+	c->entries = NULL;
+	c->nr = 0;
+	c->alloc = 0;
+}
+
+void config_release(struct config *c)
+{
+	for (int i = 0; i < c->nr; i++) {
+		free(c->entries[i].key);
+		free(c->entries[i].value);
+	}
+	free(c->entries);
+	config_init(c);
+}
+
+static void append_entry(struct config *c, const char *key, const char *value,
+			 enum config_scope scope)
+{
+	ALLOC_GROW(c->entries, c->nr + 1, c->alloc);
+	c->entries[c->nr].key = sbuf_strdup(key);
+	c->entries[c->nr].value = sbuf_strdup(value);
+	c->entries[c->nr].scope = scope;
+	c->nr++;
+}
+
+void config_add(struct config *c, const char *key, const char *value,
+		enum config_scope scope)
+{
+	append_entry(c, key, value, scope);
+}
+
+void config_set(struct config *c, const char *key, const char *value,
+		enum config_scope scope)
+{
+	int dst = 0;
+
+	for (int i = 0; i < c->nr; i++) {
+		if (c->entries[i].scope == scope &&
+		    !strcmp(c->entries[i].key, key)) {
+			free(c->entries[i].key);
+			free(c->entries[i].value);
+			continue;
+		}
+		if (dst != i)
+			c->entries[dst] = c->entries[i];
+		dst++;
+	}
+	c->nr = dst;
+
+	append_entry(c, key, value, scope);
+}
+
+const char *config_get(const char *key)
+{
+	const char *value = NULL;
+	enum config_scope best = CONFIG_SCOPE_DEFAULT;
+
+	for (int i = 0; i < config.nr; i++) {
+		if (strcmp(config.entries[i].key, key))
+			continue;
+		if (!value || config.entries[i].scope >= best) {
+			value = config.entries[i].value;
+			best = config.entries[i].scope;
+		}
+	}
+	return value;
+}
+
+const char *config_get_at(const char *key, enum config_scope scope)
+{
+	const char *value = NULL;
+
+	for (int i = 0; i < config.nr; i++) {
+		if (config.entries[i].scope == scope &&
+		    !strcmp(config.entries[i].key, key))
+			value = config.entries[i].value;
+	}
+	return value;
+}
+
+int config_get_all(const char *key, struct config_entry ***out)
+{
+	struct config_entry **list = NULL;
+	int n = 0, alloc = 0;
+
+	for (int i = 0; i < config.nr; i++) {
+		if (strcmp(config.entries[i].key, key))
+			continue;
+		ALLOC_GROW(list, n + 1, alloc);
+		list[n++] = &config.entries[i];
+	}
+	*out = list;
+	return n;
+}
+
+int config_has(const char *key)
+{
+	for (int i = 0; i < config.nr; i++) {
+		if (!strcmp(config.entries[i].key, key))
+			return 1;
+	}
+	return 0;
+}
+
+enum config_scope config_source(const char *key)
+{
+	enum config_scope best = CONFIG_SCOPE_DEFAULT;
+	int found = 0;
+
+	for (int i = 0; i < config.nr; i++) {
+		if (strcmp(config.entries[i].key, key))
+			continue;
+		if (!found || config.entries[i].scope > best)
+			best = config.entries[i].scope;
+		found = 1;
+	}
+	if (!found)
+		die("config_source: '%s' is not set", key);
+	return best;
+}
+
+static int streq_ci(const char *a, const char *b)
+{
+	for (; *a && *b; a++, b++) {
+		if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
+			return 0;
+	}
+	return *a == *b;
+}
+
+int config_get_int(const char *key, int *out)
+{
+	const char *s = config_get(key);
+	char *end;
+	long v;
+
+	if (!s)
+		return -1;
+	if (!*s)
+		return -2;
+
+	errno = 0;
+	v = strtol(s, &end, 10);
+	if (*end != '\0' || errno == ERANGE || v < INT_MIN || v > INT_MAX)
+		return -2;
+
+	*out = (int)v;
+	return 0;
+}
+
+int config_get_bool(const char *key, int *out)
+{
+	const char *s = config_get(key);
+
+	if (!s)
+		return -1;
+
+	if (streq_ci(s, "true") || streq_ci(s, "yes") ||
+	    streq_ci(s, "on") || !strcmp(s, "1")) {
+		*out = 1;
+		return 0;
+	}
+	if (streq_ci(s, "false") || streq_ci(s, "no") ||
+	    streq_ci(s, "off") || !strcmp(s, "0") || !*s) {
+		*out = 0;
+		return 0;
+	}
+	return -2;
+}
+
+const char *scope_name(enum config_scope scope)
+{
+	switch (scope) {
+	case CONFIG_SCOPE_DEFAULT:	return "default";
+	case CONFIG_SCOPE_USER:		return "user";
+	case CONFIG_SCOPE_LOCAL:	return "local";
+	case CONFIG_SCOPE_PROJECT:	return "project";
+	case CONFIG_SCOPE_ENV:		return "env";
+	case CONFIG_SCOPE_CLI:		return "cli";
+	}
+	return "unknown";
+}
+
+/* ------------------------------------------------------------------ */
+/*  Path helpers                                                      */
+/* ------------------------------------------------------------------ */
+
+const char *user_config_path(void)
+{
+	static struct sbuf path = SBUF_INIT;
+	const char *home;
+
+	if (path.len)
+		return path.buf;
+
+#ifdef _WIN32
+	home = getenv("USERPROFILE");
+#else
+	home = getenv("HOME");
+#endif
+	if (!home || !*home)
+		return NULL;
+
+	sbuf_addstr(&path, home);
+	sbuf_addch(&path, '/');
+	sbuf_addstr(&path, ".iceconfig");
+	return path.buf;
+}
+
+const char *local_config_path(void)
+{
+	return "./.iceconfig";
+}
+
+/* ------------------------------------------------------------------ */
+/*  INI parser                                                        */
+/* ------------------------------------------------------------------ */
+
+static int valid_name_char(int ch)
+{
+	return isalnum((unsigned char)ch) || ch == '-' || ch == '_';
+}
+
+static void parse_section(const char *path, int lineno, char *line,
+			  struct sbuf *section)
+{
+	char *start = line + 1;	/* past '[' */
+	char *end, *after, *p;
+
+	end = strchr(start, ']');
+	if (!end) {
+		warn("%s:%d: missing ']' in section header", path, lineno);
+		return;
+	}
+
+	after = end + 1;
+	while (*after == ' ' || *after == '\t')
+		after++;
+	if (*after && *after != '#' && *after != ';') {
+		warn("%s:%d: garbage after section header", path, lineno);
+		return;
+	}
+
+	while (*start == ' ' || *start == '\t')
+		start++;
+	while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+		end--;
+
+	if (start >= end) {
+		warn("%s:%d: empty section name", path, lineno);
+		return;
+	}
+
+	for (p = start; p < end; p++) {
+		if (!valid_name_char((unsigned char)*p)) {
+			warn("%s:%d: invalid character in section name",
+			     path, lineno);
+			return;
+		}
+	}
+
+	sbuf_reset(section);
+	sbuf_add(section, start, end - start);
+}
+
+static void parse_kv(struct config *c, enum config_scope scope,
+		     const char *path, int lineno, char *line,
+		     struct sbuf *section)
+{
+	struct sbuf fullkey = SBUF_INIT;
+	struct sbuf val = SBUF_INIT;
+	char *eq, *key, *key_end, *value, *p;
+
+	if (section->len == 0) {
+		warn("%s:%d: key outside of any section", path, lineno);
+		return;
+	}
+
+	eq = strchr(line, '=');
+	if (!eq) {
+		warn("%s:%d: expected 'key = value'", path, lineno);
+		return;
+	}
+
+	key = line;
+	key_end = eq;
+	while (key_end > key && (key_end[-1] == ' ' || key_end[-1] == '\t'))
+		key_end--;
+
+	if (key >= key_end) {
+		warn("%s:%d: empty key", path, lineno);
+		return;
+	}
+
+	for (p = key; p < key_end; p++) {
+		if (!valid_name_char((unsigned char)*p)) {
+			warn("%s:%d: invalid character in key", path, lineno);
+			return;
+		}
+	}
+
+	value = eq + 1;
+	while (*value == ' ' || *value == '\t')
+		value++;
+
+	if (*value == '"') {
+		char *vend, *after;
+
+		value++;
+		vend = strchr(value, '"');
+		if (!vend) {
+			warn("%s:%d: unterminated quoted value",
+			     path, lineno);
+			return;
+		}
+		sbuf_add(&val, value, vend - value);
+
+		after = vend + 1;
+		while (*after == ' ' || *after == '\t')
+			after++;
+		if (*after && *after != '#' && *after != ';') {
+			warn("%s:%d: garbage after quoted value",
+			     path, lineno);
+			sbuf_release(&val);
+			return;
+		}
+	} else {
+		char *cur = value;
+		char *last = value;	/* one past last non-ws, non-comment */
+
+		while (*cur && *cur != '#' && *cur != ';') {
+			if (*cur != ' ' && *cur != '\t')
+				last = cur + 1;
+			cur++;
+		}
+		sbuf_add(&val, value, last - value);
+	}
+
+	sbuf_addstr(&fullkey, section->buf);
+	sbuf_addch(&fullkey, '.');
+	sbuf_add(&fullkey, key, key_end - key);
+
+	config_add(c, fullkey.buf, val.buf, scope);
+
+	sbuf_release(&fullkey);
+	sbuf_release(&val);
+}
+
+static void parse_line(struct config *c, enum config_scope scope,
+		       const char *path, int lineno, char *line,
+		       struct sbuf *section)
+{
+	while (*line == ' ' || *line == '\t')
+		line++;
+
+	if (*line == '\0' || *line == '#' || *line == ';')
+		return;
+
+	if (*line == '[')
+		parse_section(path, lineno, line, section);
+	else
+		parse_kv(c, scope, path, lineno, line, section);
+}
+
+int config_load_file(struct config *c, enum config_scope scope,
+		     const char *path)
+{
+	struct sbuf sb = SBUF_INIT;
+	struct sbuf section = SBUF_INIT;
+	size_t pos = 0;
+	char *line;
+	int lineno = 0;
+
+	if (!path)
+		return 0;
+
+	if (sbuf_read_file(&sb, path) < 0) {
+		int saved = errno;
+
+		sbuf_release(&sb);
+		if (saved == ENOENT)
+			return 0;
+		errno = saved;
+		warn_errno("cannot read '%s'", path);
+		return -1;
+	}
+
+	while ((line = sbuf_getline(sb.buf, sb.len, &pos)) != NULL) {
+		lineno++;
+		parse_line(c, scope, path, lineno, line, &section);
+	}
+
+	sbuf_release(&sb);
+	sbuf_release(&section);
+	return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Non-file loaders                                                  */
+/* ------------------------------------------------------------------ */
+
+void config_load_defaults(struct config *c)
+{
+	config_set(c, "core.build-dir", "build", CONFIG_SCOPE_DEFAULT);
+	config_set(c, "core.generator", "Ninja", CONFIG_SCOPE_DEFAULT);
+	config_set(c, "core.verbose",   "false", CONFIG_SCOPE_DEFAULT);
+}
+
+void config_load_env(struct config *c)
+{
+	static const struct {
+		const char *env;
+		const char *key;
+	} map[] = {
+		{ "ESPPORT",    "serial.port" },
+		{ "ESPBAUD",    "serial.baud" },
+		{ "IDF_TARGET", "target"      },
+	};
+
+	for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+		const char *val = getenv(map[i].env);
+
+		if (val && *val)
+			config_set(c, map[i].key, val, CONFIG_SCOPE_ENV);
+	}
+}
+
+/*
+ * Targeted scan for a top-level string field in a JSON object:
+ *   "key" : "value"
+ *
+ * Handles "\\\\" and "\\\"" escapes in the value; returns a
+ * heap-allocated copy with those unescaped, or NULL if not found or
+ * the value is not a string.  Not a general JSON parser -- good
+ * enough for the small, cmake-generated project_description.json.
+ */
+static char *json_get_string(const char *buf, const char *key)
+{
+	struct sbuf needle = SBUF_INIT;
+	struct sbuf out = SBUF_INIT;
+	const char *p;
+
+	sbuf_addch(&needle, '"');
+	sbuf_addstr(&needle, key);
+	sbuf_addch(&needle, '"');
+
+	p = strstr(buf, needle.buf);
+	sbuf_release(&needle);
+	if (!p)
+		return NULL;
+
+	p += strlen(key) + 2;
+
+	while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+		p++;
+	if (*p != ':')
+		return NULL;
+	p++;
+	while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+		p++;
+
+	if (*p != '"')
+		return NULL;
+	p++;
+
+	while (*p && *p != '"') {
+		if (*p == '\\' && p[1]) {
+			sbuf_addch(&out, p[1]);
+			p += 2;
+		} else {
+			sbuf_addch(&out, *p);
+			p++;
+		}
+	}
+	if (*p != '"') {
+		sbuf_release(&out);
+		return NULL;
+	}
+	return sbuf_detach(&out);
+}
+
+void config_load_project(struct config *c, const char *build_dir)
+{
+	struct sbuf path = SBUF_INIT;
+	struct sbuf buf = SBUF_INIT;
+	struct sbuf derived = SBUF_INIT;
+	char *target = NULL;
+	char *project_name = NULL;
+
+	if (!build_dir)
+		return;
+
+	sbuf_addf(&path, "%s/CMakeCache.txt", build_dir);
+	if (sbuf_read_file(&buf, path.buf) >= 0) {
+		target = cmakecache_get(buf.buf, "IDF_TARGET");
+		if (target)
+			config_set(c, "target", target,
+				   CONFIG_SCOPE_PROJECT);
+	}
+
+	sbuf_reset(&path);
+	sbuf_reset(&buf);
+	sbuf_addf(&path, "%s/project_description.json", build_dir);
+	if (sbuf_read_file(&buf, path.buf) >= 0) {
+		project_name = json_get_string(buf.buf, "project_name");
+		if (project_name) {
+			sbuf_addf(&derived, "%s/%s.map", build_dir,
+				  project_name);
+			config_set(c, "mapfile", derived.buf,
+				   CONFIG_SCOPE_PROJECT);
+
+			sbuf_reset(&derived);
+			sbuf_addf(&derived, "%s/%s.elf", build_dir,
+				  project_name);
+			config_set(c, "elf", derived.buf,
+				   CONFIG_SCOPE_PROJECT);
+		}
+	}
+
+	free(target);
+	free(project_name);
+	sbuf_release(&path);
+	sbuf_release(&buf);
+	sbuf_release(&derived);
+}

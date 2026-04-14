@@ -199,42 +199,6 @@ static int run_with_log(const char **argv, const char *label,
 /* ------------------------------------------------------------------ */
 
 /**
- * Look up @p key in a CMakeCache.txt buffer.
- *
- * Cache lines: KEY:TYPE=VALUE (comments start with # or //).
- * Returns a pointer into @p buf at the start of VALUE, or NULL.
- */
-static const char *cache_lookup(const char *buf, const char *key)
-{
-	size_t key_len = strlen(key);
-	const char *p = buf;
-
-	while (*p) {
-		/* Skip comments and blank lines. */
-		if (*p == '#' || (*p == '/' && *(p + 1) == '/') || *p == '\n') {
-			p = strchr(p, '\n');
-			if (!p)
-				break;
-			p++;
-			continue;
-		}
-
-		/* Match KEY, then expect ':' TYPE '=' VALUE. */
-		if (!strncmp(p, key, key_len) && p[key_len] == ':') {
-			const char *eq = strchr(p + key_len, '=');
-			if (eq)
-				return eq + 1;
-		}
-
-		p = strchr(p, '\n');
-		if (!p)
-			break;
-		p++;
-	}
-	return NULL;
-}
-
-/**
  * Check whether any -D entry is missing from, or differs in, the cache.
  *
  * Each entry in @p defines is "KEY=VALUE" or "KEY:TYPE=VALUE".
@@ -263,7 +227,7 @@ static int cache_needs_configure(const char *cache_buf,
 		}
 
 		val = eq + 1;
-		cached = cache_lookup(cache_buf, key.buf);
+		cached = cmakecache_lookup(cache_buf, key.buf);
 
 		if (!cached) {
 			sbuf_release(&key);
@@ -327,8 +291,8 @@ int ensure_build_directory(const char *build_dir, const char *generator,
 
 	/* Validate generator against existing cache. */
 	if (has_cache) {
-		const char *cached_gen = cache_lookup(cache_buf.buf,
-						      "CMAKE_GENERATOR");
+		const char *cached_gen = cmakecache_lookup(cache_buf.buf,
+							   "CMAKE_GENERATOR");
 		if (cached_gen) {
 			size_t gen_len = strlen(generator);
 			const char *nl = strchr(cached_gen, '\n');
@@ -431,73 +395,72 @@ int run_cmake_target(const char *target, const char *build_dir, int verbose)
 /*  Wrapper commands                                                  */
 /* ------------------------------------------------------------------ */
 
-int cmd_build(int argc, const char **argv)
+/*
+ * Pull build_dir / generator / verbose / cmake.define entries from
+ * the config store.  The defines svec is filled by the caller and
+ * must be cleared with svec_clear() after use.
+ */
+static void gather_cmake_config(const char **build_dir, const char **generator,
+				struct svec *defines, int *verbose)
 {
-	static const char *usage[] = { "ice build", NULL };
+	struct config_entry **entries;
+	int n;
+
+	*build_dir = config_get("core.build-dir");
+	*generator = config_get("core.generator");
+
+	*verbose = 0;
+	config_get_bool("core.verbose", verbose);
+
+	n = config_get_all("cmake.define", &entries);
+	for (int i = 0; i < n; i++)
+		svec_push(defines, entries[i]->value);
+	free(entries);
+}
+
+static int run_cmake_cmd(int argc, const char **argv, const char *usage_line,
+			 const char *target, int force)
+{
+	const char *usage[] = { usage_line, NULL };
 	struct option opts[] = { OPT_END() };
+	const char *build_dir, *generator;
+	struct svec defines = SVEC_INIT;
+	int verbose;
 	int rc;
 
 	parse_options(argc, argv, opts, usage);
+	gather_cmake_config(&build_dir, &generator, &defines, &verbose);
 
-	rc = ensure_build_directory(opt_build_dir, opt_generator,
-				  &opt_define, opt_verbose, 0);
-	if (rc)
-		return rc;
-	return run_cmake_target("all", opt_build_dir, opt_verbose);
+	rc = ensure_build_directory(build_dir, generator, &defines, verbose,
+				    force);
+	if (!rc && target)
+		rc = run_cmake_target(target, build_dir, verbose);
+
+	svec_clear(&defines);
+	return rc;
+}
+
+int cmd_build(int argc, const char **argv)
+{
+	return run_cmake_cmd(argc, argv, "ice build", "all", 0);
 }
 
 int cmd_reconfigure(int argc, const char **argv)
 {
-	static const char *usage[] = { "ice reconfigure", NULL };
-	struct option opts[] = { OPT_END() };
-
-	parse_options(argc, argv, opts, usage);
-
-	return ensure_build_directory(opt_build_dir, opt_generator,
-				  &opt_define, opt_verbose, 1);
+	return run_cmake_cmd(argc, argv, "ice reconfigure", NULL, 1);
 }
 
 int cmd_clean(int argc, const char **argv)
 {
-	static const char *usage[] = { "ice clean", NULL };
-	struct option opts[] = { OPT_END() };
-	int rc;
-
-	parse_options(argc, argv, opts, usage);
-
-	rc = ensure_build_directory(opt_build_dir, opt_generator,
-				  &opt_define, opt_verbose, 0);
-	if (rc)
-		return rc;
-	return run_cmake_target("clean", opt_build_dir, opt_verbose);
+	return run_cmake_cmd(argc, argv, "ice clean", "clean", 0);
 }
 
 int cmd_flash(int argc, const char **argv)
 {
-	static const char *usage[] = { "ice flash", NULL };
-	struct option opts[] = { OPT_END() };
-	int rc;
-
-	parse_options(argc, argv, opts, usage);
-
-	rc = ensure_build_directory(opt_build_dir, opt_generator,
-				  &opt_define, opt_verbose, 0);
-	if (rc)
-		return rc;
-	return run_cmake_target("flash", opt_build_dir, opt_verbose);
+	return run_cmake_cmd(argc, argv, "ice flash", "flash", 0);
 }
 
 int cmd_menuconfig(int argc, const char **argv)
 {
-	static const char *usage[] = { "ice menuconfig", NULL };
-	struct option opts[] = { OPT_END() };
-	int rc;
-
-	parse_options(argc, argv, opts, usage);
-
-	rc = ensure_build_directory(opt_build_dir, opt_generator,
-				  &opt_define, opt_verbose, 0);
-	if (rc)
-		return rc;
-	return run_cmake_target("menuconfig", opt_build_dir, opt_verbose);
+	return run_cmake_cmd(argc, argv, "ice menuconfig", "menuconfig", 0);
 }

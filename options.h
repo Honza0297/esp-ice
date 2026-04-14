@@ -38,6 +38,9 @@ enum option_type {
 	OPTION_STRING,
 	OPTION_STRING_LIST,
 	OPTION_INT,
+	OPTION_CONFIG,		/**< Routes value to config_set(key, ..., CLI). */
+	OPTION_CONFIG_BOOL,	/**< Flag; sets config "true" (or attached val). */
+	OPTION_CONFIG_LIST,	/**< Multi-value; routes to config_add. */
 	OPTION_END,
 };
 
@@ -45,7 +48,12 @@ struct option {
 	enum option_type type;
 	int short_opt;		/**< Single char: 'v', 'C', 0 for none. */
 	const char *long_opt;	/**< Long name: "verbose", NULL for none. */
-	void *value;		/**< Pointer to int (BOOL/INT) or const char **. */
+	void *value;		/**<
+				 * For BOOL/INT:          int *.
+				 * For STRING:            const char **.
+				 * For STRING_LIST:       struct svec *.
+				 * For CONFIG*:           const char * config key.
+				 */
 	const char *argh;	/**< Placeholder for help: "path", "n", etc. */
 	const char *help;	/**< One-line description for -h output. */
 };
@@ -61,6 +69,15 @@ struct option {
 
 #define OPT_INT(s, l, v, a, h)                                                \
 	{ OPTION_INT, (s), (l), (v), (a), (h) }
+
+#define OPT_CONFIG(s, l, key, a, h)                                           \
+	{ OPTION_CONFIG, (s), (l), (void *)(key), (a), (h) }
+
+#define OPT_CONFIG_BOOL(s, l, key, h)                                         \
+	{ OPTION_CONFIG_BOOL, (s), (l), (void *)(key), NULL, (h) }
+
+#define OPT_CONFIG_LIST(s, l, key, a, h)                                      \
+	{ OPTION_CONFIG_LIST, (s), (l), (void *)(key), (a), (h) }
 
 #define OPT_END()                                                              \
 	{ OPTION_END, 0, NULL, NULL, NULL, NULL }

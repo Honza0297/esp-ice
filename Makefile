@@ -74,12 +74,14 @@ PKG_NAME := $(NAME)-$(VERSION)-$(S)-$(ARCH)$(PKG_SUFFIX)
 
 SRCS := ice.c \
 	ar.c \
+	cmakecache.c \
 	cmd/cmake/cmake.c \
 	cmd/configdep/configdep.c \
 	cmd/ldgen/ldgen.c \
 	cmd/ldgen/lf.c \
 	cmd/size/chip.c \
 	cmd/size/size.c \
+	config.c \
 	map.c \
 	term.c \
 	elf.c \

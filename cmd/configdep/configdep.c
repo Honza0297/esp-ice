@@ -140,19 +140,19 @@ static int parse_depfile(struct depfile *d)
 /*  CONFIG_* scanner                                                  */
 /* ------------------------------------------------------------------ */
 
-struct config {
+struct sdk_opts {
 	char **opts;		/**< Unique option names (without CONFIG_). */
 	int n_opts, alloc_opts;
 };
 
-static void config_release(struct config *cfg)
+static void sdk_opts_release(struct sdk_opts *cfg)
 {
 	for (int i = 0; i < cfg->n_opts; i++)
 		free(cfg->opts[i]);
 	free(cfg->opts);
 }
 
-static void add_opt(struct config *cfg, const char *s, size_t len)
+static void add_opt(struct sdk_opts *cfg, const char *s, size_t len)
 {
 	if (!len)
 		return;
@@ -172,7 +172,7 @@ static void add_opt(struct config *cfg, const char *s, size_t len)
  * silently ignored (they may have been removed between compilation
  * and this pass).
  */
-static int scan_file(struct config *cfg, const char *path)
+static int scan_file(struct sdk_opts *cfg, const char *path)
 {
 	struct sbuf sb = SBUF_INIT;
 	const char *c, *end;
@@ -213,7 +213,7 @@ static int scan_file(struct config *cfg, const char *path)
 	return 0;
 }
 
-static int scan_deps(struct config *cfg, struct depfile *d)
+static int scan_deps(struct sdk_opts *cfg, struct depfile *d)
 {
 	for (int i = 0; i < d->n_deps; i++) {
 		if (scan_file(cfg, d->deps[i]))
@@ -260,7 +260,7 @@ static int touch_file(char *path)
  * Option names are lowercased and underscores become directory
  * separators, e.g. CONFIG_MY_OPTION -> my/option.cdep.
  */
-static int fix_depfile(struct depfile *d, struct config *cfg)
+static int fix_depfile(struct depfile *d, struct sdk_opts *cfg)
 {
 	struct sbuf out = SBUF_INIT;
 	struct sbuf path = SBUF_INIT;
@@ -336,7 +336,7 @@ static const char *find_mf(int argc, const char **argv)
 int cmd_configdep(int argc, const char **argv)
 {
 	struct depfile d = {0};
-	struct config cfg = {0};
+	struct sdk_opts cfg = {0};
 	const char *dep_fn;
 	int rc;
 
@@ -375,11 +375,11 @@ int cmd_configdep(int argc, const char **argv)
 		goto fail;
 
 	depfile_release(&d);
-	config_release(&cfg);
+	sdk_opts_release(&cfg);
 	return EXIT_SUCCESS;
 
 fail:
 	depfile_release(&d);
-	config_release(&cfg);
+	sdk_opts_release(&cfg);
 	return EXIT_FAILURE;
 }

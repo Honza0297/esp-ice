@@ -24,6 +24,8 @@
 
 #include "alloc.h"
 #include "ar.h"
+#include "cmakecache.h"
+#include "config.h"
 #include "term.h"
 #include "elf.h"
 #include "error.h"
@@ -34,12 +36,6 @@
 #include "process.h"
 #include "sbuf.h"
 #include "svec.h"
-
-/* Global options used by cmake target commands */
-extern const char *opt_build_dir;
-extern const char *opt_generator;
-extern struct svec opt_define;
-extern int opt_verbose;
 
 /* Subcommands -- cmake targets (cmd/cmake/) */
 int cmd_build(int argc, const char **argv);
