@@ -20,10 +20,12 @@ const struct cmd_struct ice_commands[] = {
 	{"config",      cmd_config,      "inspect and modify configuration entries"},
 	{"configdep",   cmd_configdep,   "sdkconfig-aware compiler wrapper"},
 	{"flash",       cmd_flash,       "flash firmware to the device"},
+	{"fullclean",   cmd_fullclean,   "wipe the build directory"},
 	{"help",        cmd_help,        "show help for a subcommand"},
 	{"ldgen",       cmd_ldgen,       "analyse linker fragment (.lf) files"},
 	{"menuconfig",  cmd_menuconfig,  "open the project configuration UI"},
 	{"reconfigure", cmd_reconfigure, "regenerate the build system"},
+	{"set-target",  cmd_set_target,  "switch the chip target"},
 	{"size",        cmd_size,        "analyse firmware memory usage by region"},
 	{NULL, NULL, NULL},
 };

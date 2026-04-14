@@ -82,11 +82,13 @@ SRCS := ice.c \
 	cmd/config/config.c \
 	cmd/configdep/configdep.c \
 	cmd/flash/flash.c \
+	cmd/fullclean/fullclean.c \
 	cmd/help/help.c \
 	cmd/ldgen/ldgen.c \
 	cmd/ldgen/lf.c \
 	cmd/menuconfig/menuconfig.c \
 	cmd/reconfigure/reconfigure.c \
+	cmd/set-target/set-target.c \
 	cmd/size/chip.c \
 	cmd/size/size.c \
 	config.c \

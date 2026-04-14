@@ -46,8 +46,19 @@ int cmd_build(int argc, const char **argv);
 int cmd_clean(int argc, const char **argv);
 int cmd_cmake(int argc, const char **argv);
 int cmd_flash(int argc, const char **argv);
+int cmd_fullclean(int argc, const char **argv);
 int cmd_menuconfig(int argc, const char **argv);
 int cmd_reconfigure(int argc, const char **argv);
+int cmd_set_target(int argc, const char **argv);
+
+/**
+ * @brief Wipe the contents of the configured build directory.
+ *
+ * Implements the body of "ice fullclean" and is also called by
+ * cmd_set_target().  Returns 0 on success or when there was nothing
+ * to clean, non-zero if any entry could not be removed.
+ */
+int fullclean_run(void);
 
 /* Subcommands -- standalone */
 int cmd_config(int argc, const char **argv);
