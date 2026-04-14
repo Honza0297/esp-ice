@@ -30,6 +30,50 @@ static const char *usage[] = {
 	NULL,
 };
 
+static const struct cmd_manual manual = {
+	.description =
+	H_PARA("@b{ice config} reads and writes configuration entries "
+	       "across scopes.  The effective value of a key is resolved in "
+	       "precedence order: @b{cli > env > project > local > user > "
+	       "defaults}.")
+	H_PARA("Without flags, one positional argument prints the effective "
+	       "value of that key (exits non-zero if unset).  Two positional "
+	       "arguments set the key in the target scope.")
+	H_PARA("The target scope for writes is @b{--local} (./.iceconfig) by "
+	       "default; pass @b{--user} to write ~/.iceconfig.  The "
+	       "@b{--list} and @b{--add}/@b{--unset} modes are mutually "
+	       "exclusive."),
+
+	.examples =
+	H_EXAMPLE("ice config --list")
+	H_EXAMPLE("ice config core.build-dir")
+	H_EXAMPLE("ice config core.build-dir out")
+	H_EXAMPLE("ice config --user alias.b \"build -v\"")
+	H_EXAMPLE("ice config --add cmake.define MY_OPT=ON")
+	H_EXAMPLE("ice config --unset alias.b"),
+
+	.extras =
+	H_SECTION("SCOPES")
+	H_ITEM("cli",
+	       "Options passed on the command line (highest precedence).")
+	H_ITEM("env",
+	       "Variables named @b{ICE_<SECTION>_<KEY>}, e.g. "
+	       "@b{ICE_CORE_BUILD_DIR}.")
+	H_ITEM("project",
+	       "Values derived from the active build tree "
+	       "(e.g. CMakeCache.txt).")
+	H_ITEM("local",
+	       "@b{./.iceconfig} in the current working directory.")
+	H_ITEM("user",
+	       "@b{~/.iceconfig} in the user's home directory.")
+	H_ITEM("defaults",
+	       "Built-in fallbacks (lowest precedence).")
+
+	H_SECTION("FILES")
+	H_ITEM("./.iceconfig",    "Local (project) configuration.")
+	H_ITEM("~/.iceconfig",    "User configuration."),
+};
+
 static enum config_scope target_scope(int user, int local)
 {
 	if (user && local)
@@ -143,7 +187,7 @@ int cmd_config(int argc, const char **argv)
 		OPT_END(),
 	};
 
-	argc = parse_options(argc, argv, opts, usage);
+	argc = parse_options_manual(argc, argv, opts, usage, &manual);
 
 	modes = list + add + unset;
 	if (modes > 1)

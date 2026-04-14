@@ -30,7 +30,9 @@
 #include "term.h"
 #include "elf.h"
 #include "error.h"
+#include "help.h"
 #include "http.h"
+#include "pager.h"
 #include "json.h"
 #include "map.h"
 #include "options.h"
@@ -50,7 +52,34 @@ int cmd_reconfigure(int argc, const char **argv);
 /* Subcommands -- standalone */
 int cmd_config(int argc, const char **argv);
 int cmd_configdep(int argc, const char **argv);
+int cmd_help(int argc, const char **argv);
 int cmd_ldgen(int argc, const char **argv);
 int cmd_size(int argc, const char **argv);
+
+/**
+ * @brief Dispatch entry for a subcommand.
+ *
+ * Holds the name (what the user types), the handler, and a
+ * one-line summary used by `ice help`, `ice --help`, and the
+ * NAME line of the per-command manual page.
+ */
+struct cmd_struct {
+	const char *name;
+	int (*fn)(int argc, const char **argv);
+	const char *summary;
+};
+
+/** NULL-terminated (last entry has name == NULL). */
+extern const struct cmd_struct ice_commands[];
+
+/** Usage lines and manual for the top-level `ice` command. */
+extern const char *ice_global_usage[];
+extern const struct cmd_manual ice_root_manual;
+
+/**
+ * @brief Look up the one-line summary for a subcommand.
+ * @return Summary string, or NULL if @p name is not a known command.
+ */
+const char *ice_cmd_summary(const char *name);
 
 #endif /* ICE_H */

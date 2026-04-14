@@ -120,8 +120,9 @@ static int set_value(const struct option *o, const char *val)
 	}
 }
 
-int parse_options(int argc, const char **argv, const struct option *opts,
-		  const char **usage)
+int parse_options_manual(int argc, const char **argv,
+			 const struct option *opts, const char **usage,
+			 const struct cmd_manual *manual)
 {
 	int out = 0;
 	int i;
@@ -139,9 +140,16 @@ int parse_options(int argc, const char **argv, const struct option *opts,
 		if (arg[0] != '-' || arg[1] == '\0')
 			break;
 
-		/* --help / -h */
-		if (!strcmp(arg, "-h") || !strcmp(arg, "--help")) {
+		/* -h: short usage always; --help: full manual if provided. */
+		if (!strcmp(arg, "-h")) {
 			print_usage(opts, usage);
+			exit(0);
+		}
+		if (!strcmp(arg, "--help")) {
+			if (manual)
+				print_manual(argv[0], manual, opts, usage);
+			else
+				print_usage(opts, usage);
 			exit(0);
 		}
 
@@ -194,4 +202,10 @@ int parse_options(int argc, const char **argv, const struct option *opts,
 	argv[out] = NULL;
 
 	return out;
+}
+
+int parse_options(int argc, const char **argv, const struct option *opts,
+		  const char **usage)
+{
+	return parse_options_manual(argc, argv, opts, usage, NULL);
 }

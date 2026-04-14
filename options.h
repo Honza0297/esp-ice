@@ -82,6 +82,8 @@ struct option {
 #define OPT_END()                                                              \
 	{ OPTION_END, 0, NULL, NULL, NULL, NULL }
 
+struct cmd_manual;
+
 /**
  * @brief Parse command-line options according to the option table.
  *
@@ -90,15 +92,22 @@ struct option {
  * Parsing stops at "--" (which is consumed) or at the first
  * non-option argument.
  *
- * If -h or --help is encountered, usage is printed and the process
- * exits with 0.
+ * On -h, a short usage is printed and the process exits 0.  On
+ * --help, if @p manual is non-NULL, print_manual() renders the full
+ * man-style page; otherwise --help falls back to the short usage.
  *
- * @param argc   Argument count.
- * @param argv   Argument vector (modified in-place).
- * @param opts   NULL-terminated option table (OPT_END sentinel).
- * @param usage  NULL-terminated array of usage strings for -h output.
+ * @param argc    Argument count.
+ * @param argv    Argument vector (modified in-place).
+ * @param opts    NULL-terminated option table (OPT_END sentinel).
+ * @param usage   NULL-terminated array of short usage strings.
+ * @param manual  Optional full manual for --help; may be NULL.
  * @return New argc (number of remaining arguments in argv).
  */
+int parse_options_manual(int argc, const char **argv,
+			 const struct option *opts, const char **usage,
+			 const struct cmd_manual *manual);
+
+/** @brief Shorthand: parse_options_manual() with no manual. */
 int parse_options(int argc, const char **argv, const struct option *opts,
 		  const char **usage);
 

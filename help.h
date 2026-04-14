@@ -1,0 +1,96 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file help.h
+ * @brief Per-command manual pages embedded as C strings.
+ *
+ * A command defines a @c cmd_manual with prose sections (DESCRIPTION,
+ * EXAMPLES, optional extras).  NAME / SYNOPSIS / OPTIONS are synthesized
+ * by print_manual() from the option table and usage[] array so that the
+ * option docs have a single source of truth.
+ *
+ * Prose strings use the H_* fragment macros below plus the inline
+ * @c \@x{...} color tokens defined in term.h.  All fragments expand to
+ * C string literals and concatenate at compile time -- no runtime cost.
+ *
+ * Convention: each field ends with a trailing newline; paragraph breaks
+ * use H_PARA (adds a blank line).  print_manual() adds spacing between
+ * sections automatically.
+ *
+ * Example:
+ *   static const struct cmd_manual build_manual = {
+ *       .name = "ice-build",
+ *       .summary = "build the default target",
+ *       .description =
+ *           H_PARA("Runs the CMake @b{all} target in the configured "
+ *                  "build directory."),
+ *       .examples =
+ *           H_EXAMPLE("ice build")
+ *           H_EXAMPLE("ice -B out build"),
+ *   };
+ */
+#ifndef HELP_H
+#define HELP_H
+
+struct option;
+
+struct cmd_manual {
+	/**
+	 * One-line tagline after the dash on the NAME line.  Optional
+	 * override; when NULL, print_manual() falls back to
+	 * ice_cmd_summary(cmd_name).
+	 */
+	const char *summary;
+	const char *description; /**< Prose built with H_PARA/H_LINE. */
+	const char *examples;    /**< Optional; built with H_EXAMPLE. */
+	const char *extras;      /**< Optional; extra sections with H_SECTION. */
+
+	/**
+	 * When non-zero, print_manual() auto-emits a COMMANDS section
+	 * listing every entry in ice_commands[] with its summary.
+	 * Used by the top-level `ice --help` manual.
+	 */
+	int list_commands;
+};
+
+/** Paragraph: 4-space indent, trailing blank line. */
+#define H_PARA(t)     "    " t "\n\n"
+
+/** Single indented line, no trailing blank. */
+#define H_LINE(t)     "    " t "\n"
+
+/** Raw line -- no indent, author controls everything. */
+#define H_RAW(t)      t "\n"
+
+/** Shell example: indented, colored prompt + bold command. */
+#define H_EXAMPLE(c)  "    @y{$} @b{" c "}\n"
+
+/** Definition-list entry: key/value pair, man-style two-line form. */
+#define H_ITEM(k, v)  "    @b{" k "}\n        " v "\n\n"
+
+/** Section heading for use inside .extras (NAME/SYNOPSIS/OPTIONS are auto). */
+#define H_SECTION(n)  "@b{" n "}\n"
+
+/**
+ * @brief Render a full manual page to stdout.
+ *
+ * Emits NAME, SYNOPSIS (from @p usage), DESCRIPTION, OPTIONS
+ * (auto-generated from @p opts), EXAMPLES, optional COMMANDS
+ * (when @p m->list_commands is set), then any extras.  All
+ * @c \@x{...} color tokens are expanded by the platform printf override.
+ *
+ * @param cmd_name  Subcommand name as typed by the user (e.g. "config").
+ *                  "ice" is the top-level manual.  Used to synthesize
+ *                  "ice-<name>" for NAME and to look up the summary
+ *                  from ice_commands[] when @p m->summary is NULL.
+ */
+void print_manual(const char *cmd_name,
+		  const struct cmd_manual *m,
+		  const struct option *opts,
+		  const char **usage);
+
+#endif /* HELP_H */

@@ -225,7 +225,7 @@ int vfprintf_p(FILE *stream, const char *fmt, va_list args)
 	/* NOLINTNEXTLINE(performance-no-int-to-ptr) */
 	HANDLE h = (HANDLE)_get_osfhandle(_fileno(stream));
 
-	expand_colors(&expanded, fmt);
+	expand_colors(&expanded, fmt, use_color_for(stream));
 
 	/* Redirected: format and fwrite. */
 	if (!GetConsoleMode(h, &dwMode)) {
@@ -274,7 +274,7 @@ int fputs_p(const char *s, FILE *stream)
 	/* NOLINTNEXTLINE(performance-no-int-to-ptr) */
 	HANDLE h = (HANDLE)_get_osfhandle(_fileno(stream));
 
-	expand_colors(&expanded, s);
+	expand_colors(&expanded, s, use_color_for(stream));
 
 	if (!GetConsoleMode(h, &dwMode)) {
 		n = (int)fwrite(expanded.buf, 1, expanded.len, stream);

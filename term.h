@@ -36,6 +36,7 @@
 #define TERM_H
 
 #include <stddef.h>
+#include <stdio.h>
 
 struct sbuf;
 
@@ -63,16 +64,27 @@ void color_init(int fd);
 /**
  * @brief Expand @x{...} color tokens in a format string.
  *
- * When use_color is set, tokens are replaced with ANSI escape codes.
- * When unset, tokens are stripped and only the text content remains.
- * The expanded result is a valid printf format string.
+ * When @p colorize is non-zero, tokens are replaced with ANSI escape
+ * codes.  When zero, tokens are stripped and only the text content
+ * remains.  The expanded result is a valid printf format string.
  *
- * Called by the platform fprintf/vfprintf overrides.
+ * Called by the platform fprintf/vfprintf overrides with the
+ * per-stream decision (e.g. stdout may be redirected even when
+ * stderr is a tty).
  *
- * @param out  Destination sbuf for the expanded format string.
- * @param fmt  Format string with @x{...} tokens.
+ * @param out       Destination sbuf for the expanded format string.
+ * @param fmt       Format string with @x{...} tokens.
+ * @param colorize  1 -> emit ANSI codes; 0 -> strip tokens.
  */
-void expand_colors(struct sbuf *out, const char *fmt);
+void expand_colors(struct sbuf *out, const char *fmt, int colorize);
+
+/**
+ * @brief Per-stream colorization decision.
+ *
+ * Returns non-zero when @p stream should receive ANSI codes --
+ * i.e. @c use_color is set AND the underlying fd is a tty.
+ */
+int use_color_for(FILE *stream);
 
 /**
  * @brief Rule for keyword-based colorization in color_text().

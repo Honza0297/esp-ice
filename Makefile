@@ -82,6 +82,7 @@ SRCS := ice.c \
 	cmd/config/config.c \
 	cmd/configdep/configdep.c \
 	cmd/flash/flash.c \
+	cmd/help/help.c \
 	cmd/ldgen/ldgen.c \
 	cmd/ldgen/lf.c \
 	cmd/menuconfig/menuconfig.c \
@@ -94,6 +95,8 @@ SRCS := ice.c \
 	term.c \
 	elf.c \
 	error.c \
+	help.c \
+	pager.c \
 	options.c \
 	sbuf.c \
 	svec.c \

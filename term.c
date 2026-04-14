@@ -13,6 +13,13 @@
  */
 #include "ice.h"
 
+/* fileno() is POSIX, not ISO C99, so not declared by <stdio.h> under
+ * -std=c99 -pedantic.  Declare it explicitly (it's always present in
+ * libc).  Same pattern as putenv() in platform.h. */
+#ifndef _WIN32
+int fileno(FILE *stream);
+#endif
+
 int use_color;
 int use_vt;
 
@@ -23,6 +30,20 @@ void color_init(int fd)
 	/* POSIX terminals always support ANSI escape codes. */
 	use_vt = 1;
 #endif
+}
+
+int use_color_for(FILE *stream)
+{
+	if (!use_color)
+		return 0;
+	/*
+	 * When the pager is active, stdout's underlying fd is a pipe
+	 * to the pager -- not a tty -- but the pager (e.g. `less -R`)
+	 * renders the ANSI sequences we emit, so we still want colour.
+	 */
+	if (stream == stdout && pager_active())
+		return 1;
+	return isatty(fileno(stream));
 }
 
 /* Named color lookup for @[COLOR_RED]{...} syntax. */
@@ -180,7 +201,7 @@ void color_text(struct sbuf *out, const char *text, size_t len,
  *
  * Escaping: @@ -> literal @, }} -> literal } inside a color block.
  */
-void expand_colors(struct sbuf *out, const char *fmt)
+void expand_colors(struct sbuf *out, const char *fmt, int colorize)
 {
 	int depth = 0;
 
@@ -200,7 +221,7 @@ void expand_colors(struct sbuf *out, const char *fmt)
 		if (*fmt == '@' && fmt[1] == '[') {
 			const char *end = strchr(fmt + 2, ']');
 			if (end && end[1] == '{') {
-				if (use_color) {
+				if (colorize) {
 					const char *s = fmt + 2;
 					size_t len = (size_t)(end - s);
 					const char *code =
@@ -235,7 +256,7 @@ void expand_colors(struct sbuf *out, const char *fmt)
 			}
 
 			if (code) {
-				if (use_color)
+				if (colorize)
 					sbuf_addstr(out, code);
 				fmt += 3;
 				depth++;
@@ -253,7 +274,7 @@ void expand_colors(struct sbuf *out, const char *fmt)
 
 		/* } -> close color block */
 		if (*fmt == '}' && depth > 0) {
-			if (use_color)
+			if (colorize)
 				sbuf_addstr(out, "\033[0m");
 			depth--;
 			fmt++;

@@ -39,7 +39,7 @@ int vfprintf_p(FILE *stream, const char *fmt, va_list ap)
 	if (!memchr(fmt, '@', strlen(fmt)))
 		return real_vfprintf(stream, fmt, ap);
 
-	expand_colors(&expanded, fmt);
+	expand_colors(&expanded, fmt, use_color_for(stream));
 	n = real_vfprintf(stream, expanded.buf, ap);
 	sbuf_release(&expanded);
 	return n;
@@ -75,7 +75,7 @@ int fputs_p(const char *s, FILE *stream)
 	if (!memchr(s, '@', strlen(s)))
 		return real_fputs(s, stream);
 
-	expand_colors(&expanded, s);
+	expand_colors(&expanded, s, use_color_for(stream));
 	n = real_fputs(expanded.buf, stream);
 	sbuf_release(&expanded);
 	return n;

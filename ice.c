@@ -13,43 +13,76 @@
  */
 #include "ice.h"
 
-struct cmd_struct {
-	const char *name;
-	int (*fn)(int argc, const char **argv);
+const struct cmd_struct ice_commands[] = {
+	{"build",       cmd_build,       "build the default target"},
+	{"clean",       cmd_clean,       "remove build artifacts"},
+	{"cmake",       cmd_cmake,       "run a raw cmake target"},
+	{"config",      cmd_config,      "inspect and modify ice configuration"},
+	{"configdep",   cmd_configdep,   "print config build dependencies"},
+	{"flash",       cmd_flash,       "flash firmware to the device"},
+	{"help",        cmd_help,        "show help for a subcommand"},
+	{"ldgen",       cmd_ldgen,       "generate the linker script"},
+	{"menuconfig",  cmd_menuconfig,  "open the project configuration UI"},
+	{"reconfigure", cmd_reconfigure, "regenerate the build system"},
+	{"size",        cmd_size,        "summarize firmware size by section"},
+	{NULL, NULL, NULL},
 };
 
-static struct cmd_struct commands[] = {
-	{"build", cmd_build},
-	{"clean", cmd_clean},
-	{"cmake", cmd_cmake},
-	{"config", cmd_config},
-	{"configdep", cmd_configdep},
-	{"flash", cmd_flash},
-	{"ldgen", cmd_ldgen},
-	{"menuconfig", cmd_menuconfig},
-	{"reconfigure", cmd_reconfigure},
-	{"size", cmd_size},
-};
-
-static struct cmd_struct *find_command(const char *name)
+const char *ice_cmd_summary(const char *name)
 {
-	for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
-		if (!strcmp(name, commands[i].name))
-			return &commands[i];
-	}
+	for (const struct cmd_struct *c = ice_commands; c->name; c++)
+		if (!strcmp(name, c->name))
+			return c->summary;
+	return NULL;
+}
+
+static const struct cmd_struct *find_command(const char *name)
+{
+	for (const struct cmd_struct *c = ice_commands; c->name; c++)
+		if (!strcmp(name, c->name))
+			return c;
 	return NULL;
 }
 
 static void list_commands(void)
 {
 	fprintf(stderr, "\navailable commands:\n");
-	for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
-		fprintf(stderr, "   %s\n", commands[i].name);
+	for (const struct cmd_struct *c = ice_commands; c->name; c++)
+		fprintf(stderr, "   %-12s %s\n", c->name,
+			c->summary ? c->summary : "");
 }
 
-static const char *global_usage[] = {
+const char *ice_global_usage[] = {
 	"ice [-B <path>] [-G <name>] [-D <key=val>] [-v] [-C <dir>] [--no-color] <command> [<args>]",
 	NULL,
+};
+
+const struct cmd_manual ice_root_manual = {
+	.summary = "frontend for ESP-IDF projects",
+
+	.description =
+	H_PARA("@b{ice} drives the build, flash, configuration and size "
+	       "tooling for ESP-IDF projects.  It replaces @b{idf.py} with "
+	       "a single self-contained binary.")
+	H_PARA("Subcommands wrap the underlying CMake / flashing / linker "
+	       "utilities and share a common configuration system with "
+	       "@b{cli > env > project > local > user > defaults} "
+	       "precedence."),
+
+	.list_commands = 1,
+
+	.examples =
+	H_EXAMPLE("ice reconfigure")
+	H_EXAMPLE("ice build")
+	H_EXAMPLE("ice -C /path/to/project flash")
+	H_EXAMPLE("ice help config"),
+
+	.extras =
+	H_SECTION("SEE ALSO")
+	H_ITEM("ice help <command>",
+	       "Show the manual page for a specific command.")
+	H_ITEM("ice config --help",
+	       "How configuration entries and scopes work."),
 };
 
 /*
@@ -217,7 +250,7 @@ int main(int argc, const char **argv)
 	const char *build_override = NULL;
 	int no_color = 0;
 	int version = 0;
-	struct cmd_struct *cmd;
+	const struct cmd_struct *cmd;
 
 	struct option global_opts[] = {
 		OPT_CONFIG('B', "build-dir", "core.build-dir", "path",
@@ -251,7 +284,8 @@ int main(int argc, const char **argv)
 					   : config_get("core.build-dir"));
 	config_load_env(&config);
 
-	argc = parse_options(argc, argv, global_opts, global_usage);
+	argc = parse_options_manual(argc, argv, global_opts,
+				    ice_global_usage, &ice_root_manual);
 
 	if (no_color)
 		use_color = 0;
