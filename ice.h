@@ -30,6 +30,7 @@
 #include "elf.h"
 #include "error.h"
 #include "http.h"
+#include "json.h"
 #include "map.h"
 #include "options.h"
 #include "platform.h"

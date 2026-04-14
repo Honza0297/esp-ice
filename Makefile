@@ -82,6 +82,7 @@ SRCS := ice.c \
 	cmd/size/chip.c \
 	cmd/size/size.c \
 	config.c \
+	json.c \
 	map.c \
 	term.c \
 	elf.c \

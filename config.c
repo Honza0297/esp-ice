@@ -443,67 +443,13 @@ void config_load_env(struct config *c)
 	}
 }
 
-/*
- * Targeted scan for a top-level string field in a JSON object:
- *   "key" : "value"
- *
- * Handles "\\\\" and "\\\"" escapes in the value; returns a
- * heap-allocated copy with those unescaped, or NULL if not found or
- * the value is not a string.  Not a general JSON parser -- good
- * enough for the small, cmake-generated project_description.json.
- */
-static char *json_get_string(const char *buf, const char *key)
-{
-	struct sbuf needle = SBUF_INIT;
-	struct sbuf out = SBUF_INIT;
-	const char *p;
-
-	sbuf_addch(&needle, '"');
-	sbuf_addstr(&needle, key);
-	sbuf_addch(&needle, '"');
-
-	p = strstr(buf, needle.buf);
-	sbuf_release(&needle);
-	if (!p)
-		return NULL;
-
-	p += strlen(key) + 2;
-
-	while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
-		p++;
-	if (*p != ':')
-		return NULL;
-	p++;
-	while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
-		p++;
-
-	if (*p != '"')
-		return NULL;
-	p++;
-
-	while (*p && *p != '"') {
-		if (*p == '\\' && p[1]) {
-			sbuf_addch(&out, p[1]);
-			p += 2;
-		} else {
-			sbuf_addch(&out, *p);
-			p++;
-		}
-	}
-	if (*p != '"') {
-		sbuf_release(&out);
-		return NULL;
-	}
-	return sbuf_detach(&out);
-}
-
 void config_load_project(struct config *c, const char *build_dir)
 {
 	struct sbuf path = SBUF_INIT;
 	struct sbuf buf = SBUF_INIT;
 	struct sbuf derived = SBUF_INIT;
 	struct cmakecache cache = CMAKECACHE_INIT;
-	char *project_name = NULL;
+	struct json_value *desc = NULL;
 
 	if (!build_dir)
 		return;
@@ -519,23 +465,25 @@ void config_load_project(struct config *c, const char *build_dir)
 
 	sbuf_reset(&path);
 	sbuf_addf(&path, "%s/project_description.json", build_dir);
-	if (sbuf_read_file(&buf, path.buf) >= 0) {
-		project_name = json_get_string(buf.buf, "project_name");
-		if (project_name) {
-			sbuf_addf(&derived, "%s/%s.map", build_dir,
-				  project_name);
+	if (sbuf_read_file(&buf, path.buf) >= 0)
+		desc = json_parse(buf.buf, buf.len);
+
+	if (desc) {
+		const char *name = json_as_string(json_get(desc,
+							   "project_name"));
+		if (name) {
+			sbuf_addf(&derived, "%s/%s.map", build_dir, name);
 			config_set(c, "mapfile", derived.buf,
 				   CONFIG_SCOPE_PROJECT);
 
 			sbuf_reset(&derived);
-			sbuf_addf(&derived, "%s/%s.elf", build_dir,
-				  project_name);
+			sbuf_addf(&derived, "%s/%s.elf", build_dir, name);
 			config_set(c, "elf", derived.buf,
 				   CONFIG_SCOPE_PROJECT);
 		}
 	}
 
-	free(project_name);
+	json_free(desc);
 	cmakecache_release(&cache);
 	sbuf_release(&path);
 	sbuf_release(&buf);
