@@ -24,9 +24,9 @@ int cmd_help(int argc, const char **argv)
 
 	argc = parse_options(argc, argv, opts, usage);
 
-	/* `ice help` -> render the top-level manual directly. */
+	/* `ice help` -> git-style short usage + COMMANDS + ALIASES. */
 	if (argc == 0) {
-		print_manual("ice", &ice_root_manual, NULL, ice_global_usage);
+		print_short_usage(&ice_root_manual, ice_global_usage);
 		return EXIT_SUCCESS;
 	}
 

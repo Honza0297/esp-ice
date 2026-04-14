@@ -44,14 +44,6 @@ static const struct cmd_struct *find_command(const char *name)
 	return NULL;
 }
 
-static void list_commands(void)
-{
-	fprintf(stderr, "\navailable commands:\n");
-	for (const struct cmd_struct *c = ice_commands; c->name; c++)
-		fprintf(stderr, "   %-12s %s\n", c->name,
-			c->summary ? c->summary : "");
-}
-
 const char *ice_global_usage[] = {
 	"ice [-B <path>] [-G <name>] [-D <key=val>] [-v] [-C <dir>] [--no-color] <command> [<args>]",
 	NULL,
@@ -298,7 +290,7 @@ int main(int argc, const char **argv)
 	}
 
 	if (argc < 1) {
-		list_commands();
+		print_short_usage(&ice_root_manual, ice_global_usage);
 		return EXIT_FAILURE;
 	}
 
@@ -307,15 +299,15 @@ int main(int argc, const char **argv)
 		if (!try_expand_alias(&argc, &argv))
 			break;
 		if (argc < 1) {
-			list_commands();
+			print_short_usage(&ice_root_manual, ice_global_usage);
 			return EXIT_FAILURE;
 		}
 	}
 
 	cmd = find_command(argv[0]);
 	if (!cmd) {
-		fprintf(stderr, "ice: '%s' is not a command\n", argv[0]);
-		list_commands();
+		fprintf(stderr, "ice: '%s' is not a command. "
+				"See 'ice --help'.\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 
