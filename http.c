@@ -28,7 +28,8 @@ struct download_ctx {
 /**
  * @brief libcurl write callback that appends data to an sbuf.
  */
-static size_t write_to_sbuf(void *data, size_t size, size_t nmemb, void *userp)
+static size_t write_to_sbuf(void *data, size_t size, size_t nmemb,
+			     void *userp)
 {
 	struct sbuf *sb = userp;
 	size_t bytes = size * nmemb;
@@ -41,8 +42,9 @@ static size_t write_to_sbuf(void *data, size_t size, size_t nmemb, void *userp)
  * @brief libcurl progress callback that delegates to the user's
  * progress function.
  */
-static int curl_progress_cb(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
-			    curl_off_t ultotal, curl_off_t ulnow)
+static int curl_progress_cb(void *clientp, curl_off_t dltotal,
+			     curl_off_t dlnow, curl_off_t ultotal,
+			     curl_off_t ulnow)
 {
 	struct download_ctx *ctx = clientp;
 
@@ -50,7 +52,8 @@ static int curl_progress_cb(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
 	(void)ulnow;
 
 	if (ctx->progress)
-		ctx->progress((size_t)dltotal, (size_t)dlnow, ctx->user_ctx);
+		ctx->progress((size_t)dltotal, (size_t)dlnow,
+			      ctx->user_ctx);
 
 	return 0;
 }
@@ -78,8 +81,8 @@ void http_default_progress(size_t total, size_t now, void *ctx)
 			(int)(now * 100 / total), now, total);
 }
 
-int http_download(const char *url, const char *path, http_progress_fn progress,
-		  void *ctx)
+int http_download(const char *url, const char *path,
+		  http_progress_fn progress, void *ctx)
 {
 	CURL *curl;
 	FILE *fp;
@@ -118,7 +121,8 @@ int http_download(const char *url, const char *path, http_progress_fn progress,
 		fprintf(stderr, "\n");
 
 	if (res != CURLE_OK) {
-		err("download failed: %s: %s", url, curl_easy_strerror(res));
+		err("download failed: %s: %s", url,
+		    curl_easy_strerror(res));
 		return -1;
 	}
 
