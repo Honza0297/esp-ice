@@ -502,22 +502,22 @@ void config_load_project(struct config *c, const char *build_dir)
 	struct sbuf path = SBUF_INIT;
 	struct sbuf buf = SBUF_INIT;
 	struct sbuf derived = SBUF_INIT;
-	char *target = NULL;
+	struct cmakecache cache = CMAKECACHE_INIT;
 	char *project_name = NULL;
 
 	if (!build_dir)
 		return;
 
 	sbuf_addf(&path, "%s/CMakeCache.txt", build_dir);
-	if (sbuf_read_file(&buf, path.buf) >= 0) {
-		target = cmakecache_get(buf.buf, "IDF_TARGET");
+	if (cmakecache_load(&cache, path.buf) == 0) {
+		const char *target = cmakecache_get(&cache, "IDF_TARGET");
+
 		if (target)
 			config_set(c, "target", target,
 				   CONFIG_SCOPE_PROJECT);
 	}
 
 	sbuf_reset(&path);
-	sbuf_reset(&buf);
 	sbuf_addf(&path, "%s/project_description.json", build_dir);
 	if (sbuf_read_file(&buf, path.buf) >= 0) {
 		project_name = json_get_string(buf.buf, "project_name");
@@ -535,8 +535,8 @@ void config_load_project(struct config *c, const char *build_dir)
 		}
 	}
 
-	free(target);
 	free(project_name);
+	cmakecache_release(&cache);
 	sbuf_release(&path);
 	sbuf_release(&buf);
 	sbuf_release(&derived);

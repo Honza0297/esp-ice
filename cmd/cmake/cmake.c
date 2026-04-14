@@ -204,46 +204,28 @@ static int run_with_log(const char **argv, const char *label,
  * Each entry in @p defines is "KEY=VALUE" or "KEY:TYPE=VALUE".
  * The optional :TYPE is stripped before lookup.
  */
-static int cache_needs_configure(const char *cache_buf,
+static int cache_needs_configure(const struct cmakecache *cache,
 				 const struct svec *defines)
 {
 	for (size_t i = 0; i < defines->nr; i++) {
 		const char *entry = defines->v[i];
 		const char *eq = strchr(entry, '=');
+		const char *colon;
 		struct sbuf key = SBUF_INIT;
-		const char *val, *cached;
+		const char *cached;
 		int differs;
 
 		if (!eq)
 			continue;
 
-		/* Key part: strip optional :TYPE suffix. */
-		{
-			const char *colon = memchr(entry, ':', eq - entry);
-			if (colon)
-				sbuf_add(&key, entry, colon - entry);
-			else
-				sbuf_add(&key, entry, eq - entry);
-		}
+		colon = memchr(entry, ':', eq - entry);
+		if (colon)
+			sbuf_add(&key, entry, colon - entry);
+		else
+			sbuf_add(&key, entry, eq - entry);
 
-		val = eq + 1;
-		cached = cmakecache_lookup(cache_buf, key.buf);
-
-		if (!cached) {
-			sbuf_release(&key);
-			return 1;
-		}
-
-		/* cached points to VALUE\n or VALUE\0 -- compare up to EOL. */
-		{
-			size_t val_len = strlen(val);
-			size_t cached_len;
-			const char *nl = strchr(cached, '\n');
-
-			cached_len = nl ? (size_t)(nl - cached) : strlen(cached);
-			differs = val_len != cached_len ||
-				  memcmp(val, cached, val_len) != 0;
-		}
+		cached = cmakecache_get(cache, key.buf);
+		differs = !cached || strcmp(cached, eq + 1);
 
 		sbuf_release(&key);
 		if (differs)
@@ -260,7 +242,7 @@ int ensure_build_directory(const char *build_dir, const char *generator,
 			   const struct svec *defines, int verbose, int force)
 {
 	struct sbuf cache_path = SBUF_INIT;
-	struct sbuf cache_buf = SBUF_INIT;
+	struct cmakecache cache = CMAKECACHE_INIT;
 	struct sbuf logpath = SBUF_INIT;
 	int has_cache;
 	int needs_configure;
@@ -278,40 +260,29 @@ int ensure_build_directory(const char *build_dir, const char *generator,
 		sbuf_release(&logdir);
 	}
 
-	/* Read CMakeCache.txt if it exists. */
+	/* Parse CMakeCache.txt once if it exists. */
 	sbuf_addf(&cache_path, "%s/CMakeCache.txt", build_dir);
-	has_cache = access(cache_path.buf, F_OK) == 0;
-
-	if (has_cache)
-		sbuf_read_file(&cache_buf, cache_path.buf);
+	has_cache = (cmakecache_load(&cache, cache_path.buf) == 0);
 
 	/* Decide whether cmake needs to run. */
 	needs_configure = force || !has_cache ||
-		(defines->nr && cache_needs_configure(cache_buf.buf, defines));
+		(defines->nr && cache_needs_configure(&cache, defines));
 
 	/* Validate generator against existing cache. */
 	if (has_cache) {
-		const char *cached_gen = cmakecache_lookup(cache_buf.buf,
-							   "CMAKE_GENERATOR");
-		if (cached_gen) {
-			size_t gen_len = strlen(generator);
-			const char *nl = strchr(cached_gen, '\n');
-			size_t cached_len = nl ? (size_t)(nl - cached_gen)
-					       : strlen(cached_gen);
+		const char *cached_gen = cmakecache_get(&cache,
+							"CMAKE_GENERATOR");
 
-			if (gen_len != cached_len ||
-			    memcmp(generator, cached_gen, gen_len) != 0)
-				die("build is configured for generator '%.*s' "
-				    "not '%s' -- run 'ice reconfigure' or "
-				    "remove '%s'",
-				    (int)cached_len, cached_gen,
-				    generator, build_dir);
-		}
+		if (cached_gen && strcmp(cached_gen, generator))
+			die("build is configured for generator '%s' "
+			    "not '%s' -- run 'ice reconfigure' or "
+			    "remove '%s'",
+			    cached_gen, generator, build_dir);
 	}
 
 	if (!needs_configure) {
 		sbuf_release(&cache_path);
-		sbuf_release(&cache_buf);
+		cmakecache_release(&cache);
 		return 0;
 	}
 
@@ -349,7 +320,7 @@ int ensure_build_directory(const char *build_dir, const char *generator,
 
 	sbuf_release(&logpath);
 	sbuf_release(&cache_path);
-	sbuf_release(&cache_buf);
+	cmakecache_release(&cache);
 	return rc;
 }
 
