@@ -457,8 +457,8 @@ static void table_hline(const char *l, const char *m, const char *r,
 
 static int cmp_entry_used(const void *a, const void *b)
 {
-	uint64_t ua = ((const struct memmap_entry *)a)->used;
-	uint64_t ub = ((const struct memmap_entry *)b)->used;
+	uint64_t ua = (*(const struct memmap_entry **)a)->used;
+	uint64_t ub = (*(const struct memmap_entry **)b)->used;
 	return ua < ub ? 1 : ua > ub ? -1 : 0;
 }
 
