@@ -41,26 +41,28 @@ and is added to your user `PATH` automatically.  Override with
 
 #### Development build
 
-Requires a C compiler, `make`, and libcurl development headers.
+Requires a C compiler, `make`, and the development headers for
+libcurl, zlib, and liblzma.
 
 ```bash
 # Debian/Ubuntu
-sudo apt-get install gcc make libcurl4-openssl-dev
+sudo apt-get install gcc make libcurl4-openssl-dev zlib1g-dev liblzma-dev
 
 # Fedora
-sudo dnf install gcc make libcurl-devel
+sudo dnf install gcc make libcurl-devel zlib-devel xz-devel
 
 make
 ```
 
-This links dynamically against the system libcurl for fast iteration.
-Override `CC` to pick a different compiler (e.g. `make CC=clang`).
+This links dynamically against the system libcurl, zlib, and liblzma
+for fast iteration.  Override `CC` to pick a different compiler
+(e.g. `make CC=clang`).
 
 #### Static build (release)
 
-All vendored libraries (zlib, mbedTLS, curl, libyaml) are built from
-source automatically.  The resulting binary is fully static with zero
-runtime dependencies.
+All vendored libraries (zlib, mbedTLS, curl, libyaml, xz) are built
+from source automatically.  The resulting binary is fully static with
+zero runtime dependencies.
 
 ```bash
 # macOS

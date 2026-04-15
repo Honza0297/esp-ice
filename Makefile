@@ -151,7 +151,11 @@ LIB_SRCS := \
 	partition_table.c \
 	sbuf.c \
 	svec.c \
-	http.c
+	http.c \
+	gzip.c \
+	xz.c \
+	reader.c \
+	tar.c
 
 # MAIN_SRCS provide the program entry point.  Excluded from libice.a
 # so that unit tests (and any future external libice consumer) can
@@ -169,7 +173,7 @@ ifdef STATIC
 DEPS_PREFIX := $(CURDIR)/deps/install/$(TRIPLE)
 DEPS_STAMP := $(DEPS_PREFIX)/.stamp
 BUILD_CFLAGS += -I$(DEPS_PREFIX)/include -DCURL_STATICLIB
-LIBS := -L$(DEPS_PREFIX)/lib -L$(DEPS_PREFIX)/lib64 -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -ltfpsacrypto -lz
+LIBS := -L$(DEPS_PREFIX)/lib -L$(DEPS_PREFIX)/lib64 -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -ltfpsacrypto -lz -llzma
 ifeq ($(S),linux)
 ifeq ($(findstring musl,$(TRIPLE)),)
 $(error STATIC=1 on Linux requires a musl toolchain (got CC='$(CC)', triple='$(TRIPLE)'). Fetch one: eval "$$(make -f Makefile.toolchain linux-<arch>)")
@@ -183,7 +187,12 @@ ifeq ($(S),win)
 LDFLAGS += -static
 endif
 else
-LIBS := -lcurl
+# Dev mode: link against system libraries.  -lz isn't strictly
+# required (libcurl pulls it in transitively for HTTP gzip), but
+# being explicit removes a fragile assumption and matches what we
+# actually call directly.  liblzma is needed for .tar.xz extraction;
+# the system package is xz-devel (Fedora) / liblzma-dev (Debian).
+LIBS := -lcurl -lz -llzma
 endif
 
 ifeq ($(S), win)
@@ -409,7 +418,7 @@ help:
 	@echo ' clang-tidy       - run clang tidy'
 	@echo ''
 	@echo 'dependency targets:'
-	@echo ' deps             - build vendored deps (zlib, mbedTLS, curl)'
+	@echo ' deps             - build vendored deps (zlib, mbedTLS, curl, libyaml, xz)'
 	@echo ''
 	@echo 'misc targets:'
 	@echo ' clean            - remove: $(O) $(DIST) $(STAGE) $(T_OUT)'

@@ -87,6 +87,17 @@ int unlink_w(const char *);
 int rmdir_w(const char *);
 int rename_w(const char *oldp, const char *newp);
 
+/*
+ * POSIX symlink(2) / link(2) shims.  symlink_w is a no-op that
+ * returns 0: NTFS symlinks require elevated privileges (or Developer
+ * Mode), and Espressif Windows toolchain archives don't use them
+ * anyway (Unix archives' gcc → cc symlink is a separate .exe on
+ * Windows).  link_w uses CreateHardLinkW; both paths must live on
+ * the same volume and the filesystem must be NTFS.
+ */
+int symlink_w(const char *target, const char *linkpath);
+int link_w(const char *target, const char *linkpath);
+
 #define F_OK 0
 #define access access_w
 #define fopen fopen_w
@@ -94,6 +105,8 @@ int rename_w(const char *oldp, const char *newp);
 #define unlink unlink_w
 #define rmdir rmdir_w
 #define rename rename_w
+#define symlink symlink_w
+#define link link_w
 #define isatty _isatty
 #define putenv _putenv
 #define STDIN_FILENO 0

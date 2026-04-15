@@ -445,6 +445,41 @@ int is_directory(const char *path)
 	return (attr & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
 }
 
+/*
+ * Symlinks on Windows require SeCreateSymbolicLinkPrivilege (admin)
+ * or Developer Mode.  Espressif Windows toolchain archives don't use
+ * them -- Unix archives' gcc → cc symlinks become separate .exe files
+ * on Windows -- so this is a no-op rather than a failure.
+ */
+int symlink_w(const char *target, const char *linkpath)
+{
+	(void)target;
+	(void)linkpath;
+	return 0;
+}
+
+int link_w(const char *target, const char *linkpath)
+{
+	wchar_t *wtarget = mbs_to_wcs(target);
+	wchar_t *wlink = mbs_to_wcs(linkpath);
+	int rv = -1;
+
+	if (!wtarget || !wlink) {
+		errno = ENOMEM;
+		goto out;
+	}
+
+	if (CreateHardLinkW(wlink, wtarget, NULL))
+		rv = 0;
+	else
+		errno = EIO;
+
+out:
+	free(wtarget);
+	free(wlink);
+	return rv;
+}
+
 int dir_foreach(const char *path, int (*cb)(const char *name, void *ud),
 		void *ud)
 {
