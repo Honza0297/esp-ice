@@ -130,6 +130,7 @@ LIB_SRCS := \
 	cmd/ldgen/ldgen.c \
 	cmd/ldgen/lf.c \
 	cmd/menuconfig/menuconfig.c \
+	cmd/partition_table/part_cmd.c \
 	cmd/reconfigure/reconfigure.c \
 	cmd/set-target/set-target.c \
 	cmd/size/chip.c \
@@ -138,12 +139,14 @@ LIB_SRCS := \
 	ice.c \
 	json.c \
 	map.c \
+	md5.c \
 	term.c \
 	elf.c \
 	error.c \
 	help.c \
 	pager.c \
 	options.c \
+	partition_table.c \
 	sbuf.c \
 	svec.c \
 	http.c
@@ -186,7 +189,7 @@ ifeq ($(S), win)
 # wmain.c provides the Windows wide-char entry point that calls into
 # main() from ice.c, so it lives with MAIN_SRCS.  io / process / wconv
 # are reusable platform glue and go into libice.a.
-LIB_SRCS  += platform/win/io.c platform/win/process.c platform/win/wconv.c
+LIB_SRCS  += platform/win/io.c platform/win/process.c platform/win/wconv.c platform/win/win_exe.c
 MAIN_SRCS += platform/win/wmain.c
 SRCS      := $(MAIN_SRCS) $(LIB_SRCS)
 CFLAGS += -municode
@@ -196,9 +199,11 @@ BINARY := $(O)/$(NAME).exe
 
 else
 
-LIB_SRCS += platform/posix/posix_io.c platform/posix/posix_process.c
+LIB_SRCS += platform/posix/posix_io.c platform/posix/posix_process.c platform/posix/posix_exe.c
 SRCS     := $(MAIN_SRCS) $(LIB_SRCS)
 BINARY := $(O)/$(NAME)
+# readlink() requires _POSIX_C_SOURCE >= 200112L under -std=c99
+CFLAGS_APPEND += -D_POSIX_C_SOURCE=200112L
 
 endif
 

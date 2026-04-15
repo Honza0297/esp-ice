@@ -14,6 +14,8 @@
  */
 #include "ice.h"
 
+const char *ice_executable;
+
 const struct cmd_struct ice_commands[] = {
     {.name = "build", .fn = cmd_build, .summary = "build the default target"},
     {.name = "clean", .fn = cmd_clean, .summary = "remove build artifacts"},
@@ -44,6 +46,9 @@ const struct cmd_struct ice_commands[] = {
     {.name = "menuconfig",
      .fn = cmd_menuconfig,
      .summary = "open the project configuration UI"},
+    {.name = "partition-table",
+     .fn = cmd_partition_table,
+     .summary = "generate partition table binary from CSV"},
     {.name = "reconfigure",
      .fn = cmd_reconfigure,
      .summary = "regenerate the build system"},

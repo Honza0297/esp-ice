@@ -384,9 +384,12 @@ static void memmap_build(struct memmap *mm, const char *target,
 	if (nr_ranges == 0)
 		die("chip '%s' has no memory ranges", target);
 
-	mm->entries = calloc(nr_ranges, sizeof(*mm->entries));
-	if (!mm->entries)
-		die_errno("calloc");
+	mm->entries = NULL;
+	if (nr_ranges > 0) {
+		mm->entries = calloc(nr_ranges, sizeof(*mm->entries));
+		if (!mm->entries)
+			die_errno("calloc");
+	}
 	mm->nr_entries = 0;
 
 	for (int i = 0; i < nr_ranges; i++) {
