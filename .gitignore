@@ -5,6 +5,7 @@
 /deps/*/zlib-*/
 /deps/*/mbedtls-*/
 /deps/*/curl-*/
+/deps/*/xz-*/
 /deps/*/*.tar.*
 /toolchains/
 dist/

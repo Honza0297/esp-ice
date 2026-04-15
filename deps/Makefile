@@ -22,7 +22,7 @@ export PREFIX NPROC S TRIPLE CONFIGURE_HOST CMAKE_CROSS_FLAGS
 
 all: $(STAMP)
 
-$(STAMP): curl libyaml
+$(STAMP): curl libyaml xz
 	@touch $@
 
 curl: mbedtls zlib
@@ -37,11 +37,15 @@ zlib:
 libyaml:
 	$(MAKE) -C libyaml
 
+xz:
+	$(MAKE) -C xz
+
 clean:
 	$(MAKE) -C zlib clean
 	$(MAKE) -C mbedtls clean
 	$(MAKE) -C curl clean
 	$(MAKE) -C libyaml clean
+	$(MAKE) -C xz clean
 	rm -rf $(PREFIX) $(STAMP)
 
 # mrproper wipes the entire install tree (all TRIPLEs) and all
@@ -51,6 +55,7 @@ mrproper:
 	$(MAKE) -C mbedtls clean
 	$(MAKE) -C curl clean
 	$(MAKE) -C libyaml clean
+	$(MAKE) -C xz clean
 	rm -rf $(CURDIR)/install
 
-.PHONY: all clean mrproper zlib mbedtls curl libyaml
+.PHONY: all clean mrproper zlib mbedtls curl libyaml xz
