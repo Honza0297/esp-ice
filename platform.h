@@ -25,7 +25,7 @@
  *    handles UTF-8 console output.
  *  - Provides the child-process API (struct process, process_start,
  *    process_finish, process_run); implementation lives in
- *    platform/<os>/posix_process.c or platform/win/process.c.
+ *    platform/posix/process.c or platform/win/process.c.
  *
  * On Windows (_WIN32):
  *  - Provides a ssize_t typedef (not part of the Windows CRT).

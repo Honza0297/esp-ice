@@ -200,7 +200,7 @@ BINARY := $(O)/$(NAME).exe
 
 else
 
-LIB_SRCS += platform/posix/posix_io.c platform/posix/posix_process.c
+LIB_SRCS += platform/posix/io.c platform/posix/process.c
 SRCS     := $(MAIN_SRCS) $(LIB_SRCS)
 BINARY := $(O)/$(NAME)
 # readlink() requires _POSIX_C_SOURCE >= 200112L under -std=c99

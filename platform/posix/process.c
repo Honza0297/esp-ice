@@ -5,7 +5,7 @@
  */
 
 /**
- * @file platform/posix/posix_process.c
+ * @file platform/posix/process.c
  * @brief POSIX child process API and self-path resolution.
  *
  * process_start() / process_finish() use fork()/execvp()/waitpid()
