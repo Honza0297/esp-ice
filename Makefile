@@ -136,6 +136,7 @@ LIB_SRCS := \
 	cmd/size/chip.c \
 	cmd/size/size.c \
 	config.c \
+	csv.c \
 	fs.c \
 	ice.c \
 	json.c \

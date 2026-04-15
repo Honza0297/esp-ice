@@ -27,6 +27,7 @@
 #include "cmake.h"
 #include "cmakecache.h"
 #include "config.h"
+#include "csv.h"
 #include "elf.h"
 #include "error.h"
 #include "fs.h"
