@@ -18,13 +18,17 @@ if [ "$S" != "linux" ]; then
 fi
 
 # Compile a small translation unit to produce a realistic fixture
-# that has .text, .data, and .bss sections.
+# that has .text, .data, and .bss sections.  The same source is also
+# linked as a host executable to give the segment reader a real ELF
+# with PT_LOAD program headers to chew on.
 cat >"$O/stub.c" <<'EOF'
 int initialised = 42;
 char big_array[1000];
 int fn(int x) { return x + 1; }
+int main(void) { return fn(0) + initialised + (int)big_array[0]; }
 EOF
 $CC -c "$O/stub.c" -o "$O/stub.o" || exit 1
+$CC       "$O/stub.c" -o "$O/stub.elf" || exit 1
 
 $CC -std=c99 $SAN_FLAGS -I. -It -o "$O/test_elf" t/test_elf.c "$LIBICE" || exit 1
 cd "$O" && ./test_elf
