@@ -6,10 +6,12 @@
 
 /**
  * @file platform/win/process.c
- * @brief Windows implementation of child process spawning.
+ * @brief Windows child process API and self-path resolution.
  *
- * Implements process_start() and process_finish() using
- * CreateProcessW()/WaitForSingleObject() with optional pipe redirection.
+ * process_start() / process_finish() use CreateProcessW() /
+ * WaitForSingleObject() with optional pipe redirection.  process_exe()
+ * resolves the path of the running binary via GetModuleFileNameW +
+ * UTF-8 conversion, caching the result on first call.
  */
 #include <errhandlingapi.h>
 #include <fcntl.h>
@@ -246,4 +248,36 @@ int process_finish(struct process *proc)
 
 	CloseHandle(hProcess);
 	return (int)exitCode;
+}
+
+const char *process_exe(void)
+{
+	static char buf[4096];
+	static const char *result;
+	static int initialized;
+	wchar_t wbuf[4096];
+	DWORD n;
+	char *utf8;
+	size_t len;
+
+	if (initialized)
+		return result;
+	initialized = 1;
+
+	n = GetModuleFileNameW(NULL, wbuf,
+			       (DWORD)(sizeof(wbuf) / sizeof(wbuf[0])));
+	if (n == 0 || n >= (DWORD)(sizeof(wbuf) / sizeof(wbuf[0])))
+		return NULL;
+
+	utf8 = wcs_to_mbs(wbuf);
+	if (!utf8)
+		return NULL;
+
+	len = strlen(utf8);
+	if (len < sizeof(buf)) {
+		memcpy(buf, utf8, len + 1);
+		result = buf;
+	}
+	free(utf8);
+	return result;
 }

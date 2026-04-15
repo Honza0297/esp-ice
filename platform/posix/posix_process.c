@@ -5,15 +5,46 @@
  */
 
 /**
- * @file platform/posix/process.c
- * @brief POSIX implementation of child process spawning.
+ * @file platform/posix/posix_process.c
+ * @brief POSIX child process API and self-path resolution.
  *
- * Implements process_start() and process_finish() using
- * fork()/execvp()/waitpid() with optional pipe redirection.
+ * process_start() / process_finish() use fork()/execvp()/waitpid()
+ * with optional pipe redirection.  process_exe() resolves the path of
+ * the running binary via /proc/self/exe (Linux) or
+ * _NSGetExecutablePath (macOS), caching the result on first call.
  */
 #include "ice.h"
 
 #include <sys/wait.h>
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
+const char *process_exe(void)
+{
+	static char buf[4096];
+	static const char *result;
+	static int initialized;
+
+	if (initialized)
+		return result;
+	initialized = 1;
+
+#ifdef __APPLE__
+	uint32_t size = (uint32_t)sizeof(buf);
+	if (_NSGetExecutablePath(buf, &size) == 0)
+		result = buf;
+#else
+	ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+	if (n > 0) {
+		buf[n] = '\0';
+		result = buf;
+	}
+#endif
+
+	return result;
+}
 
 /**
  * @brief Start a child process (POSIX).
