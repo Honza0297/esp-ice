@@ -85,6 +85,7 @@ int access_w(const char *, int);
 int mkdir_w(const char *, int);
 int unlink_w(const char *);
 int rmdir_w(const char *);
+int rename_w(const char *oldp, const char *newp);
 
 #define F_OK 0
 #define access access_w
@@ -92,6 +93,7 @@ int rmdir_w(const char *);
 #define mkdir mkdir_w
 #define unlink unlink_w
 #define rmdir rmdir_w
+#define rename rename_w
 #define isatty _isatty
 #define putenv _putenv
 #define STDIN_FILENO 0

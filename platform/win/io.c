@@ -401,6 +401,34 @@ int rmdir_w(const char *path)
 	return rv;
 }
 
+/*
+ * Atomic-replace rename: POSIX rename() already replaces an existing
+ * target atomically, but the Windows CRT rename() fails with EEXIST.
+ * Use MoveFileExW with MOVEFILE_REPLACE_EXISTING to match POSIX
+ * semantics, so write-to-tmp + rename idioms work on both sides.
+ */
+int rename_w(const char *oldp, const char *newp)
+{
+	wchar_t *wold = mbs_to_wcs(oldp);
+	wchar_t *wnew = mbs_to_wcs(newp);
+	int rv = -1;
+
+	if (!wold || !wnew) {
+		errno = ENOMEM;
+		goto out;
+	}
+
+	if (MoveFileExW(wold, wnew, MOVEFILE_REPLACE_EXISTING))
+		rv = 0;
+	else
+		errno = EIO;
+
+out:
+	free(wold);
+	free(wnew);
+	return rv;
+}
+
 int is_directory(const char *path)
 {
 	wchar_t *wpath = mbs_to_wcs(path);
