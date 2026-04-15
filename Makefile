@@ -156,6 +156,7 @@ LIB_SRCS := \
 	binary.c \
 	elf2image.c \
 	sbuf.c \
+	slip.c \
 	svec.c \
 	http.c \
 	gzip.c \
