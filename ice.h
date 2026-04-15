@@ -78,6 +78,7 @@ int cmd_size(int argc, const char **argv);
  */
 extern const struct option cmd_config_opts[];
 extern const struct option cmd_ldgen_opts[];
+extern const struct option cmd_partition_table_opts[];
 extern const struct option cmd_set_target_opts[];
 extern const struct option cmd_size_opts[];
 

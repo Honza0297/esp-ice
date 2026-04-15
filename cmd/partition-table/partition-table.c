@@ -52,41 +52,42 @@ static const char *pt_usage[] = {
     NULL,
 };
 
+/*
+ * File-scope so the completion backend can walk the option table via
+ * cmd_struct.opts.  Defaults live on the variables; parse_options
+ * overwrites them when flags are passed.
+ */
+static const char *offset_str = "0x8000";
+static const char *pbl_offset_str;
+static const char *rbl_offset_str;
+static const char *flash_size_str;
+static const char *secure_str;
+static int disable_md5;
+static int no_verify;
+static int quiet;
+/* --extra-partition-subtypes: accepted, ignored (numeric always works). */
+static const char *extra_subtypes;
+
+const struct option cmd_partition_table_opts[] = {
+    OPT_BOOL('q', "quiet", &quiet, "suppress non-error output"),
+    OPT_STRING(0, "offset", &offset_str, "hex",
+	       "partition table offset in flash (default 0x8000)"),
+    OPT_STRING(0, "primary-bootloader-offset", &pbl_offset_str, "hex",
+	       "primary bootloader offset in flash"),
+    OPT_STRING(0, "recovery-bootloader-offset", &rbl_offset_str, "hex",
+	       "recovery bootloader offset in flash"),
+    OPT_BOOL(0, "disable-md5sum", &disable_md5, "disable MD5 checksum entry"),
+    OPT_BOOL(0, "no-verify", &no_verify, "skip partition table validation"),
+    OPT_STRING(0, "flash-size", &flash_size_str, "NMB",
+	       "flash size for validation (e.g. 4MB)"),
+    OPT_STRING(0, "secure", &secure_str, "v1|v2", "secure boot version"),
+    OPT_STRING(0, "extra-partition-subtypes", &extra_subtypes, "...",
+	       "extra subtype definitions (ignored)"),
+    OPT_END(),
+};
+
 int cmd_partition_table(int argc, const char **argv)
 {
-	const char *offset_str = "0x8000";
-	const char *pbl_offset_str = NULL;
-	const char *rbl_offset_str = NULL;
-	const char *flash_size_str = NULL;
-	const char *secure_str = NULL;
-	int disable_md5 = 0;
-	int no_verify = 0;
-	int quiet = 0;
-	/* --extra-partition-subtypes: accepted, ignored (numeric always works)
-	 */
-	const char *extra_subtypes = NULL;
-
-	struct option opts[] = {
-	    OPT_BOOL('q', "quiet", &quiet, "suppress non-error output"),
-	    OPT_STRING(0, "offset", &offset_str, "hex",
-		       "partition table offset in flash (default 0x8000)"),
-	    OPT_STRING(0, "primary-bootloader-offset", &pbl_offset_str, "hex",
-		       "primary bootloader offset in flash"),
-	    OPT_STRING(0, "recovery-bootloader-offset", &rbl_offset_str, "hex",
-		       "recovery bootloader offset in flash"),
-	    OPT_BOOL(0, "disable-md5sum", &disable_md5,
-		     "disable MD5 checksum entry"),
-	    OPT_BOOL(0, "no-verify", &no_verify,
-		     "skip partition table validation"),
-	    OPT_STRING(0, "flash-size", &flash_size_str, "NMB",
-		       "flash size for validation (e.g. 4MB)"),
-	    OPT_STRING(0, "secure", &secure_str, "v1|v2",
-		       "secure boot version"),
-	    OPT_STRING(0, "extra-partition-subtypes", &extra_subtypes, "...",
-		       "extra subtype definitions (ignored)"),
-	    OPT_END(),
-	};
-
 	struct pt_options pt_opts;
 	struct pt_entry entries[PT_MAX_ENTRIES];
 	uint8_t binary[PT_DATA_SIZE];
@@ -95,7 +96,8 @@ int cmd_partition_table(int argc, const char **argv)
 	const char *output_path;
 	FILE *fp;
 
-	argc = parse_options_manual(argc, argv, opts, pt_usage, &manual);
+	argc = parse_options_manual(argc, argv, cmd_partition_table_opts,
+				    pt_usage, &manual);
 
 	if (argc < 2)
 		die("usage: ice partition-table [options] <input.csv> "
