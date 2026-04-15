@@ -77,6 +77,37 @@ int mkdirp_for_file(const char *path)
 	return rc;
 }
 
+int write_file_atomic(const char *path, const void *data, size_t len)
+{
+	struct sbuf tmp = SBUF_INIT;
+	FILE *fp;
+	int rc = -1;
+
+	sbuf_addf(&tmp, "%s.tmp", path);
+
+	fp = fopen(tmp.buf, "wb");
+	if (!fp)
+		goto done;
+	if (fwrite(data, 1, len, fp) != len) {
+		fclose(fp);
+		goto unlink_tmp;
+	}
+	if (fclose(fp) != 0)
+		goto unlink_tmp;
+
+	if (rename(tmp.buf, path) != 0)
+		goto unlink_tmp;
+
+	rc = 0;
+	goto done;
+
+unlink_tmp:
+	unlink(tmp.buf);
+done:
+	sbuf_release(&tmp);
+	return rc;
+}
+
 struct rmtree_ctx {
 	const char *path;
 	int verbose;

@@ -103,11 +103,11 @@ void csv_record_addf(struct csv_record *r, const char *fmt, ...);
 void csv_serialize(const struct csv *c, struct sbuf *out);
 
 /**
- * @brief Serialize @p c and write it to @p path (direct, not atomic).
+ * @brief Serialize @p c and atomically write it to @p path.
  *
- * Truncates and overwrites any existing file at @p path.  A crash mid
- * write can leave @p path truncated; callers needing atomicity should
- * write to a sibling tmp path and rename() themselves.
+ * Internally goes through write_file_atomic() (sibling ".tmp" file
+ * plus rename), so a crash mid-write leaves any existing @p path
+ * untouched.
  *
  * @return 0 on success, -1 on I/O error (errno is set).
  */

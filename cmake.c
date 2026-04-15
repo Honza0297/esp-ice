@@ -420,7 +420,6 @@ static void patch_ninja(const char *build_dir)
 	struct sbuf out = SBUF_INIT;
 	const char *p, *end, *nl;
 	int modified = 0;
-	FILE *fp;
 
 	sbuf_addf(&ninja_path, "%s/build.ninja", build_dir);
 
@@ -450,13 +449,8 @@ static void patch_ninja(const char *build_dir)
 		p = nl + (nl < end ? 1 : 0);
 	}
 
-	if (modified) {
-		fp = fopen(ninja_path.buf, "w");
-		if (fp) {
-			fwrite(out.buf, 1, out.len, fp);
-			fclose(fp);
-		}
-	}
+	if (modified)
+		write_file_atomic(ninja_path.buf, out.buf, out.len);
 
 done:
 	sbuf_release(&ninja_path);

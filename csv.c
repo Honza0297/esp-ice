@@ -251,22 +251,10 @@ void csv_serialize(const struct csv *c, struct sbuf *out)
 int csv_save(const struct csv *c, const char *path)
 {
 	struct sbuf out = SBUF_INIT;
-	FILE *fp;
-	int rc = 0;
+	int rc;
 
 	csv_serialize(c, &out);
-
-	fp = fopen(path, "w");
-	if (!fp) {
-		rc = -1;
-		goto done;
-	}
-	if (fwrite(out.buf, 1, out.len, fp) != out.len)
-		rc = -1;
-	if (fclose(fp) != 0)
-		rc = -1;
-
-done:
+	rc = write_file_atomic(path, out.buf, out.len);
 	sbuf_release(&out);
 	return rc;
 }

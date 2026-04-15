@@ -15,6 +15,8 @@
 #ifndef FS_H
 #define FS_H
 
+#include <stddef.h>
+
 /**
  * @brief Create a directory and any missing intermediate parents.
  *
@@ -39,6 +41,21 @@ int mkdirp(const char *dir);
  * @return 0 on success, -1 on mkdir failure.
  */
 int mkdirp_for_file(const char *path);
+
+/**
+ * @brief Write @p len bytes of @p data to @p path atomically.
+ *
+ * The content goes to `@p path.tmp` first and is renamed onto @p path
+ * on success.  `rename()` is atomic on POSIX and atomic-replace on
+ * Windows (via rename_w / MoveFileExW), so a crash mid-write leaves
+ * the original @p path untouched -- no truncate-then-partial-write
+ * window.
+ *
+ * On failure the tmp file is removed; errno reflects the failing call.
+ *
+ * @return 0 on success, -1 on any I/O failure.
+ */
+int write_file_atomic(const char *path, const void *data, size_t len);
 
 /**
  * @brief Recursively delete the contents of @p path.
