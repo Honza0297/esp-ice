@@ -179,40 +179,19 @@ static int parse_subtype(uint8_t type, const char *s, uint8_t *out)
 	return -1;
 }
 
-/* ------------------------------------------------------------------ */
-/* CSV line parser                                                     */
-/* ------------------------------------------------------------------ */
-
-static void trim(char *s)
+/* Right/left trim in place; used for the ':'-separated flag tokens. */
+static void trim_in_place(char *s)
 {
-	char *p = s + strlen(s);
+	char *p;
+	size_t len = strlen(s);
 
-	while (p > s && (*(p - 1) == ' ' || *(p - 1) == '\t' ||
-			 *(p - 1) == '\r' || *(p - 1) == '\n'))
-		*--p = '\0';
+	while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t'))
+		s[--len] = '\0';
 
-	p = s;
-	while (*p == ' ' || *p == '\t')
-		p++;
-
+	for (p = s; *p == ' ' || *p == '\t'; p++)
+		;
 	if (p != s)
 		memmove(s, p, strlen(p) + 1);
-}
-
-/* Split @line on commas into at most 6 fields in-place. */
-static int split_csv(char *line, char *fields[6])
-{
-	int n = 0;
-	char *p = line;
-
-	while (n < 6) {
-		fields[n++] = p;
-		p = strchr(p, ',');
-		if (!p)
-			break;
-		*p++ = '\0';
-	}
-	return n;
 }
 
 /* ------------------------------------------------------------------ */
@@ -246,207 +225,156 @@ static uint32_t align_up(uint32_t val, uint32_t align)
 int pt_parse_csv(const char *path, struct pt_entry *entries, int *count,
 		 const struct pt_options *opts)
 {
-	FILE *fp;
-	char line[256];
-	int lineno = 0;
+	struct csv csv = CSV_INIT;
 	int n = 0;
 	uint32_t last_end;
+	int rc = -1;
 
-	fp = fopen(path, "r");
-	if (!fp) {
+	if (csv_load(&csv, path) < 0) {
 		err_errno("cannot open '%s'", path);
 		return -1;
 	}
 
-	while (fgets(line, sizeof(line), fp)) {
-		char *fields[6];
-		int nf;
+	/* ---- Phase 1: populate entries from CSV records ---------------- */
+
+	for (int ri = 0; ri < csv.nr; ri++) {
+		const struct csv_record *r = &csv.records[ri];
 		struct pt_entry *e;
-		char *name_f, *type_f, *sub_f, *off_f, *size_f, *flags_f;
-
-		lineno++;
-
-		/* strip comment and blank */
-		{
-			char *c = strchr(line, '#');
-			if (c)
-				*c = '\0';
-		}
-		trim(line);
-		if (!line[0])
-			continue;
+		const char *name_f, *type_f, *sub_f, *off_f, *size_f, *flags_f;
 
 		if (n >= PT_MAX_ENTRIES) {
-			err("line %d: too many entries (max %d)", lineno,
+			err("line %d: too many entries (max %d)", r->lineno,
 			    PT_MAX_ENTRIES);
-			fclose(fp);
-			return -1;
+			goto out;
 		}
 
-		/* duplicate the line for splitting */
-		{
-			char tmp[256];
-			strncpy(tmp, line, sizeof(tmp) - 1);
-			tmp[sizeof(tmp) - 1] = '\0';
-			nf = split_csv(tmp, fields);
+		if (r->nr_fields < 5) {
+			err("line %d: expected at least 5 fields", r->lineno);
+			goto out;
+		}
 
-			/* need at least name, type, subtype, size */
-			if (nf < 5) {
-				err("line %d: expected at least 5 fields: %s",
-				    lineno, line);
-				fclose(fp);
-				return -1;
+		name_f = r->fields[0];
+		type_f = r->fields[1];
+		sub_f = r->fields[2];
+		off_f = r->fields[3];
+		size_f = r->fields[4];
+		flags_f = (r->nr_fields >= 6) ? r->fields[5] : "";
+
+		e = &entries[n];
+		memset(e, 0, sizeof(*e));
+
+		/* name */
+		if (strlen(name_f) > 16) {
+			err("line %d: name '%s' too long (max 16)", r->lineno,
+			    name_f);
+			goto out;
+		}
+		strncpy(e->name, name_f, 16);
+
+		/* type */
+		if (parse_type(type_f, &e->type) != 0) {
+			err("line %d: unknown type '%s'", r->lineno, type_f);
+			goto out;
+		}
+
+		/* subtype */
+		if (sub_f[0]) {
+			if (parse_subtype(e->type, sub_f, &e->subtype) != 0) {
+				err("line %d: unknown subtype '%s'", r->lineno,
+				    sub_f);
+				goto out;
 			}
-
-			name_f = fields[0];
-			type_f = fields[1];
-			sub_f = fields[2];
-			off_f = fields[3];
-			size_f = fields[4];
-			flags_f = (nf >= 6) ? fields[5] : (char *)"";
-
-			for (int i = 0; i < nf; i++)
-				trim(fields[i]);
-
-			e = &entries[n];
-			memset(e, 0, sizeof(*e));
-
-			/* name */
-			if (strlen(name_f) > 16) {
-				err("line %d: name '%s' too long (max 16)",
-				    lineno, name_f);
-				fclose(fp);
-				return -1;
+		} else {
+			if (e->type == PT_TYPE_APP) {
+				err("line %d: app partition must have a "
+				    "subtype",
+				    r->lineno);
+				goto out;
 			}
-			strncpy(e->name, name_f, 16);
+			e->subtype = 0x06; /* 'undefined' */
+		}
 
-			/* type */
-			if (parse_type(type_f, &e->type) != 0) {
-				err("line %d: unknown type '%s'", lineno,
-				    type_f);
-				fclose(fp);
-				return -1;
-			}
-
-			/* subtype */
-			if (sub_f[0]) {
-				if (parse_subtype(e->type, sub_f,
-						  &e->subtype) != 0) {
-					err("line %d: unknown subtype '%s'",
-					    lineno, sub_f);
-					fclose(fp);
-					return -1;
-				}
+		/* offset */
+		if (off_f[0]) {
+			/* bootloader / ptable offsets come from CLI flags. */
+			if ((e->type == PT_TYPE_BOOT &&
+			     (e->subtype == 0x00 /* primary */ ||
+			      e->subtype == 0x02 /* recovery */)) ||
+			    (e->type == PT_TYPE_PTABLE &&
+			     e->subtype == 0x00 /* primary */)) {
+				/* offset set by --*-offset option */
 			} else {
-				/* empty subtype: app must be explicit */
-				if (e->type == PT_TYPE_APP) {
-					err("line %d: app partition must have "
-					    "a subtype",
-					    lineno);
-					fclose(fp);
-					return -1;
-				}
-				e->subtype = 0x06; /* 'undefined' */
-			}
-
-			/* offset */
-			if (off_f[0]) {
-				/* bootloader/ptable offsets are overridden by
-				 * CLI */
-				if ((e->type == PT_TYPE_BOOT &&
-				     (e->subtype == 0x00 /* primary */ ||
-				      e->subtype == 0x02 /* recovery */)) ||
-				    (e->type == PT_TYPE_PTABLE &&
-				     e->subtype == 0x00 /* primary */)) {
-					/* offset set by --*-offset option */
-				} else {
-					uint32_t v;
-					if (parse_int(off_f, &v) != 0) {
-						err("line %d: bad offset '%s'",
-						    lineno, off_f);
-						fclose(fp);
-						return -1;
-					}
-					e->offset = v;
-					e->offset_set = 1;
-				}
-			}
-
-			/* size */
-			if (e->type == PT_TYPE_BOOT) {
-				/* size = table_offset - primary_boot_offset */
-				if (!opts->has_primary_boot) {
-					err("line %d: bootloader entry "
-					    "requires "
-					    "--primary-bootloader-offset",
-					    lineno);
-					fclose(fp);
-					return -1;
-				}
-				e->size = opts->table_offset -
-					  opts->primary_boot_offset;
-			} else if (e->type == PT_TYPE_PTABLE) {
-				e->size = PT_TABLE_SIZE;
-			} else if (size_f[0]) {
 				uint32_t v;
-				/* negative size: fill to this address */
-				if (size_f[0] == '-') {
-					uint32_t end_addr;
-					if (parse_int(size_f + 1, &end_addr) !=
-					    0) {
-						err("line %d: bad size '%s'",
-						    lineno, size_f);
-						fclose(fp);
-						return -1;
-					}
-					/* size resolved after offset auto-fill
-					 */
-					e->size =
-					    (uint32_t)(-(int32_t)end_addr);
-					/* marker: MSB set → negative size */
-				} else {
-					if (parse_int(size_f, &v) != 0) {
-						err("line %d: bad size '%s'",
-						    lineno, size_f);
-						fclose(fp);
-						return -1;
-					}
-					e->size = v;
+				if (parse_int(off_f, &v) != 0) {
+					err("line %d: bad offset '%s'",
+					    r->lineno, off_f);
+					goto out;
 				}
-			} else {
-				err("line %d: size field cannot be empty",
-				    lineno);
-				fclose(fp);
-				return -1;
+				e->offset = v;
+				e->offset_set = 1;
 			}
-
-			/* flags */
-			if (flags_f[0]) {
-				char fbuf[64];
-				char *tok;
-				strncpy(fbuf, flags_f, sizeof(fbuf) - 1);
-				fbuf[sizeof(fbuf) - 1] = '\0';
-				tok = strtok(fbuf, ":");
-				while (tok) {
-					trim(tok);
-					if (!strcmp(tok, "encrypted"))
-						e->encrypted = 1;
-					else if (!strcmp(tok, "readonly"))
-						e->readonly = 1;
-					else if (tok[0])
-						warn("line %d: unknown flag "
-						     "'%s'",
-						     lineno, tok);
-					tok = strtok(NULL, ":");
-				}
-			}
-
-			n++;
 		}
-	}
-	fclose(fp);
 
-	/* ---- Auto-fill missing offsets --------------------------------- */
+		/* size */
+		if (e->type == PT_TYPE_BOOT) {
+			if (!opts->has_primary_boot) {
+				err("line %d: bootloader entry requires "
+				    "--primary-bootloader-offset",
+				    r->lineno);
+				goto out;
+			}
+			e->size =
+			    opts->table_offset - opts->primary_boot_offset;
+		} else if (e->type == PT_TYPE_PTABLE) {
+			e->size = PT_TABLE_SIZE;
+		} else if (size_f[0]) {
+			uint32_t v;
+			if (size_f[0] == '-') {
+				uint32_t end_addr;
+				if (parse_int(size_f + 1, &end_addr) != 0) {
+					err("line %d: bad size '%s'", r->lineno,
+					    size_f);
+					goto out;
+				}
+				/* Marker: MSB set → resolved after offsets. */
+				e->size = (uint32_t)(-(int32_t)end_addr);
+			} else {
+				if (parse_int(size_f, &v) != 0) {
+					err("line %d: bad size '%s'", r->lineno,
+					    size_f);
+					goto out;
+				}
+				e->size = v;
+			}
+		} else {
+			err("line %d: size field cannot be empty", r->lineno);
+			goto out;
+		}
+
+		/* flags */
+		if (flags_f[0]) {
+			char fbuf[64];
+			char *tok;
+			strncpy(fbuf, flags_f, sizeof(fbuf) - 1);
+			fbuf[sizeof(fbuf) - 1] = '\0';
+			tok = strtok(fbuf, ":");
+			while (tok) {
+				trim_in_place(tok);
+				if (!strcmp(tok, "encrypted"))
+					e->encrypted = 1;
+				else if (!strcmp(tok, "readonly"))
+					e->readonly = 1;
+				else if (tok[0])
+					warn("line %d: unknown flag '%s'",
+					     r->lineno, tok);
+				tok = strtok(NULL, ":");
+			}
+		}
+
+		n++;
+	}
+
+	/* ---- Phase 2: auto-fill missing offsets ------------------------ */
 
 	last_end = opts->table_offset + PT_TABLE_SIZE;
 
@@ -457,22 +385,21 @@ int pt_parse_csv(const char *path, struct pt_entry *entries, int *count,
 		int is_prim_ptbl =
 		    (e->type == PT_TYPE_PTABLE && e->subtype == 0x00);
 
-		/* Set fixed offsets for bootloader/partition_table types */
 		if (is_prim_boot) {
 			if (!opts->has_primary_boot) {
 				err("primary bootloader entry present but "
 				    "--primary-bootloader-offset not set");
-				return -1;
+				goto out;
 			}
 			e->offset = opts->primary_boot_offset;
 			e->offset_set = 1;
-			continue; /* skip from last_end tracking */
+			continue;
 		}
 		if (e->type == PT_TYPE_BOOT && e->subtype == 0x02) {
 			if (!opts->has_recovery_boot) {
 				err("recovery bootloader entry present but "
 				    "--recovery-bootloader-offset not set");
-				return -1;
+				goto out;
 			}
 			e->offset = opts->recovery_boot_offset;
 			e->offset_set = 1;
@@ -484,7 +411,6 @@ int pt_parse_csv(const char *path, struct pt_entry *entries, int *count,
 			continue;
 		}
 
-		/* Normal partition: auto-fill offset if not given */
 		if (!e->offset_set) {
 			uint32_t align = offset_align_for(e->type);
 			last_end = align_up(last_end, align);
@@ -494,10 +420,10 @@ int pt_parse_csv(const char *path, struct pt_entry *entries, int *count,
 			err("partition '%s' offset 0x%x overlaps previous "
 			    "partition end 0x%x",
 			    e->name, e->offset, last_end);
-			return -1;
+			goto out;
 		}
 
-		/* Resolve negative size: stored as -(end_addr) in uint32 */
+		/* Resolve negative size: stored as -(end_addr) in uint32. */
 		if ((int32_t)e->size < 0) {
 			uint32_t end_addr = (uint32_t)(-(int32_t)e->size);
 			e->size = end_addr - e->offset;
@@ -506,50 +432,49 @@ int pt_parse_csv(const char *path, struct pt_entry *entries, int *count,
 		last_end = e->offset + e->size;
 	}
 
-	/* ---- Validation ------------------------------------------------ */
+	/* ---- Phase 3: validation --------------------------------------- */
 
 	for (int i = 0; i < n; i++) {
 		struct pt_entry *e = &entries[i];
+		uint32_t align;
 
 		if (!e->size) {
 			err("partition '%s' has zero size", e->name);
-			return -1;
+			goto out;
 		}
 
-		/* Offset alignment */
-		{
-			uint32_t align = offset_align_for(e->type);
-			if (e->offset % align) {
-				err("partition '%s' offset 0x%x not aligned "
-				    "to 0x%x",
-				    e->name, e->offset, align);
-				return -1;
-			}
+		align = offset_align_for(e->type);
+		if (e->offset % align) {
+			err("partition '%s' offset 0x%x not aligned to 0x%x",
+			    e->name, e->offset, align);
+			goto out;
 		}
 
-		/* Size alignment for app */
 		if (e->type == PT_TYPE_APP) {
-			uint32_t align = size_align_for(e->type, opts->secure);
+			align = size_align_for(e->type, opts->secure);
 			if (e->size % align) {
-				err("partition '%s' size 0x%x not aligned "
-				    "to 0x%x",
+				err("partition '%s' size 0x%x not aligned to "
+				    "0x%x",
 				    e->name, e->size, align);
-				return -1;
+				goto out;
 			}
 		}
 
-		/* Flash size check */
 		if (opts->flash_size &&
 		    e->offset + e->size > opts->flash_size) {
-			err("partition '%s' (0x%x + 0x%x) exceeds flash "
-			    "size 0x%x",
+			err("partition '%s' (0x%x + 0x%x) exceeds flash size "
+			    "0x%x",
 			    e->name, e->offset, e->size, opts->flash_size);
-			return -1;
+			goto out;
 		}
 	}
 
 	*count = n;
-	return 0;
+	rc = 0;
+
+out:
+	csv_release(&csv);
+	return rc;
 }
 
 /* ------------------------------------------------------------------ */
