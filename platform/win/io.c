@@ -371,6 +371,52 @@ int mkdir_w(const char *path, int mode)
 	return rv;
 }
 
+int unlink_w(const char *path)
+{
+	wchar_t *wpath = mbs_to_wcs(path);
+	int rv;
+
+	if (!wpath) {
+		errno = ENOMEM;
+		return -1;
+	}
+
+	rv = _wunlink(wpath);
+	free(wpath);
+	return rv;
+}
+
+int rmdir_w(const char *path)
+{
+	wchar_t *wpath = mbs_to_wcs(path);
+	int rv;
+
+	if (!wpath) {
+		errno = ENOMEM;
+		return -1;
+	}
+
+	rv = _wrmdir(wpath);
+	free(wpath);
+	return rv;
+}
+
+int is_directory(const char *path)
+{
+	wchar_t *wpath = mbs_to_wcs(path);
+	DWORD attr;
+
+	if (!wpath)
+		return 0;
+
+	attr = GetFileAttributesW(wpath);
+	free(wpath);
+
+	if (attr == INVALID_FILE_ATTRIBUTES)
+		return 0;
+	return (attr & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
+}
+
 int dir_foreach(const char *path, int (*cb)(const char *name, void *ud),
 		void *ud)
 {

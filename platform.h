@@ -83,11 +83,15 @@ typedef ptrdiff_t ssize_t;
 FILE *fopen_w(const char *, const char *);
 int access_w(const char *, int);
 int mkdir_w(const char *, int);
+int unlink_w(const char *);
+int rmdir_w(const char *);
 
 #define F_OK 0
 #define access access_w
 #define fopen fopen_w
 #define mkdir mkdir_w
+#define unlink unlink_w
+#define rmdir rmdir_w
 #define isatty _isatty
 #define putenv _putenv
 #define STDIN_FILENO 0
@@ -116,6 +120,14 @@ int putenv(char *);
  * @return Terminal width in columns, or 80 if not a terminal or unknown.
  */
 int term_width(int fd);
+
+/**
+ * @brief Test whether @p path refers to a directory.
+ *
+ * @return 1 if the path exists and is a directory, 0 otherwise
+ *         (non-existent, not a directory, or stat failure).
+ */
+int is_directory(const char *path);
 
 /**
  * @brief Iterate over the entries of a directory.

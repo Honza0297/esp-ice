@@ -82,6 +82,12 @@ int fputs_p(const char *s, FILE *stream)
 	return n;
 }
 
+int is_directory(const char *path)
+{
+	struct stat st;
+	return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 int dir_foreach(const char *path, int (*cb)(const char *name, void *ud),
 		void *ud)
 {
