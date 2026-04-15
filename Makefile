@@ -149,6 +149,7 @@ LIB_SRCS := \
 	pager.c \
 	options.c \
 	partition_table.c \
+	elf2image.c \
 	sbuf.c \
 	svec.c \
 	http.c \
