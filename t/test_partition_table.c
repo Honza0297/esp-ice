@@ -218,5 +218,61 @@ int main(void)
 		tap_done("padding after entries is 0xFF");
 	}
 
+	/* Negative size: "-2M" fills from offset up to end-address 2M. */
+	{
+		struct pt_entry e[16];
+		int n = 0;
+		struct pt_options o = default_opts();
+		const char *csv =
+		    write_csv(9, "first,  app,  factory, 0x10000, -2M,\n"
+				 "second, data, 0x15,    ,        1M,\n");
+
+		tap_check(pt_parse_csv(csv, e, &n, &o) == 0);
+		tap_check(n == 2);
+		tap_check(e[0].offset == 0x10000);
+		tap_check(e[0].size == 0x200000 - 0x10000);
+		tap_check(e[1].offset == 0x200000);
+		tap_check(e[1].size == 0x100000);
+		tap_done("negative size resolves to end_addr - offset");
+	}
+
+	/* Negative size with target address <= offset is rejected. */
+	{
+		struct pt_entry e[16];
+		int n = 0;
+		struct pt_options o = default_opts();
+		const char *csv =
+		    write_csv(10, "bad, data, spiffs, 0x400000, -0x10000,\n");
+
+		tap_check(pt_parse_csv(csv, e, &n, &o) == -1);
+		tap_done("negative size with end_addr <= offset errors out");
+	}
+
+	/* Overlapping explicit offsets are rejected (mirrors IDF's test). */
+	{
+		struct pt_entry e[16];
+		int n = 0;
+		struct pt_options o = default_opts();
+		const char *csv =
+		    write_csv(11, "first,  app, factory, 0x100000, 2M,\n"
+				  "second, app, ota_0,   0x200000, 1M,\n");
+
+		tap_check(pt_parse_csv(csv, e, &n, &o) == -1);
+		tap_done("overlapping explicit offsets are rejected");
+	}
+
+	/* Empty data subtype defaults to PT_SUBTYPE_DATA_UNDEFINED. */
+	{
+		struct pt_entry e[16];
+		int n = 0;
+		struct pt_options o = default_opts();
+		const char *csv =
+		    write_csv(12, "misc, data, , 0x9000, 0x1000,\n");
+
+		tap_check(pt_parse_csv(csv, e, &n, &o) == 0);
+		tap_check(e[0].subtype == PT_SUBTYPE_DATA_UNDEFINED);
+		tap_done("empty data subtype defaults to 'undefined' (0x06)");
+	}
+
 	return tap_result();
 }
