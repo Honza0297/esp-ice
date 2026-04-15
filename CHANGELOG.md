@@ -1,3 +1,10 @@
+## v0.3.1 (2026-04-15)
+
+### 🐛 Bug Fixes
+
+- **install**: point default ICE_REPO at fhrbata/esp-ice *(Frantisek Hrbata - 1597b4f)*
+
+
 ## v0.3.0 (2026-04-15)
 
 ### ✨ New Features
