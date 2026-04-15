@@ -5,9 +5,41 @@
 > **Experimental PoC** -- this project is a proof of concept and is not
 > intended for production use.
 
-## Building
+## Install
 
-### Development build
+### Prebuilt binaries
+
+Prebuilt static binaries for Linux, macOS, and Windows are published
+with each release.  The one-liners below download the matching archive,
+extract `ice` to a user-writable directory, and print a completion
+setup hint tailored to your shell.
+
+#### Linux / macOS
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/espressif/esp-ice/main/install.sh | sh
+```
+
+Default install location is `$HOME/.local/bin/ice`.  Override with
+`ICE_INSTALL_DIR`, or pin a specific version with `ICE_VERSION`:
+
+```sh
+ICE_VERSION=0.2.0 ICE_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/espressif/esp-ice/main/install.sh | sh
+```
+
+#### Windows
+
+```powershell
+irm https://raw.githubusercontent.com/espressif/esp-ice/main/install.ps1 | iex
+```
+
+Default install location is `%LOCALAPPDATA%\Programs\ice\bin\ice.exe`
+and is added to your user `PATH` automatically.  Override with
+`$env:ICE_INSTALL_DIR` or `$env:ICE_VERSION`.
+
+### From source
+
+#### Development build
 
 Requires a C compiler, `make`, and libcurl development headers.
 
@@ -24,7 +56,7 @@ make
 This links dynamically against the system libcurl for fast iteration.
 Override `CC` to pick a different compiler (e.g. `make CC=clang`).
 
-### Static build (release)
+#### Static build (release)
 
 All vendored libraries (zlib, mbedTLS, curl, libyaml) are built from
 source automatically.  The resulting binary is fully static with zero
@@ -48,7 +80,7 @@ On Linux, `STATIC=1` requires a musl-based compiler.  glibc static
 linking is not truly portable (NSS uses `dlopen` at runtime), so the
 build will error if `CC` does not target musl.
 
-### Cross-compilation
+#### Cross-compilation
 
 Linux and Windows release binaries are cross-compiled from a Linux
 host.  macOS binaries are built natively (cross-compiling for macOS
@@ -80,7 +112,7 @@ install path (`deps/install/<triple>`).  Build artifacts are scoped by
 the compiler triple, so multiple targets can coexist in the same
 checkout without colliding.
 
-### Build variables
+#### Build variables
 
 | Variable | Description |
 |----------|-------------|
@@ -92,7 +124,7 @@ Run `make help` for the full list of variables, targets, and their
 current values.  Run `make -f Makefile.toolchain help` for the
 catalogue of available cross-compilation toolchains.
 
-### Useful targets
+#### Useful targets
 
 | Target | Description |
 |--------|-------------|
@@ -106,22 +138,32 @@ catalogue of available cross-compilation toolchains.
 
 ## Shell completion
 
-`ice` ships with completion support for bash, zsh, and fish.  Add the
-matching line to your shell's rc file:
+`ice` ships with completion support for bash, zsh, fish, and
+PowerShell.  The install scripts print the matching line for your
+shell; you can also add it manually:
 
 ```bash
 # ~/.bashrc
 eval "$(ice completion bash)"
+```
 
+```zsh
 # ~/.zshrc
 eval "$(ice completion zsh)"
+```
 
+```fish
 # ~/.config/fish/config.fish
 ice completion fish | source
 ```
 
+```powershell
+# $PROFILE
+ice completion powershell | Out-String | Invoke-Expression
+```
+
 Each `ice completion <shell>` invocation prints a tiny init snippet on
-stdout; `eval`-ing it binds a dispatch function to the `ice` command.
+stdout; evaluating it binds a dispatch function to the `ice` command.
 Every `TAB` then re-invokes `ice` itself to list candidates —
 subcommands, long / short flags, aliases, chip targets, known config
 keys — so completion stays in sync with the binary automatically and
