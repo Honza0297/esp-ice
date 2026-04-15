@@ -342,8 +342,32 @@ int ensure_build_directory(int force)
 	/* On failure, remove CMakeCache.txt to prevent half-valid state.
 	 * cmake may create a partial cache even when configure fails the
 	 * first time (has_cache == 0), so always unlink on failure. */
-	if (rc)
+	if (rc) {
+		struct config_entry **entries;
+		int n, has_cli = 0;
+
 		unlink(cache_path.buf);
+
+		/*
+		 * -D entries from the command line live at CLI scope only
+		 * and are gone when the process exits.  Warn so the user
+		 * can either re-pass them or persist via `ice config --add`.
+		 */
+		n = config_get_all("cmake.define", &entries);
+		for (int i = 0; i < n; i++) {
+			if (entries[i]->scope == CONFIG_SCOPE_CLI) {
+				has_cli = 1;
+				break;
+			}
+		}
+		free(entries);
+
+		if (has_cli)
+			warn("--define entries passed on the command line are "
+			     "not retained across ice invocations; re-pass "
+			     "them, or persist with 'ice config --add "
+			     "cmake.define KEY=VAL'");
+	}
 
 out:
 	sbuf_release(&logpath);
