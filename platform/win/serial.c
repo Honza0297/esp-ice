@@ -264,3 +264,12 @@ void serial_free_port_list(char **ports)
 		free(*p);
 	free(ports);
 }
+
+int serial_get_usb_id(const char *device, unsigned int *vid,
+		      unsigned int *pid)
+{
+	(void)device;
+	(void)vid;
+	(void)pid;
+	return -1;
+}

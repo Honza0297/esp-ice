@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <glob.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -301,4 +302,46 @@ void serial_free_port_list(char **ports)
 	for (char **p = ports; *p; p++)
 		free(*p);
 	free(ports);
+}
+
+int serial_get_usb_id(const char *device, unsigned int *vid,
+		      unsigned int *pid)
+{
+#ifdef __linux__
+	const char *name = strrchr(device, '/');
+	name = name ? name + 1 : device;
+
+	char vid_path[256], pid_path[256];
+	snprintf(vid_path, sizeof(vid_path),
+		 "/sys/class/tty/%s/device/../idVendor", name);
+	snprintf(pid_path, sizeof(pid_path),
+		 "/sys/class/tty/%s/device/../idProduct", name);
+
+	FILE *f;
+
+	f = fopen(vid_path, "r");
+	if (!f)
+		return -1;
+	if (fscanf(f, "%x", vid) != 1) {
+		fclose(f);
+		return -1;
+	}
+	fclose(f);
+
+	f = fopen(pid_path, "r");
+	if (!f)
+		return -1;
+	if (fscanf(f, "%x", pid) != 1) {
+		fclose(f);
+		return -1;
+	}
+	fclose(f);
+
+	return 0;
+#else
+	(void)device;
+	(void)vid;
+	(void)pid;
+	return -1;
+#endif
 }

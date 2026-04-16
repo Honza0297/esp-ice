@@ -111,4 +111,18 @@ int serial_list_ports(char ***out);
  */
 void serial_free_port_list(char **ports);
 
+/**
+ * @brief Read the USB VID and PID for a serial device.
+ *
+ * On Linux this is read from sysfs.  On other platforms the function
+ * always returns -1.
+ *
+ * @param device  Device path, e.g. "/dev/ttyACM0".
+ * @param vid     Receives the USB Vendor ID.
+ * @param pid     Receives the USB Product ID.
+ * @return 0 on success, -1 if the information is unavailable.
+ */
+int serial_get_usb_id(const char *device, unsigned int *vid,
+		      unsigned int *pid);
+
 #endif /* SERIAL_H */

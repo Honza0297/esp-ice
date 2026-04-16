@@ -46,8 +46,9 @@ typedef struct {
 	unsigned           baudrate;/*!< Initial baud rate, e.g. 115200 */
 
 	/* Private runtime state — do not access directly */
-	struct serial     *_serial; /*!< Opened by init, closed by deinit */
-	int64_t            _time_end;/*!< Deadline set by start_timer, ms from time_now_ms() epoch */
+	struct serial     *_serial;    /*!< Opened by init, closed by deinit */
+	int64_t            _time_end;  /*!< Deadline set by start_timer */
+	int                _is_usb_jtag; /*!< 1 when VID=0x303A PID=0x1001 (USB JTAG Serial) */
 } esf_port_t;
 
 /** Operations vtable for esf_port_t. */
