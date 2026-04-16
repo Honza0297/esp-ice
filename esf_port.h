@@ -11,9 +11,9 @@
 #ifndef ESF_PORT_H
 #define ESF_PORT_H
 
-#include <stdint.h>
-#include "esp_loader_io.h"
 #include "esp_loader.h"
+#include "esp_loader_io.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,16 +39,17 @@ struct serial;
  * @endcode
  */
 typedef struct {
-	esp_loader_port_t  port;     /*!< Embedded base; pass &port to esp_loader_init_* */
+	esp_loader_port_t
+	    port; /*!< Embedded base; pass &port to esp_loader_init_* */
 
 	/* Public configuration — fill before calling esp_loader_init_uart() */
-	const char        *device;  /*!< Serial device path, e.g. "/dev/ttyUSB0" */
-	unsigned           baudrate;/*!< Initial baud rate, e.g. 115200 */
+	const char *device; /*!< Serial device path, e.g. "/dev/ttyUSB0" */
+	unsigned baudrate;  /*!< Initial baud rate, e.g. 115200 */
 
 	/* Private runtime state — do not access directly */
-	struct serial     *_serial;    /*!< Opened by init, closed by deinit */
-	int64_t            _time_end;  /*!< Deadline set by start_timer */
-	int                _is_usb_jtag; /*!< 1 when VID=0x303A PID=0x1001 (USB JTAG Serial) */
+	struct serial *_serial; /*!< Opened by init, closed by deinit */
+	int64_t _time_end;	/*!< Deadline set by start_timer */
+	int _is_usb_jtag; /*!< 1 when VID=0x303A PID=0x1001 (USB JTAG Serial) */
 } esf_port_t;
 
 /** Operations vtable for esf_port_t. */

@@ -237,10 +237,10 @@ int serial_flush_input(struct serial *s)
 int serial_list_ports(char ***out)
 {
 	static const char *patterns[] = {
-		"/dev/ttyUSB*",
-		"/dev/ttyACM*",
-		"/dev/cu.*",
-		NULL,
+	    "/dev/ttyUSB*",
+	    "/dev/ttyACM*",
+	    "/dev/cu.*",
+	    NULL,
 	};
 
 	glob_t g;
@@ -304,8 +304,7 @@ void serial_free_port_list(char **ports)
 	free(ports);
 }
 
-int serial_get_usb_id(const char *device, unsigned int *vid,
-		      unsigned int *pid)
+int serial_get_usb_id(const char *device, unsigned int *vid, unsigned int *pid)
 {
 #ifdef __linux__
 	const char *name = strrchr(device, '/');

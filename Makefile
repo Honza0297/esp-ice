@@ -394,7 +394,7 @@ clang-format:
 	pre-commit run clang-format --all-files
 
 # Lint checks and WarningsAsErrors: see .clang-tidy in this directory.
-clang-tidy:
+clang-tidy: | $(VENDOR_STAMP)
 	clang-tidy \
 		--extra-arg="--target=$(TRIPLE)" \
 		$(SRCS) \

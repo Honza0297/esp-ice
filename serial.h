@@ -122,7 +122,6 @@ void serial_free_port_list(char **ports);
  * @param pid     Receives the USB Product ID.
  * @return 0 on success, -1 if the information is unavailable.
  */
-int serial_get_usb_id(const char *device, unsigned int *vid,
-		      unsigned int *pid);
+int serial_get_usb_id(const char *device, unsigned int *vid, unsigned int *pid);
 
 #endif /* SERIAL_H */
