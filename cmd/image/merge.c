@@ -97,7 +97,7 @@ static size_t flash_size_bytes(const char *s)
 	if (!strcmp(end, "MB"))
 		return (size_t)n * (size_t)1024u * (size_t)1024u;
 	if (!strcmp(end, "KB"))
-		return (size_t)n * 1024u;
+		return (size_t)n * (size_t)1024u;
 	die("invalid --flash-size '%s' (expected e.g. 4MB, 16KB, or raw bytes)",
 	    s);
 	return 0; /* unreachable */

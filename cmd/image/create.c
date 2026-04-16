@@ -150,7 +150,7 @@ static size_t flash_size_bytes(const char *s)
 	if (errno != 0 || end == s || strcmp(end, "MB") != 0) {
 		/* Also accept sub-MB for bootloader pad-to-size (4KB). */
 		if (strcmp(s, "4KB") == 0)
-			return 4u * 1024u;
+			return (size_t)4u * (size_t)1024u;
 		die("unrecognised flash size '%s' (expected e.g. 2MB or 4KB)",
 		    s);
 	}
