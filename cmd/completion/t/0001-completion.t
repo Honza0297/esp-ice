@@ -112,6 +112,10 @@ tap_check cand_present 'target'    tpref.out
 tap_check cand_present 'tools'     tpref.out
 tap_done "subcommand list includes target and tools (shell does prefix filtering)"
 
+"$BINARY" __complete 2 ice target "" >targets.out
+tap_check cand_present 'list'  targets.out
+tap_done "target <TAB> lists subcommands"
+
 "$BINARY" __complete 2 ice help "" >helpcmds.out
 tap_check cand_present 'build'       helpcmds.out
 tap_check cand_present 'completion'  helpcmds.out
