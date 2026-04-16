@@ -95,7 +95,7 @@ static size_t flash_size_bytes(const char *s)
 	if (*end == '\0')
 		return (size_t)n; /* raw bytes */
 	if (!strcmp(end, "MB"))
-		return (size_t)n * 1024u * 1024u;
+		return (size_t)n * (size_t)1024u * (size_t)1024u;
 	if (!strcmp(end, "KB"))
 		return (size_t)n * 1024u;
 	die("invalid --flash-size '%s' (expected e.g. 4MB, 16KB, or raw bytes)",
@@ -133,8 +133,9 @@ int cmd_image_merge(int argc, const char **argv)
 	size_t end = 0;
 
 	for (int i = 0; i < n_pairs; i++) {
-		const char *off_s = argv[2 * i];
-		const char *path = argv[2 * i + 1];
+		int idx = 2 * i;
+		const char *off_s = argv[idx];
+		const char *path = argv[idx + 1];
 		uint32_t raw = parse_hex(off_s, "offset");
 
 		if (raw < base)
@@ -163,8 +164,10 @@ int cmd_image_merge(int argc, const char **argv)
 			if (a0 < b1 && b0 < a1)
 				die("inputs overlap: '%s' at 0x%x and '%s' at "
 				    "0x%x",
-				    argv[2 * i + 1], (unsigned)ent[i].off,
-				    argv[2 * j + 1], (unsigned)ent[j].off);
+				    argv[2 * i + 1], /* NOLINT */
+				    (unsigned)ent[i].off,
+				    argv[2 * j + 1], /* NOLINT */
+				    (unsigned)ent[j].off);
 		}
 	}
 
@@ -179,6 +182,9 @@ int cmd_image_merge(int argc, const char **argv)
 			    opt_pad_to_size, end, fs);
 		total = fs;
 	}
+
+	if (total == 0)
+		die("nothing to merge (all inputs are empty)");
 
 	/* Second pass: allocate 0xFF buffer, place each file, write. */
 	uint8_t *out = malloc(total);

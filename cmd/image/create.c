@@ -154,7 +154,7 @@ static size_t flash_size_bytes(const char *s)
 		die("unrecognised flash size '%s' (expected e.g. 2MB or 4KB)",
 		    s);
 	}
-	return (size_t)mb * 1024u * 1024u;
+	return (size_t)mb * (size_t)1024u * (size_t)1024u;
 }
 
 int cmd_image_create(int argc, const char **argv)
