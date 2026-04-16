@@ -120,22 +120,44 @@ const struct cmd_manual ice_root_manual = {
 	.description =
 	H_PARA("@b{ice} drives the build, flash, configuration and size "
 	       "tooling for ESP-IDF projects.  It replaces @b{idf.py} with "
-	       "a single self-contained binary.")
-	H_PARA("Subcommands wrap the underlying CMake / flashing / linker "
-	       "utilities and share a common configuration system with "
-	       "@b{cli > env > project > local > user > defaults} "
-	       "precedence."),
+	       "a single self-contained binary -- no Python, no "
+	       "@b{export.sh}, no virtual environments."),
 
 	.list_commands = 1,
 	.list_aliases  = 1,
 
 	.examples =
-	H_EXAMPLE("ice reconfigure")
+	H_EXAMPLE("ice idf clone && ice idf switch v5.4")
+	H_EXAMPLE("ice target set esp32s3")
 	H_EXAMPLE("ice build")
-	H_EXAMPLE("ice -C /path/to/project flash")
+	H_EXAMPLE("ice flash")
 	H_EXAMPLE("ice help config"),
 
 	.extras =
+	H_SECTION("GETTING STARTED")
+	H_PARA("Set up ESP-IDF (choose one):")
+	H_LINE("@y{$} @b{ice idf clone}                     clone ESP-IDF into ~/.ice/")
+	H_LINE("@y{$} @b{ice idf repo ~/work/esp-idf}       use an existing clone")
+	H_RAW("")
+	H_PARA("Pick a version and target:")
+	H_LINE("@y{$} @b{ice idf switch v5.4}               checkout a release")
+	H_LINE("@y{$} @b{ice target set esp32s3}             set the chip target")
+	H_LINE("@y{$} @b{ice tools install}                  install build tools")
+	H_RAW("")
+	H_PARA("Build and flash:")
+	H_LINE("@y{$} @b{ice build}")
+	H_LINE("@y{$} @b{ice flash}")
+	H_RAW("")
+	H_PARA("No @b{export.sh} or environment setup needed -- @b{ice} "
+	       "finds the tools automatically.")
+
+	H_SECTION("MANAGING ESP-IDF VERSIONS")
+	H_PARA("List available versions and switch between them:")
+	H_LINE("@y{$} @b{ice idf list}                      show available tags")
+	H_LINE("@y{$} @b{ice idf switch v6.0}               switch to a new release")
+	H_LINE("@y{$} @b{ice idf pull}                      fetch latest tags")
+	H_LINE("@y{$} @b{ice idf info}                      show current version")
+
 	H_SECTION("SEE ALSO")
 	H_ITEM("ice help <command>",
 	       "Show the manual page for a specific command.")
