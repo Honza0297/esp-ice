@@ -140,6 +140,7 @@ LIB_SRCS := \
 	cmd/partition-table/partition-table.c \
 	cmd/reconfigure/reconfigure.c \
 	cmd/set-target/set-target.c \
+	cmd/target/target.c \
 	cmd/size/chip.c \
 	cmd/size/size.c \
 	config.c \

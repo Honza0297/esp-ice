@@ -74,6 +74,7 @@ int cmd_ldgen(int argc, const char **argv);
 int cmd_monitor(int argc, const char **argv);
 int cmd_partition_table(int argc, const char **argv);
 int cmd_size(int argc, const char **argv);
+int cmd_target(int argc, const char **argv);
 
 /*
  * Per-subcommand option tables, lifted to file scope so the completion
@@ -90,6 +91,7 @@ extern const struct option cmd_ldgen_opts[];
 extern const struct option cmd_partition_table_opts[];
 extern const struct option cmd_set_target_opts[];
 extern const struct option cmd_size_opts[];
+extern const struct option cmd_target_set_opts[];
 
 /* NULL-terminated chip target lists defined in cmd/set-target/set-target.c. */
 extern const char *const ice_supported_targets[];

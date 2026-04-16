@@ -65,12 +65,14 @@ const struct cmd_struct ice_commands[] = {
      .summary = "regenerate the build system"},
     {.name = "set-target",
      .fn = cmd_set_target,
-     .summary = "switch the chip target",
-     .opts = cmd_set_target_opts},
+     .summary = "switch the chip target (alias for 'target set')",
+     .opts = cmd_set_target_opts,
+     .hidden = 1},
     {.name = "size",
      .fn = cmd_size,
      .summary = "analyse firmware memory usage by region",
      .opts = cmd_size_opts},
+    {.name = "target", .fn = cmd_target, .summary = "manage the chip target"},
     /*
      * Hidden backend invoked by the bash/zsh/fish glue printed by
      * `ice completion`.  Kept out of help listings and top-level
