@@ -20,8 +20,6 @@
 
 #include "fs.h"
 
-#include <string.h>
-
 #define IDF_CLONE_URL "https://github.com/espressif/esp-idf.git"
 
 /*

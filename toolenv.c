@@ -19,8 +19,6 @@
 
 #include "json.h"
 
-#include <string.h>
-
 struct find_version_ctx {
 	const char *parent;
 	struct sbuf *result;
