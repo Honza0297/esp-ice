@@ -11,6 +11,7 @@
  * Connects to a serial port, displays device output in real time,
  * and forwards keyboard input to the device.  Press Ctrl-] to exit.
  */
+#include "esf_port.h"
 #include "ice.h"
 #include "serial.h"
 

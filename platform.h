@@ -40,6 +40,7 @@
 #define PLATFORM_H
 
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <sys/types.h>
 
@@ -144,6 +145,14 @@ int link_w(const char *target, const char *linkpath);
 int putenv(char *);
 
 #endif /* _WIN32 */
+
+/**
+ * @brief Sleep for @p ms milliseconds.
+ *
+ * Uses nanosleep() on POSIX and Sleep() on Windows.
+ * Implementation lives next to mono_ms() in platform/{posix,win}/process.c.
+ */
+void delay_ms(uint32_t ms);
 
 /**
  * @brief Get terminal width for a given file descriptor.

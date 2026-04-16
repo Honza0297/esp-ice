@@ -149,6 +149,7 @@ LIB_SRCS := \
 	cmd/repo/info/info.c \
 	cmd/status/status.c \
 	cmd/target/target.c \
+	cmd/target/flash.c \
 	cmd/target/list/list.c \
 	cmd/target/monitor/monitor.c \
 	cmd/tools/tools.c \
@@ -181,7 +182,8 @@ LIB_SRCS := \
 	reader.c \
 	tar.c \
 	toolenv.c \
-	vendor/sha256/sha256.c
+	vendor/sha256/sha256.c \
+	esf_port.c
 
 # MAIN_SRCS provide the program entry point.  Excluded from libice.a
 # so that unit tests (and any future external libice consumer) can

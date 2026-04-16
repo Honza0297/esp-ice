@@ -80,19 +80,23 @@ static const struct cmd_manual target_manual = {
 
 	.description =
 	H_PARA("Operations on a connected chip via an explicit serial "
-	       "port -- the home of @b{monitor} today and the future "
-	       "home of esptool-replacement commands (flash, erase, "
-	       "reset, info, ...).")
+	       "port -- plumbing commands that require no project state.")
 	H_PARA("Setting the project's chip is done by "
 	       "@b{ice init <chip> <idf>}, not from this namespace."),
 
 	.examples =
 	H_EXAMPLE("ice target list")
-	H_EXAMPLE("ice target monitor -p /dev/ttyUSB0"),
+	H_EXAMPLE("ice target monitor -p /dev/ttyUSB0")
+	H_EXAMPLE("ice target flash --port /dev/ttyUSB0 "
+		  "0x0=bootloader.bin 0x8000=partition-table.bin "
+		  "0x10000=app.bin"),
 };
 /* clang-format on */
 
+extern const struct cmd_desc cmd_target_flash_desc;
+
 static const struct cmd_desc *const target_subs[] = {
+    &cmd_target_flash_desc,
     &cmd_target_list_desc,
     &cmd_target_monitor_desc,
     NULL,
