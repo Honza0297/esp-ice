@@ -168,6 +168,7 @@ LIB_SRCS := \
 	xz.c \
 	reader.c \
 	tar.c \
+	toolenv.c \
 	vendor/sha256/sha256.c
 
 # MAIN_SRCS provide the program entry point.  Excluded from libice.a

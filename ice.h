@@ -61,6 +61,18 @@ int cmd_set_target(int argc, const char **argv);
  */
 int fullclean_run(void);
 
+/**
+ * @brief Prepend installed tool directories to PATH and set export_vars.
+ *
+ * Reads tools.json from the configured idf.path, finds installed tools
+ * under ice_home()/tools/, and modifies the environment so child
+ * processes can find compilers, debuggers, and other tools without
+ * requiring the user to source export.sh.
+ *
+ * No-op if idf.path is not configured or tools.json cannot be read.
+ */
+void setup_tool_env(void);
+
 /* Subcommands -- standalone */
 int cmd_complete(int argc, const char **argv);
 int cmd_completion(int argc, const char **argv);

@@ -212,6 +212,8 @@ int main(int argc, const char **argv)
 					 : config_get("core.build-dir"));
 	config_load_env(&config);
 
+	setup_tool_env();
+
 	argc = parse_options_manual(argc, argv, ice_global_opts,
 				    ice_global_usage, &ice_root_manual);
 
