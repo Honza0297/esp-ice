@@ -315,8 +315,11 @@ static int ref_exists(const char *base, const char *ref)
  * The reference accumulates objects over time: every checkout
  * leaves its submodule gitdirs under @p reference/.git/modules/, so
  * the next checkout of a nearby version has most objects already
- * available locally and runs in seconds.  The `clean -fdx` up front
- * discards whatever working-tree files the previous checkout left.
+ * available locally and runs in seconds.  The `clean -ffdx` up
+ * front discards whatever working-tree files the previous
+ * checkout left -- double -f is required to cross submodule
+ * worktree boundaries, otherwise stale submodule dirs stick around
+ * and later `git checkout` warns "unable to rmdir ...".
  */
 static void prepare_reference(const char *ref, int jobs)
 {
@@ -326,7 +329,7 @@ static void prepare_reference(const char *ref, int jobs)
 	snprintf(jobs_str, sizeof(jobs_str), "%d", jobs);
 
 	{
-		const char *argv[] = {"git", "clean", "-fdx", NULL};
+		const char *argv[] = {"git", "clean", "-ffdx", NULL};
 		run_git(base, argv);
 	}
 
@@ -591,7 +594,7 @@ static int cmd_idf_pull(int argc, const char **argv)
 	fprintf(stderr, "Refreshing reference at @b{%s} ...\n", base);
 
 	{
-		const char *argv[] = {"git", "clean", "-fdx", NULL};
+		const char *argv[] = {"git", "clean", "-ffdx", NULL};
 		run_git(base, argv);
 	}
 
@@ -898,6 +901,22 @@ static int cmd_idf_checkout(int argc, const char **argv)
 		    "--force", "--no-fetch", "--jobs", jobs_str, NULL};
 		if (run_git(dest, argv) != 0)
 			warn("some submodules failed to update");
+	}
+
+	/*
+	 * Restore the reference to master so it is left in a stable,
+	 * attached state instead of detached at <ref>.  The skeleton
+	 * mirror above captured reference's gitdirs at the <ref> state,
+	 * so dest is already self-contained; flipping reference here
+	 * affects only its own worktree, which nobody uses directly.
+	 * Stale submodule worktree content is cleaned by the `git clean
+	 * -ffdx` at the start of the next prepare_reference().
+	 */
+	{
+		const char *argv[] = {"git", "checkout", "--force", "master",
+				      NULL};
+		if (run_git(base, argv) != 0)
+			warn("could not restore reference to master");
 	}
 
 	reference_unlock();
