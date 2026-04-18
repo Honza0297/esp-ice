@@ -151,6 +151,51 @@ int rmtree(const char *path, int verbose)
 	return ctx.rc;
 }
 
+struct hardlink_ctx {
+	const char *src_dir;
+	const char *dst_dir;
+	int rc;
+};
+
+static int hardlink_entry(const char *name, void *ud)
+{
+	struct hardlink_ctx *ctx = ud;
+	struct sbuf src = SBUF_INIT;
+	struct sbuf dst = SBUF_INIT;
+
+	sbuf_addf(&src, "%s/%s", ctx->src_dir, name);
+	sbuf_addf(&dst, "%s/%s", ctx->dst_dir, name);
+
+	if (is_directory(src.buf)) {
+		if (mkdir(dst.buf, 0755) < 0 && errno != EEXIST) {
+			warn_errno("mkdir '%s'", dst.buf);
+			ctx->rc = -1;
+		} else if (hardlink_tree(src.buf, dst.buf) < 0) {
+			ctx->rc = -1;
+		}
+	} else if (link(src.buf, dst.buf) < 0) {
+		warn_errno("link '%s' -> '%s'", src.buf, dst.buf);
+		ctx->rc = -1;
+	}
+
+	sbuf_release(&src);
+	sbuf_release(&dst);
+	return 0;
+}
+
+int hardlink_tree(const char *src, const char *dst)
+{
+	struct hardlink_ctx ctx = {.src_dir = src, .dst_dir = dst, .rc = 0};
+
+	if (mkdir(dst, 0755) < 0 && errno != EEXIST)
+		return -1;
+	if (dir_foreach(src, hardlink_entry, &ctx) < 0) {
+		warn_errno("cannot open '%s'", src);
+		return -1;
+	}
+	return ctx.rc;
+}
+
 int find_in_path(const char *name)
 {
 	const char *p = getenv("PATH");

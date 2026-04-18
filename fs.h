@@ -78,4 +78,26 @@ int rmtree(const char *path, int verbose);
  */
 int find_in_path(const char *name);
 
+/**
+ * @brief Recursively hardlink the contents of @p src into @p dst.
+ *
+ * @p dst is created if missing; existing files inside @p dst cause
+ * link() to fail EEXIST and abort the copy.  Directories are
+ * recreated in @p dst and their contents processed recursively;
+ * regular files are hardlinked via link(); anything else (symlinks,
+ * sockets, devices) errors out.
+ *
+ * @p src and @p dst must live on the same filesystem -- link() fails
+ * EXDEV across mounts.
+ *
+ * Intended for append-only content like git's object store: when a
+ * consumer later rewrites a file via atomic rename, the rename
+ * creates a new inode so the modification doesn't propagate to
+ * @p src; but any in-place edit to a shared inode DOES propagate,
+ * which callers must account for.
+ *
+ * @return 0 on success, -1 if any directory scan or link() failed.
+ */
+int hardlink_tree(const char *src, const char *dst);
+
 #endif /* FS_H */

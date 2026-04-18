@@ -271,7 +271,7 @@ const struct cmd_manual ice_root_manual = {
 	.list_aliases  = 1,
 
 	.examples =
-	H_EXAMPLE("ice idf clone && ice idf switch v5.4")
+	H_EXAMPLE("ice idf clone && ice idf checkout v5.4 v5.4")
 	H_EXAMPLE("ice target set esp32s3")
 	H_EXAMPLE("ice build")
 	H_EXAMPLE("ice flash")
@@ -279,14 +279,16 @@ const struct cmd_manual ice_root_manual = {
 
 	.extras =
 	H_SECTION("GETTING STARTED")
-	H_PARA("Set up ESP-IDF (choose one):")
-	H_LINE("@y{$} @b{ice idf clone}                     clone ESP-IDF into ~/.ice/")
-	H_LINE("@y{$} @b{ice idf repo ~/work/esp-idf}       use an existing clone")
+	H_PARA("Set up the ice-managed ESP-IDF reference:")
+	H_LINE("@y{$} @b{ice idf clone}                         clone ESP-IDF into ~/.ice/esp-idf")
 	H_RAW("")
-	H_PARA("Pick a version and target:")
-	H_LINE("@y{$} @b{ice idf switch v5.4}               checkout a release")
-	H_LINE("@y{$} @b{ice target set esp32s3}             set the chip target")
-	H_LINE("@y{$} @b{ice tools install}                  install build tools")
+	H_PARA("Create a working checkout for a release and point ice at it:")
+	H_LINE("@y{$} @b{ice idf checkout v5.4 v5.4}            creates ~/.ice/checkouts/v5.4")
+	H_LINE("@y{$} @b{ice config idf.path ~/.ice/checkouts/v5.4}")
+	H_RAW("")
+	H_PARA("Pick a target and install build tools:")
+	H_LINE("@y{$} @b{ice target set esp32s3}                set the chip target")
+	H_LINE("@y{$} @b{ice tools install}                     install build tools")
 	H_RAW("")
 	H_PARA("Build and flash:")
 	H_LINE("@y{$} @b{ice build}")
@@ -296,11 +298,12 @@ const struct cmd_manual ice_root_manual = {
 	       "finds the tools automatically.")
 
 	H_SECTION("MANAGING ESP-IDF VERSIONS")
-	H_PARA("List available versions and switch between them:")
-	H_LINE("@y{$} @b{ice idf list}                      show available tags")
-	H_LINE("@y{$} @b{ice idf switch v6.0}               switch to a new release")
-	H_LINE("@y{$} @b{ice idf pull}                      fetch latest tags")
-	H_LINE("@y{$} @b{ice idf info}                      show current version")
+	H_PARA("List available versions, create more checkouts, or refresh the reference:")
+	H_LINE("@y{$} @b{ice idf list}                          show available branches and tags")
+	H_LINE("@y{$} @b{ice idf checkout release/v5.2 v5.2}   add a second checkout")
+	H_LINE("@y{$} @b{ice idf checkout --list}               list existing checkouts")
+	H_LINE("@y{$} @b{ice idf pull}                          refresh the reference to latest master")
+	H_LINE("@y{$} @b{ice idf info}                          show reference and checkout status")
 
 	H_SECTION("SEE ALSO")
 	H_ITEM("ice help <command>",
