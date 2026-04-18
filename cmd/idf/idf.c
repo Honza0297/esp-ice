@@ -59,6 +59,40 @@ static const char *checkouts_path(void)
 	return path.buf;
 }
 
+/** Return ~/.ice/esp-idf.lock -- serialises clone/pull/checkout. */
+static const char *reference_lock_path(void)
+{
+	static struct sbuf path = SBUF_INIT;
+
+	if (!path.len)
+		sbuf_addf(&path, "%s/esp-idf.lock", ice_home());
+	return path.buf;
+}
+
+/**
+ * Take the reference lock for the duration of the caller, die() with
+ * a user-facing message if another ice holds it.  The parent
+ * directory (~/.ice) is created lazily so the very first clone works.
+ */
+static void reference_lock(void)
+{
+	const char *lock = reference_lock_path();
+
+	if (mkdirp_for_file(lock) < 0)
+		die_errno("cannot create parent of '%s'", lock);
+
+	if (lock_acquire(lock) < 0) {
+		if (errno == EEXIST)
+			die("another @b{ice} process holds the reference "
+			    "lock at @b{%s}\n"
+			    "hint: remove it if no ice is running",
+			    lock);
+		die_errno("cannot create lock '%s'", lock);
+	}
+}
+
+static void reference_unlock(void) { lock_release(reference_lock_path()); }
+
 /**
  * Resolve a checkout destination argument.
  *
@@ -75,10 +109,6 @@ static char *checkout_path(const char *arg)
 
 	bare = *arg && arg[0] != '/' && arg[0] != '.' && arg[0] != '~' &&
 	       !strchr(arg, '/');
-#ifdef _WIN32
-	if (bare && (strchr(arg, '\\') || (arg[0] && arg[1] == ':')))
-		bare = 0;
-#endif
 
 	if (bare)
 		sbuf_addf(&p, "%s/%s", checkouts_path(), arg);
@@ -453,6 +483,8 @@ static int cmd_idf_clone(int argc, const char **argv)
 	argc = parse_options(argc, argv, clone_opts, &manual);
 	url = argc >= 1 ? argv[0] : IDF_CLONE_URL;
 
+	reference_lock();
+
 	if (!access(reference_path(), F_OK))
 		die("ESP-IDF already cloned at @b{%s}\n"
 		    "hint: use @b{ice idf pull} to update",
@@ -490,6 +522,7 @@ static int cmd_idf_clone(int argc, const char **argv)
 		die("git clone failed");
 	svec_clear(&args);
 
+	reference_unlock();
 	fprintf(stderr, "@g{done}\n");
 	return 0;
 }
@@ -527,6 +560,7 @@ static int cmd_idf_pull(int argc, const char **argv)
 
 	parse_options(argc, argv, pull_opts, &manual);
 	ensure_reference();
+	reference_lock();
 
 	if (pull_jobs < 1)
 		pull_jobs = 1;
@@ -560,6 +594,7 @@ static int cmd_idf_pull(int argc, const char **argv)
 			warn("some submodules failed to update");
 	}
 
+	reference_unlock();
 	fprintf(stderr, "@g{done}\n");
 	return 0;
 }
@@ -732,6 +767,8 @@ static int cmd_idf_checkout(int argc, const char **argv)
 	if (checkout_jobs < 1)
 		checkout_jobs = 1;
 
+	reference_lock();
+
 	fprintf(stderr, "Preparing reference at @b{%s} ...\n", base);
 	prepare_reference(ref, checkout_jobs);
 
@@ -817,6 +854,7 @@ static int cmd_idf_checkout(int argc, const char **argv)
 			warn("some submodules failed to update");
 	}
 
+	reference_unlock();
 	fprintf(stderr, "@g{Checked out %s at %s}\n", ref, dest);
 	sbuf_release(&origin_url);
 	free(dest);
