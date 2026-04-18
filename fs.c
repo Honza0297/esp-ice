@@ -11,6 +11,9 @@
 #include "fs.h"
 #include "ice.h"
 
+#include <fcntl.h>
+#include <signal.h>
+
 int mkdirp(const char *dir)
 {
 	struct sbuf sb = SBUF_INIT;
@@ -151,49 +154,85 @@ int rmtree(const char *path, int verbose)
 	return ctx.rc;
 }
 
-struct hardlink_ctx {
-	const char *src_dir;
-	const char *dst_dir;
-	int rc;
-};
+/* ------------------------------------------------------------------ */
+/* Lockfiles                                                           */
+/* ------------------------------------------------------------------ */
 
-static int hardlink_entry(const char *name, void *ud)
+/*
+ * One process never holds more than a handful of locks, so a tiny
+ * fixed-size registry avoids pulling in svec.  Paths are duplicated
+ * on acquire and freed on release (or at exit).
+ */
+#define LOCK_MAX 4
+static char *held_locks[LOCK_MAX];
+static size_t held_locks_nr;
+static int lock_handlers_registered;
+
+static void lock_atexit_cleanup(void)
 {
-	struct hardlink_ctx *ctx = ud;
-	struct sbuf src = SBUF_INIT;
-	struct sbuf dst = SBUF_INIT;
+	for (size_t i = 0; i < held_locks_nr; i++) {
+		unlink(held_locks[i]);
+		free(held_locks[i]);
+		held_locks[i] = NULL;
+	}
+	held_locks_nr = 0;
+}
 
-	sbuf_addf(&src, "%s/%s", ctx->src_dir, name);
-	sbuf_addf(&dst, "%s/%s", ctx->dst_dir, name);
+/*
+ * Called from a signal handler -- must stay async-signal-safe.
+ * unlink() is AS-safe; free() is not, so we leak the strdup'd
+ * paths (the process is terminating anyway).
+ */
+static void lock_signal_cleanup(int sig)
+{
+	for (size_t i = 0; i < held_locks_nr; i++)
+		unlink(held_locks[i]);
+	_exit(128 + sig);
+}
 
-	if (is_directory(src.buf)) {
-		if (mkdir(dst.buf, 0755) < 0 && errno != EEXIST) {
-			warn_errno("mkdir '%s'", dst.buf);
-			ctx->rc = -1;
-		} else if (hardlink_tree(src.buf, dst.buf) < 0) {
-			ctx->rc = -1;
-		}
-	} else if (link(src.buf, dst.buf) < 0) {
-		warn_errno("link '%s' -> '%s'", src.buf, dst.buf);
-		ctx->rc = -1;
+int lock_acquire(const char *path)
+{
+	int fd;
+
+	if (held_locks_nr >= LOCK_MAX) {
+		errno = EMFILE;
+		return -1;
 	}
 
-	sbuf_release(&src);
-	sbuf_release(&dst);
+	fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
+	if (fd < 0)
+		return -1;
+	close(fd);
+
+	if (!lock_handlers_registered) {
+		atexit(lock_atexit_cleanup);
+		/*
+		 * Best-effort: SIGINT and SIGTERM are ISO C, defined on
+		 * POSIX and Windows.  Windows' SIGINT delivery via the
+		 * MSVCRT runs on a separate thread and is timing-dependent,
+		 * so a Ctrl-C on Windows may still leave a stale lock --
+		 * same tradeoff git makes.  Users see the clear
+		 * "remove the lock if no ice is running" hint either way.
+		 */
+		signal(SIGINT, lock_signal_cleanup);
+		signal(SIGTERM, lock_signal_cleanup);
+		lock_handlers_registered = 1;
+	}
+	held_locks[held_locks_nr++] = sbuf_strdup(path);
 	return 0;
 }
 
-int hardlink_tree(const char *src, const char *dst)
+void lock_release(const char *path)
 {
-	struct hardlink_ctx ctx = {.src_dir = src, .dst_dir = dst, .rc = 0};
-
-	if (mkdir(dst, 0755) < 0 && errno != EEXIST)
-		return -1;
-	if (dir_foreach(src, hardlink_entry, &ctx) < 0) {
-		warn_errno("cannot open '%s'", src);
-		return -1;
+	for (size_t i = 0; i < held_locks_nr; i++) {
+		if (!strcmp(held_locks[i], path)) {
+			unlink(path);
+			free(held_locks[i]);
+			held_locks[i] = held_locks[--held_locks_nr];
+			held_locks[held_locks_nr] = NULL;
+			return;
+		}
 	}
-	return ctx.rc;
 }
 
 int find_in_path(const char *name)

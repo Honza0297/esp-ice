@@ -401,6 +401,29 @@ int rmdir_w(const char *path)
 	return rv;
 }
 
+/**
+ * @brief UTF-8-aware open() replacement for Windows.
+ *
+ * The three-argument form (flags + mode) covers the O_CREAT cases we
+ * need for lockfiles and atomic updates.  Callers that don't need
+ * O_CREAT still pass a mode argument -- _wopen ignores it when
+ * O_CREAT is absent.
+ */
+int open_w(const char *path, int flags, int mode)
+{
+	wchar_t *wpath = mbs_to_wcs(path);
+	int rv;
+
+	if (!wpath) {
+		errno = ENOMEM;
+		return -1;
+	}
+
+	rv = _wopen(wpath, flags, mode);
+	free(wpath);
+	return rv;
+}
+
 /*
  * Atomic-replace rename: POSIX rename() already replaces an existing
  * target atomically, but the Windows CRT rename() fails with EEXIST.

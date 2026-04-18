@@ -79,25 +79,32 @@ int rmtree(const char *path, int verbose);
 int find_in_path(const char *name);
 
 /**
- * @brief Recursively hardlink the contents of @p src into @p dst.
+ * @brief Acquire an exclusive advisory lock by creating @p path.
  *
- * @p dst is created if missing; existing files inside @p dst cause
- * link() to fail EEXIST and abort the copy.  Directories are
- * recreated in @p dst and their contents processed recursively;
- * regular files are hardlinked via link(); anything else (symlinks,
- * sockets, devices) errors out.
+ * Uses open(O_CREAT | O_EXCL) to atomically create @p path (git's
+ * "<filename>.lock" pattern).  If the file already exists, fails with
+ * errno == EEXIST so the caller can report that another ice process
+ * holds the lock.  On success the PID of the current process is
+ * written into the file for diagnostics and @p path is registered
+ * with atexit() so the lock is removed even if die() is called before
+ * lock_release().
  *
- * @p src and @p dst must live on the same filesystem -- link() fails
- * EXDEV across mounts.
+ * Works cross-filesystem and cross-platform -- the atomicity is
+ * guaranteed by the kernel, not by filesystem semantics.  Signals
+ * that bypass atexit (SIGKILL, default SIGINT) will leave the file
+ * behind; callers should document how to remove stale locks.
  *
- * Intended for append-only content like git's object store: when a
- * consumer later rewrites a file via atomic rename, the rename
- * creates a new inode so the modification doesn't propagate to
- * @p src; but any in-place edit to a shared inode DOES propagate,
- * which callers must account for.
- *
- * @return 0 on success, -1 if any directory scan or link() failed.
+ * @return 0 on success, -1 on failure (errno set).
  */
-int hardlink_tree(const char *src, const char *dst);
+int lock_acquire(const char *path);
+
+/**
+ * @brief Release a lock previously acquired with lock_acquire().
+ *
+ * Unlinks @p path and deregisters it from the atexit cleanup list.
+ * Safe to call after a successful lock_acquire only -- releasing a
+ * lock we don't own would unlink another process's file.
+ */
+void lock_release(const char *path);
 
 #endif /* FS_H */

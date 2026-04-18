@@ -29,7 +29,7 @@
  *
  * On Windows (_WIN32):
  *  - Provides a ssize_t typedef (not part of the Windows CRT).
- *  - Overrides fopen, access, and mkdir with UTF-8-aware wrappers.
+ *  - Overrides fopen, access, mkdir, open with UTF-8-aware wrappers.
  *  - Defines EOL as "\r\n".
  *
  * On POSIX:
@@ -75,10 +75,11 @@ int fputs_p(const char *, FILE *);
 typedef ptrdiff_t ssize_t;
 
 /*
- * Include <io.h> early -- before our mkdir/access/fopen macros --
- * because MSYS2's <io.h> declares its own mkdir(const char *) and
- * the macro would conflict with that prototype.
+ * Include <io.h> and <fcntl.h> early -- before our mkdir/access/fopen/
+ * open macros -- because MSYS2's headers declare their own versions
+ * and the macros would conflict with those prototypes.
  */
+#include <fcntl.h>
 #include <io.h>
 
 /* UTF-8-aware filesystem function replacements (Windows only). */
@@ -88,6 +89,7 @@ int mkdir_w(const char *, int);
 int unlink_w(const char *);
 int rmdir_w(const char *);
 int rename_w(const char *oldp, const char *newp);
+int open_w(const char *path, int flags, int mode);
 
 /*
  * POSIX symlink(2) / link(2) shims.  symlink_w is a no-op that
@@ -109,6 +111,7 @@ int link_w(const char *target, const char *linkpath);
 #define rename rename_w
 #define symlink symlink_w
 #define link link_w
+#define open open_w
 #define isatty _isatty
 #define putenv _putenv
 #define STDIN_FILENO 0
