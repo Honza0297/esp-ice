@@ -706,11 +706,14 @@ static int cmd_idf_checkout(int argc, const char **argv)
 
 		.description =
 		H_PARA("Create a working ESP-IDF tree at @b{<ref>} (a branch, "
-		       "tag, or commit SHA) under @b{<name|path>}.")
+		       "tag, or commit SHA).  @b{<name|path>} is optional and "
+		       "defaults to @b{<ref>} itself.")
 		H_PARA("A bare @b{<name>} (no path separator) lands at "
 		       "@b{~/.ice/checkouts/<name>/}.  Anything else -- a "
 		       "relative or absolute path -- is used verbatim, letting "
-		       "you drop a checkout anywhere.")
+		       "you drop a checkout anywhere.  If @b{<ref>} contains "
+		       "a path separator (e.g. @b{release/v5.2}) you must pass "
+		       "an explicit @b{<name|path>}.")
 		H_PARA("The reference at @b{~/.ice/esp-idf} is advanced to "
 		       "@b{<ref>} first (@b{clean}, @b{fetch} if needed, "
 		       "@b{checkout}, recursive @b{submodule update}) so its "
@@ -722,7 +725,7 @@ static int cmd_idf_checkout(int argc, const char **argv)
 		       "under @b{~/.ice/checkouts/}."),
 
 		.examples =
-		H_EXAMPLE("ice idf checkout v5.4 v5.4")
+		H_EXAMPLE("ice idf checkout v5.4")
 		H_EXAMPLE("ice idf checkout release/v5.2 v5.2")
 		H_EXAMPLE("ice idf checkout master /tmp/scratch")
 		H_EXAMPLE("ice idf checkout --list"),
@@ -752,13 +755,27 @@ static int cmd_idf_checkout(int argc, const char **argv)
 		return 0;
 	}
 
-	if (argc < 2)
-		die("expected <ref> <name|path>");
+	if (argc < 1)
+		die("expected <ref> [<name|path>]");
 	if (argc > 2)
 		die("too many arguments");
 
 	ref = argv[0];
-	dest = checkout_path(argv[1]);
+	if (argc >= 2) {
+		dest = checkout_path(argv[1]);
+	} else {
+		/*
+		 * Default <name> = <ref>.  Refs containing a path separator
+		 * (release/v5.2, origin/master) would land at a literal
+		 * relative path and surprise the user -- require an explicit
+		 * name in that case.
+		 */
+		if (strchr(ref, '/'))
+			die("ref @b{%s} contains a path separator; "
+			    "provide an explicit <name|path>",
+			    ref);
+		dest = checkout_path(ref);
+	}
 
 	ensure_reference();
 	if (!access(dest, F_OK))

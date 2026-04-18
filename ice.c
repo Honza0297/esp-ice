@@ -271,7 +271,7 @@ const struct cmd_manual ice_root_manual = {
 	.list_aliases  = 1,
 
 	.examples =
-	H_EXAMPLE("ice idf clone && ice idf checkout v5.4 v5.4")
+	H_EXAMPLE("ice idf clone && ice idf checkout v5.4")
 	H_EXAMPLE("ice target set esp32s3")
 	H_EXAMPLE("ice build")
 	H_EXAMPLE("ice flash")
@@ -283,7 +283,7 @@ const struct cmd_manual ice_root_manual = {
 	H_LINE("@y{$} @b{ice idf clone}                         clone ESP-IDF into ~/.ice/esp-idf")
 	H_RAW("")
 	H_PARA("Create a working checkout for a release and point ice at it:")
-	H_LINE("@y{$} @b{ice idf checkout v5.4 v5.4}            creates ~/.ice/checkouts/v5.4")
+	H_LINE("@y{$} @b{ice idf checkout v5.4}                 creates ~/.ice/checkouts/v5.4")
 	H_LINE("@y{$} @b{ice config idf.path ~/.ice/checkouts/v5.4}")
 	H_RAW("")
 	H_PARA("Pick a target and install build tools:")
