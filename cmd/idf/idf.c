@@ -343,9 +343,16 @@ static void prepare_reference(const char *ref, int jobs)
 	}
 
 	{
-		const char *argv[] = {"git",	"submodule",   "update",
-				      "--init", "--recursive", "--force",
-				      "--jobs", jobs_str,      NULL};
+		const char *argv[] = {"git",
+				      "submodule",
+				      "update",
+				      "--init",
+				      "--recursive",
+				      "--force",
+				      "--no-recommend-shallow",
+				      "--jobs",
+				      jobs_str,
+				      NULL};
 		if (run_git(base, argv) != 0)
 			warn("some submodules failed to update");
 	}
@@ -512,15 +519,30 @@ static int cmd_idf_clone(int argc, const char **argv)
 		if (clone_dissociate)
 			svec_push(&args, "--dissociate");
 	}
-	svec_push(&args, "--recurse-submodules");
-	svec_push(&args, "--jobs");
-	svec_push(&args, jobs_str);
 	svec_push(&args, url);
 	svec_push(&args, reference_path());
 
 	if (run_git(NULL, args.v) != 0)
 		die("git clone failed");
 	svec_clear(&args);
+
+	/*
+	 * Submodules are cloned in a separate step so we can pass
+	 * --no-recommend-shallow: .gitmodules marks several binary blob
+	 * submodules `shallow = true`, and a depth=1 clone drops older
+	 * commits whenever a later checkout moves the submodule SHA --
+	 * which forces a re-fetch the next time an earlier ref is
+	 * checked out.  Full-depth submodules accumulate permanently, so
+	 * any SHA once fetched stays for every subsequent checkout.
+	 */
+	{
+		const char *argv[] = {
+		    "git",    "submodule",   "update",
+		    "--init", "--recursive", "--no-recommend-shallow",
+		    "--jobs", jobs_str,	     NULL};
+		if (run_git(reference_path(), argv) != 0)
+			die("git submodule update failed");
+	}
 
 	reference_unlock();
 	fprintf(stderr, "@g{done}\n");
@@ -587,9 +609,16 @@ static int cmd_idf_pull(int argc, const char **argv)
 	}
 
 	{
-		const char *argv[] = {"git",	"submodule",   "update",
-				      "--init", "--recursive", "--force",
-				      "--jobs", jobs_str,      NULL};
+		const char *argv[] = {"git",
+				      "submodule",
+				      "update",
+				      "--init",
+				      "--recursive",
+				      "--force",
+				      "--no-recommend-shallow",
+				      "--jobs",
+				      jobs_str,
+				      NULL};
 		if (run_git(base, argv) != 0)
 			warn("some submodules failed to update");
 	}
