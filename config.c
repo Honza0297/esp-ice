@@ -268,11 +268,20 @@ static int valid_name_char(int ch)
 	return isalnum((unsigned char)ch) || ch == '-' || ch == '_';
 }
 
+/*
+ * Accepts both:
+ *   [section]
+ *   [section "subsection"]           (git-style; key becomes
+ * section.subsection.key)
+ *
+ * Section names are restricted to valid_name_char; subsection names
+ * are free-form between the quotes (supports \" and \\ escapes).
+ */
 static void parse_section(const char *path, int lineno, char *line,
 			  struct sbuf *section)
 {
 	char *start = line + 1; /* past '[' */
-	char *end, *after, *p;
+	char *end, *after, *p, *name_end;
 
 	end = strchr(start, ']');
 	if (!end) {
@@ -298,7 +307,12 @@ static void parse_section(const char *path, int lineno, char *line,
 		return;
 	}
 
-	for (p = start; p < end; p++) {
+	/* Section name runs until whitespace or end. */
+	name_end = start;
+	while (name_end < end && *name_end != ' ' && *name_end != '\t')
+		name_end++;
+
+	for (p = start; p < name_end; p++) {
 		if (!valid_name_char((unsigned char)*p)) {
 			warn("%s:%d: invalid character in section name", path,
 			     lineno);
@@ -307,7 +321,42 @@ static void parse_section(const char *path, int lineno, char *line,
 	}
 
 	sbuf_reset(section);
-	sbuf_add(section, start, end - start);
+	sbuf_add(section, start, name_end - start);
+
+	/* Optional subsection in quotes. */
+	p = name_end;
+	while (p < end && (*p == ' ' || *p == '\t'))
+		p++;
+	if (p == end)
+		return;
+
+	if (*p != '"') {
+		warn("%s:%d: expected '\"' to start subsection", path, lineno);
+		sbuf_reset(section);
+		return;
+	}
+	p++;
+
+	sbuf_addch(section, '.');
+	while (p < end && *p != '"') {
+		if (*p == '\\' && p + 1 < end) {
+			p++; /* skip escape; take next char literally */
+		}
+		sbuf_addch(section, *p++);
+	}
+	if (p >= end || *p != '"') {
+		warn("%s:%d: unterminated subsection", path, lineno);
+		sbuf_reset(section);
+		return;
+	}
+	p++;
+	while (p < end && (*p == ' ' || *p == '\t'))
+		p++;
+	if (p != end) {
+		warn("%s:%d: garbage after subsection", path, lineno);
+		sbuf_reset(section);
+		return;
+	}
 }
 
 static void parse_kv(struct config *c, enum config_scope scope,
@@ -407,14 +456,26 @@ static void parse_line(struct config *c, enum config_scope scope,
 		parse_kv(c, scope, path, lineno, line, section);
 }
 
-int config_load_file(struct config *c, enum config_scope scope,
-		     const char *path)
+void config_load_buf(struct config *c, enum config_scope scope,
+		     const char *label, char *buf, size_t len)
 {
-	struct sbuf sb = SBUF_INIT;
 	struct sbuf section = SBUF_INIT;
 	size_t pos = 0;
 	char *line;
 	int lineno = 0;
+
+	while ((line = sbuf_getline(buf, len, &pos)) != NULL) {
+		lineno++;
+		parse_line(c, scope, label, lineno, line, &section);
+	}
+
+	sbuf_release(&section);
+}
+
+int config_load_file(struct config *c, enum config_scope scope,
+		     const char *path)
+{
+	struct sbuf sb = SBUF_INIT;
 
 	if (!path)
 		return 0;
@@ -430,13 +491,8 @@ int config_load_file(struct config *c, enum config_scope scope,
 		return -1;
 	}
 
-	while ((line = sbuf_getline(sb.buf, sb.len, &pos)) != NULL) {
-		lineno++;
-		parse_line(c, scope, path, lineno, line, &section);
-	}
-
+	config_load_buf(c, scope, path, sb.buf, sb.len);
 	sbuf_release(&sb);
-	sbuf_release(&section);
 	return 0;
 }
 

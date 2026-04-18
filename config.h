@@ -28,6 +28,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include <stddef.h>
+
 /** Config source, ordered low -> high precedence. */
 enum config_scope {
 	CONFIG_SCOPE_DEFAULT, /**< Built-in defaults. */
@@ -198,6 +200,18 @@ const char *ice_home(void);
  */
 int config_load_file(struct config *c, enum config_scope scope,
 		     const char *path);
+
+/**
+ * @brief Parse config content from an in-memory buffer.
+ *
+ * Same semantics as config_load_file() but reads from @p buf (of
+ * @p len bytes).  @p label is used only for diagnostic messages
+ * (e.g. "HEAD:.gitmodules").  The buffer is modified in place by
+ * sbuf_getline() while walking lines, so the caller must pass a
+ * writable buffer it owns.
+ */
+void config_load_buf(struct config *c, enum config_scope scope,
+		     const char *label, char *buf, size_t len);
 
 /**
  * @brief Populate @p c with built-in default values at DEFAULT scope.
