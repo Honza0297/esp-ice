@@ -198,7 +198,6 @@ const struct option ice_global_opts[] = {
 static const struct cmd_desc *const ice_subs[] = {
     &cmd_build_desc,
     &cmd_clean_desc,
-    &cmd_cmake_desc,
     &cmd_completion_desc,
     &cmd_config_desc,
     &cmd_configdep_desc,

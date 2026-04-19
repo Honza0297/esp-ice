@@ -51,9 +51,7 @@ static const struct cmd_manual build_manual = {
 	       "Bind/rebind the project (also re-runs cmake from scratch).")
 	H_ITEM("ice clean",
 	       "Remove build artifacts without touching the cmake "
-	       "configuration.")
-	H_ITEM("ice cmake <target>",
-	       "Run an arbitrary cmake target with direct stdio."),
+	       "configuration."),
 };
 /* clang-format on */
 

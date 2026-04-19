@@ -120,7 +120,6 @@ LIB_SRCS := \
 	cmakecache.c \
 	cmd/build/build.c \
 	cmd/clean/clean.c \
-	cmd/cmake/cmake.c \
 	cmd/completion/completion.c \
 	cmd/config/config.c \
 	cmd/configdep/configdep.c \

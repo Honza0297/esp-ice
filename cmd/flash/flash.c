@@ -32,9 +32,7 @@ static const struct cmd_manual flash_manual = {
 	.extras =
 	H_SECTION("SEE ALSO")
 	H_ITEM("ice build",
-	       "Build before flashing, with captured progress output.")
-	H_ITEM("ice cmake erase-flash",
-	       "Wipe flash before reprogramming."),
+	       "Build before flashing, with captured progress output."),
 };
 /* clang-format on */
 

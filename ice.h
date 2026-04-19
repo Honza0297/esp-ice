@@ -45,7 +45,6 @@
 /* Subcommands -- cmake wrappers (see cmake.h) */
 int cmd_build(int argc, const char **argv);
 int cmd_clean(int argc, const char **argv);
-int cmd_cmake(int argc, const char **argv);
 int cmd_flash(int argc, const char **argv);
 int cmd_init(int argc, const char **argv);
 int cmd_menuconfig(int argc, const char **argv);
@@ -136,7 +135,6 @@ extern const struct cmd_desc ice_root_desc;
 /** Top-level command descriptors, indexed by ice_subs[] in ice.c. */
 extern const struct cmd_desc cmd_build_desc;
 extern const struct cmd_desc cmd_clean_desc;
-extern const struct cmd_desc cmd_cmake_desc;
 extern const struct cmd_desc cmd_completion_desc;
 extern const struct cmd_desc cmd_config_desc;
 extern const struct cmd_desc cmd_configdep_desc;
