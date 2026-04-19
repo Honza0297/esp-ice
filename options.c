@@ -344,7 +344,7 @@ int parse_options(int argc, const char **argv, const struct cmd_desc *desc)
 			 * file completion (sensible for a <name|path> slot).
 			 * Without this guard --ice-complete would be packed
 			 * as another positional and commands that accept one
-			 * (e.g. ice idf checkout) would treat it as data.
+			 * (e.g. ice repo checkout) would treat it as data.
 			 */
 			for (int j = i + 1; j < argc; j++) {
 				if (!strcmp(argv[j], "--ice-complete"))

@@ -131,7 +131,6 @@ LIB_SRCS := \
 	cmd/image/create.c \
 	cmd/image/info.c \
 	cmd/image/merge.c \
-	cmd/idf/idf.c \
 	cmd/install/install.c \
 	cmd/ldgen/ldgen.c \
 	cmd/ldgen/lf.c \
@@ -139,6 +138,7 @@ LIB_SRCS := \
 	cmd/menuconfig/menuconfig.c \
 	cmd/partition-table/partition-table.c \
 	cmd/reconfigure/reconfigure.c \
+	cmd/repo/repo.c \
 	cmd/set-target/set-target.c \
 	cmd/target/target.c \
 	cmd/tools/tools.c \

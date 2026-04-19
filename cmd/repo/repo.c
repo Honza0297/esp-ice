@@ -5,8 +5,8 @@
  */
 
 /**
- * @file idf.c
- * @brief `ice idf` -- manage the ESP-IDF source tree.
+ * @file repo.c
+ * @brief `ice repo` -- manage the ESP-IDF source tree.
  *
  * ice maintains a single ice-managed reference clone at
  * ~/.ice/esp-idf and creates per-version working checkouts under
@@ -28,7 +28,7 @@
 
 /*
  * Minimum supported IDF major.minor -- tags and release branches
- * older than this are filtered from `ice idf list`.
+ * older than this are filtered from `ice repo list`.
  */
 #define IDF_MIN_MAJOR 5
 #define IDF_MIN_MINOR 0
@@ -153,7 +153,7 @@ static void ensure_reference(void)
 {
 	if (access(reference_path(), F_OK) != 0)
 		die("no ESP-IDF reference at @b{%s}\n"
-		    "hint: run @b{ice idf clone} first",
+		    "hint: run @b{ice repo clone} first",
 		    reference_path());
 }
 
@@ -461,17 +461,17 @@ static const struct option clone_opts[] = {
     OPT_END_COMPLETE("[<url>]", NULL),
 };
 
-static int cmd_idf_clone(int argc, const char **argv);
+static int cmd_repo_clone(int argc, const char **argv);
 
 /* clang-format off */
-static const struct cmd_manual idf_clone_manual = {
-	.name = "ice idf clone",
+static const struct cmd_manual repo_clone_manual = {
+	.name = "ice repo clone",
 	.summary = "create the reference clone at ~/.ice/esp-idf/",
 
 	.description =
 	H_PARA("Clone ESP-IDF into @b{~/.ice/esp-idf}.  The reference "
 	       "is ice-managed; do not work in it directly.  Use "
-	       "@b{ice idf checkout} to create per-version working "
+	       "@b{ice repo checkout} to create per-version working "
 	       "trees that share objects with the reference.")
 	H_PARA("@b{--reference <path>} borrows objects from an existing "
 	       "ESP-IDF clone to avoid redundant network transfer.  The "
@@ -481,33 +481,33 @@ static const struct cmd_manual idf_clone_manual = {
 	       "so the reference no longer depends on @b{<path>}."),
 
 	.examples =
-	H_EXAMPLE("ice idf clone")
-	H_EXAMPLE("ice idf clone --reference ~/work/esp-idf")
-	H_EXAMPLE("ice idf clone --reference ~/work/esp-idf --dissociate"),
+	H_EXAMPLE("ice repo clone")
+	H_EXAMPLE("ice repo clone --reference ~/work/esp-idf")
+	H_EXAMPLE("ice repo clone --reference ~/work/esp-idf --dissociate"),
 };
 /* clang-format on */
 
-static const struct cmd_desc cmd_idf_clone_desc = {
+static const struct cmd_desc cmd_repo_clone_desc = {
     .name = "clone",
-    .fn = cmd_idf_clone,
+    .fn = cmd_repo_clone,
     .opts = clone_opts,
-    .manual = &idf_clone_manual,
+    .manual = &repo_clone_manual,
 };
 
-static int cmd_idf_clone(int argc, const char **argv)
+static int cmd_repo_clone(int argc, const char **argv)
 {
 	const char *url;
 	char jobs_str[16];
 	struct svec args = SVEC_INIT;
 
-	argc = parse_options(argc, argv, &cmd_idf_clone_desc);
+	argc = parse_options(argc, argv, &cmd_repo_clone_desc);
 	url = argc >= 1 ? argv[0] : IDF_CLONE_URL;
 
 	reference_lock();
 
 	if (!access(reference_path(), F_OK))
 		die("ESP-IDF already cloned at @b{%s}\n"
-		    "hint: use @b{ice idf pull} to update",
+		    "hint: use @b{ice repo pull} to update",
 		    reference_path());
 
 	if (clone_jobs < 1)
@@ -570,40 +570,40 @@ static const struct option pull_opts[] = {
     OPT_END(),
 };
 
-static int cmd_idf_pull(int argc, const char **argv);
+static int cmd_repo_pull(int argc, const char **argv);
 
 /* clang-format off */
-static const struct cmd_manual idf_pull_manual = {
-	.name = "ice idf pull",
+static const struct cmd_manual repo_pull_manual = {
+	.name = "ice repo pull",
 	.summary = "refresh the reference to latest master",
 
 	.description =
 	H_PARA("Clean any working-tree state left by a previous "
-	       "@b{ice idf checkout}, switch the reference to "
+	       "@b{ice repo checkout}, switch the reference to "
 	       "@b{master}, fast-forward to @b{origin/master}, and "
 	       "recursively update submodules.  Existing checkouts "
 	       "under @b{~/.ice/checkouts/} are left untouched -- use "
-	       "@b{ice idf checkout} again to build a new working tree "
+	       "@b{ice repo checkout} again to build a new working tree "
 	       "against the refreshed reference."),
 
 	.examples =
-	H_EXAMPLE("ice idf pull"),
+	H_EXAMPLE("ice repo pull"),
 };
 /* clang-format on */
 
-static const struct cmd_desc cmd_idf_pull_desc = {
+static const struct cmd_desc cmd_repo_pull_desc = {
     .name = "pull",
-    .fn = cmd_idf_pull,
+    .fn = cmd_repo_pull,
     .opts = pull_opts,
-    .manual = &idf_pull_manual,
+    .manual = &repo_pull_manual,
 };
 
-static int cmd_idf_pull(int argc, const char **argv)
+static int cmd_repo_pull(int argc, const char **argv)
 {
 	const char *base = reference_path();
 	char jobs_str[16];
 
-	parse_options(argc, argv, &cmd_idf_pull_desc);
+	parse_options(argc, argv, &cmd_repo_pull_desc);
 	ensure_reference();
 	reference_lock();
 
@@ -668,11 +668,11 @@ static int version_supported(const char *ver)
 	       (major == IDF_MIN_MAJOR && minor >= IDF_MIN_MINOR);
 }
 
-static int cmd_idf_list(int argc, const char **argv);
+static int cmd_repo_list(int argc, const char **argv);
 
 /* clang-format off */
-static const struct cmd_manual idf_list_manual = {
-	.name = "ice idf list",
+static const struct cmd_manual repo_list_manual = {
+	.name = "ice repo list",
 	.summary = "list available versions (branches + tags)",
 
 	.description =
@@ -681,28 +681,28 @@ static const struct cmd_manual idf_list_manual = {
 	       "@b{v5.0} are hidden."),
 
 	.examples =
-	H_EXAMPLE("ice idf list")
-	H_EXAMPLE("ice idf list | head -20"),
+	H_EXAMPLE("ice repo list")
+	H_EXAMPLE("ice repo list | head -20"),
 };
 /* clang-format on */
 
-static const struct option cmd_idf_list_opts[] = {OPT_END()};
+static const struct option cmd_repo_list_opts[] = {OPT_END()};
 
-static const struct cmd_desc cmd_idf_list_desc = {
+static const struct cmd_desc cmd_repo_list_desc = {
     .name = "list",
-    .fn = cmd_idf_list,
-    .opts = cmd_idf_list_opts,
-    .manual = &idf_list_manual,
+    .fn = cmd_repo_list,
+    .opts = cmd_repo_list_opts,
+    .manual = &repo_list_manual,
 };
 
-static int cmd_idf_list(int argc, const char **argv)
+static int cmd_repo_list(int argc, const char **argv)
 {
 	const char *base = reference_path();
 	struct sbuf out = SBUF_INIT;
 	size_t pos;
 	char *line;
 
-	parse_options(argc, argv, &cmd_idf_list_desc);
+	parse_options(argc, argv, &cmd_repo_list_desc);
 	ensure_reference();
 
 	{
@@ -760,11 +760,11 @@ static const struct option checkout_opts[] = {
     OPT_END_COMPLETE("<ref> [<name|path>]", complete_refs),
 };
 
-static int cmd_idf_checkout(int argc, const char **argv);
+static int cmd_repo_checkout(int argc, const char **argv);
 
 /* clang-format off */
-static const struct cmd_manual idf_checkout_manual = {
-	.name = "ice idf checkout",
+static const struct cmd_manual repo_checkout_manual = {
+	.name = "ice repo checkout",
 	.summary = "create a working checkout at a given ref",
 
 	.description =
@@ -788,28 +788,28 @@ static const struct cmd_manual idf_checkout_manual = {
 	       "under @b{~/.ice/checkouts/}."),
 
 	.examples =
-	H_EXAMPLE("ice idf checkout v5.4")
-	H_EXAMPLE("ice idf checkout release/v5.2 v5.2")
-	H_EXAMPLE("ice idf checkout master /tmp/scratch")
-	H_EXAMPLE("ice idf checkout --list"),
+	H_EXAMPLE("ice repo checkout v5.4")
+	H_EXAMPLE("ice repo checkout release/v5.2 v5.2")
+	H_EXAMPLE("ice repo checkout master /tmp/scratch")
+	H_EXAMPLE("ice repo checkout --list"),
 };
 /* clang-format on */
 
-static const struct cmd_desc cmd_idf_checkout_desc = {
+static const struct cmd_desc cmd_repo_checkout_desc = {
     .name = "checkout",
-    .fn = cmd_idf_checkout,
+    .fn = cmd_repo_checkout,
     .opts = checkout_opts,
-    .manual = &idf_checkout_manual,
+    .manual = &repo_checkout_manual,
 };
 
-static int cmd_idf_checkout(int argc, const char **argv)
+static int cmd_repo_checkout(int argc, const char **argv)
 {
 	const char *base = reference_path();
 	const char *ref;
 	char *dest;
 	struct sbuf origin_url = SBUF_INIT;
 
-	argc = parse_options(argc, argv, &cmd_idf_checkout_desc);
+	argc = parse_options(argc, argv, &cmd_repo_checkout_desc);
 
 	if (opt_checkout_list) {
 		struct svec names = SVEC_INIT;
@@ -967,11 +967,11 @@ static int cmd_idf_checkout(int argc, const char **argv)
 	return 0;
 }
 
-static int cmd_idf_info(int argc, const char **argv);
+static int cmd_repo_info(int argc, const char **argv);
 
 /* clang-format off */
-static const struct cmd_manual idf_info_manual = {
-	.name = "ice idf info",
+static const struct cmd_manual repo_info_manual = {
+	.name = "ice repo info",
 	.summary = "show reference and checkout status",
 
 	.description =
@@ -982,30 +982,30 @@ static const struct cmd_manual idf_info_manual = {
 	       "working tree -- create a checkout instead."),
 
 	.examples =
-	H_EXAMPLE("ice idf info"),
+	H_EXAMPLE("ice repo info"),
 };
 /* clang-format on */
 
-static const struct option cmd_idf_info_opts[] = {OPT_END()};
+static const struct option cmd_repo_info_opts[] = {OPT_END()};
 
-static const struct cmd_desc cmd_idf_info_desc = {
+static const struct cmd_desc cmd_repo_info_desc = {
     .name = "info",
-    .fn = cmd_idf_info,
-    .opts = cmd_idf_info_opts,
-    .manual = &idf_info_manual,
+    .fn = cmd_repo_info,
+    .opts = cmd_repo_info_opts,
+    .manual = &repo_info_manual,
 };
 
-static int cmd_idf_info(int argc, const char **argv)
+static int cmd_repo_info(int argc, const char **argv)
 {
 	const char *base = reference_path();
 	struct sbuf head = SBUF_INIT;
 	struct svec names = SVEC_INIT;
 
-	parse_options(argc, argv, &cmd_idf_info_desc);
+	parse_options(argc, argv, &cmd_repo_info_desc);
 
 	if (access(base, F_OK) != 0) {
 		fprintf(stderr, "No ESP-IDF reference configured.\n"
-				"hint: run @b{ice idf clone}\n");
+				"hint: run @b{ice repo clone}\n");
 		return 1;
 	}
 
@@ -1045,7 +1045,7 @@ static int cmd_idf_info(int argc, const char **argv)
 	svec_clear(&names);
 
 	printf("\nThe reference is ice-managed; do not work in it.\n"
-	       "Use @b{ice idf checkout <ref> <name>} for a working copy.\n");
+	       "Use @b{ice repo checkout <ref> <name>} for a working copy.\n");
 
 	return 0;
 }
@@ -1054,11 +1054,11 @@ static int cmd_idf_info(int argc, const char **argv)
 /* Dispatcher                                                          */
 /* ------------------------------------------------------------------ */
 
-static const struct option cmd_idf_opts[] = {OPT_END()};
+static const struct option cmd_repo_opts[] = {OPT_END()};
 
 /* clang-format off */
-static const struct cmd_manual idf_manual = {
-	.name = "ice idf",
+static const struct cmd_manual repo_manual = {
+	.name = "ice repo",
 	.summary = "manage the ESP-IDF source tree",
 
 	.description =
@@ -1066,26 +1066,26 @@ static const struct cmd_manual idf_manual = {
 	       "reference clone at @b{~/.ice/esp-idf} and creates per-version "
 	       "working checkouts under @b{~/.ice/checkouts/<name>/} that "
 	       "borrow objects from the reference.")
-	H_PARA("Run @b{ice idf <subcommand> --help} for details.")
+	H_PARA("Run @b{ice repo <subcommand> --help} for details.")
 	H_PARA("The reference is ice-managed; do not work in it.  Create "
-	       "checkouts with @b{ice idf checkout} and work there instead."),
+	       "checkouts with @b{ice repo checkout} and work there instead."),
 
 	.examples =
-	H_EXAMPLE("ice idf clone")
-	H_EXAMPLE("ice idf checkout v5.4 v5.4")
-	H_EXAMPLE("ice idf list | head -20")
-	H_EXAMPLE("ice idf info"),
+	H_EXAMPLE("ice repo clone")
+	H_EXAMPLE("ice repo checkout v5.4 v5.4")
+	H_EXAMPLE("ice repo list | head -20")
+	H_EXAMPLE("ice repo info"),
 };
 /* clang-format on */
 
-static const struct cmd_desc *const idf_subs[] = {
-    &cmd_idf_clone_desc,    &cmd_idf_pull_desc, &cmd_idf_list_desc,
-    &cmd_idf_checkout_desc, &cmd_idf_info_desc, NULL,
+static const struct cmd_desc *const repo_subs[] = {
+    &cmd_repo_clone_desc,    &cmd_repo_pull_desc, &cmd_repo_list_desc,
+    &cmd_repo_checkout_desc, &cmd_repo_info_desc, NULL,
 };
 
-const struct cmd_desc cmd_idf_desc = {
-    .name = "idf",
-    .opts = cmd_idf_opts,
-    .manual = &idf_manual,
-    .subcommands = idf_subs,
+const struct cmd_desc cmd_repo_desc = {
+    .name = "repo",
+    .opts = cmd_repo_opts,
+    .manual = &repo_manual,
+    .subcommands = repo_subs,
 };
