@@ -254,30 +254,11 @@ done:
 	sbuf_release(&old);
 }
 
-/** Set @p key to @p value in both @p file (the to-be-written copy) and
- *  the process-wide @c config so a subsequent load_profile() picks up
- *  what we just persisted without re-reading from disk. */
-static void persist_set(struct config *file, const char *key, const char *value)
-{
-	config_set(file, key, value, CONFIG_SCOPE_LOCAL);
-	config_set(&config, key, value, CONFIG_SCOPE_LOCAL);
-}
-
-static void persist_unset(struct config *file, const char *key)
-{
-	config_unset(file, key, CONFIG_SCOPE_LOCAL);
-	config_unset(&config, key, CONFIG_SCOPE_LOCAL);
-}
-
-static void persist_add(struct config *file, const char *key, const char *value)
-{
-	config_add(file, key, value, CONFIG_SCOPE_LOCAL);
-	config_add(&config, key, value, CONFIG_SCOPE_LOCAL);
-}
-
-/** Persist the profile under @b{[project "<name>"]} in @b{.iceconfig}
- *  and mirror it into the process-wide config so load_profile() sees
- *  the updated state immediately. */
+/** Persist the profile under @b{[project "<name>"]} in @b{.iceconfig}.
+ *
+ *  Only writes to the file -- the process-wide config is not touched.
+ *  load_profile() re-reads .iceconfig fresh, so it picks up what we
+ *  just wrote without an in-memory mirror. */
 static void persist_profile(const char *name, const char *chip,
 			    const char *idf_path, const char *sdkconfig,
 			    const struct svec *sdkconfig_defaults,
@@ -296,36 +277,37 @@ static void persist_profile(const char *name, const char *chip,
 	/* Scalar entries. */
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.chip", name);
-	persist_set(&c, key.buf, chip);
+	config_set(&c, key.buf, chip, CONFIG_SCOPE_LOCAL);
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.idf-path", name);
-	persist_set(&c, key.buf, idf_path);
+	config_set(&c, key.buf, idf_path, CONFIG_SCOPE_LOCAL);
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.sdkconfig", name);
-	persist_set(&c, key.buf, sdkconfig);
+	config_set(&c, key.buf, sdkconfig, CONFIG_SCOPE_LOCAL);
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.build-dir", name);
-	persist_set(&c, key.buf, build_dir);
+	config_set(&c, key.buf, build_dir, CONFIG_SCOPE_LOCAL);
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.generator", name);
-	persist_set(&c, key.buf, generator);
+	config_set(&c, key.buf, generator, CONFIG_SCOPE_LOCAL);
 
 	/* Multi-values (clear + re-add so re-init replaces, not appends). */
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.sdkconfig-defaults", name);
-	persist_unset(&c, key.buf);
+	config_unset(&c, key.buf, CONFIG_SCOPE_LOCAL);
 	for (size_t i = 0; i < sdkconfig_defaults->nr; i++)
-		persist_add(&c, key.buf, sdkconfig_defaults->v[i]);
+		config_add(&c, key.buf, sdkconfig_defaults->v[i],
+			   CONFIG_SCOPE_LOCAL);
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.define", name);
-	persist_unset(&c, key.buf);
+	config_unset(&c, key.buf, CONFIG_SCOPE_LOCAL);
 	for (size_t i = 0; i < defines->nr; i++)
-		persist_add(&c, key.buf, defines->v[i]);
+		config_add(&c, key.buf, defines->v[i], CONFIG_SCOPE_LOCAL);
 
 	if (config_write_file(&c, CONFIG_SCOPE_LOCAL, path))
 		die_errno("cannot write '%s'", path);

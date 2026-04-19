@@ -35,6 +35,12 @@ static const char *cmake_build_dir;
 static const char *cmake_generator;
 static struct svec cmake_defines = SVEC_INIT;
 
+/* The .iceconfig snapshot load_profile reads from.  Held at file
+ * scope (not released across load_profile calls) so cmake_build_dir /
+ * cmake_generator -- which point into this struct's value strings --
+ * stay valid for the life of the process. */
+static struct config project_config = CONFIG_INIT;
+
 /* ------------------------------------------------------------------ */
 /*  Profile loading                                                   */
 /* ------------------------------------------------------------------ */
@@ -78,18 +84,13 @@ void complete_profile_names(void)
 		printf("default\n");
 }
 
-/**
- * Resolve project.@p name.@p suffix as a single config value.
- *
- * Returns a pointer into the config store (do not free) or NULL.
- * @p key is reused across calls; caller releases it once at end.
- */
-static const char *profile_get(struct sbuf *key, const char *name,
-			       const char *suffix)
+/** Resolve project.@p name.@p suffix in @p c (one scalar value). */
+static const char *profile_get(struct config *c, struct sbuf *key,
+			       const char *name, const char *suffix)
 {
 	sbuf_reset(key);
 	sbuf_addf(key, "project.%s.%s", name, suffix);
-	return config_get(key->buf);
+	return config_get_in(c, key->buf);
 }
 
 void load_profile(const char *name)
@@ -104,7 +105,15 @@ void load_profile(const char *name)
 	struct config_entry **entries;
 	int n;
 
-	build_dir = profile_get(&key, name, "build-dir");
+	/* Re-read .iceconfig fresh into project_config so we see what
+	 * the most recent ice init wrote.  project_config is file-scope
+	 * and held alive for the rest of the process; the cmake_*
+	 * pointers below point into its value strings. */
+	config_release(&project_config);
+	config_load_file(&project_config, CONFIG_SCOPE_LOCAL,
+			 local_config_path());
+
+	build_dir = profile_get(&project_config, &key, name, "build-dir");
 	if (!build_dir || !*build_dir) {
 		if (!strcmp(name, "default"))
 			die("project not initialised\n"
@@ -115,17 +124,17 @@ void load_profile(const char *name)
 	}
 	cmake_build_dir = build_dir;
 
-	generator = profile_get(&key, name, "generator");
+	generator = profile_get(&project_config, &key, name, "generator");
 	cmake_generator = generator ? generator : "Ninja";
 
-	chip = profile_get(&key, name, "chip");
+	chip = profile_get(&project_config, &key, name, "chip");
 	if (chip) {
 		sbuf_reset(&entry);
 		sbuf_addf(&entry, "IDF_TARGET=%s", chip);
 		svec_push(&cmake_defines, entry.buf);
 	}
 
-	sdkconfig = profile_get(&key, name, "sdkconfig");
+	sdkconfig = profile_get(&project_config, &key, name, "sdkconfig");
 	if (sdkconfig) {
 		sbuf_reset(&entry);
 		sbuf_addf(&entry, "SDKCONFIG=%s", sdkconfig);
@@ -134,7 +143,7 @@ void load_profile(const char *name)
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.sdkconfig-defaults", name);
-	n = config_get_all(key.buf, &entries);
+	n = config_get_all_in(&project_config, key.buf, &entries);
 	if (n > 0) {
 		sbuf_reset(&entry);
 		sbuf_addstr(&entry, "SDKCONFIG_DEFAULTS=");
@@ -149,12 +158,12 @@ void load_profile(const char *name)
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.define", name);
-	n = config_get_all(key.buf, &entries);
+	n = config_get_all_in(&project_config, key.buf, &entries);
 	for (int i = 0; i < n; i++)
 		svec_push(&cmake_defines, entries[i]->value);
 	free(entries);
 
-	idf_path = profile_get(&key, name, "idf-path");
+	idf_path = profile_get(&project_config, &key, name, "idf-path");
 	if (idf_path && *idf_path)
 		setup_tool_env(idf_path);
 

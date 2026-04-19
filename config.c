@@ -75,21 +75,23 @@ int config_unset(struct config *c, const char *key, enum config_scope scope)
 	return removed;
 }
 
-const char *config_get(const char *key)
+const char *config_get_in(struct config *c, const char *key)
 {
 	const char *value = NULL;
 	enum config_scope best = CONFIG_SCOPE_DEFAULT;
 
-	for (int i = 0; i < config.nr; i++) {
-		if (strcmp(config.entries[i].key, key) != 0)
+	for (int i = 0; i < c->nr; i++) {
+		if (strcmp(c->entries[i].key, key) != 0)
 			continue;
-		if (!value || config.entries[i].scope >= best) {
-			value = config.entries[i].value;
-			best = config.entries[i].scope;
+		if (!value || c->entries[i].scope >= best) {
+			value = c->entries[i].value;
+			best = c->entries[i].scope;
 		}
 	}
 	return value;
 }
+
+const char *config_get(const char *key) { return config_get_in(&config, key); }
 
 const char *config_get_at(const char *key, enum config_scope scope)
 {
@@ -103,19 +105,25 @@ const char *config_get_at(const char *key, enum config_scope scope)
 	return value;
 }
 
-int config_get_all(const char *key, struct config_entry ***out)
+int config_get_all_in(struct config *c, const char *key,
+		      struct config_entry ***out)
 {
 	struct config_entry **list = NULL;
 	int n = 0, alloc = 0;
 
-	for (int i = 0; i < config.nr; i++) {
-		if (strcmp(config.entries[i].key, key) != 0)
+	for (int i = 0; i < c->nr; i++) {
+		if (strcmp(c->entries[i].key, key) != 0)
 			continue;
 		ALLOC_GROW(list, n + 1, alloc);
-		list[n++] = &config.entries[i];
+		list[n++] = &c->entries[i];
 	}
 	*out = list;
 	return n;
+}
+
+int config_get_all(const char *key, struct config_entry ***out)
+{
+	return config_get_all_in(&config, key, out);
 }
 
 int config_has(const char *key)

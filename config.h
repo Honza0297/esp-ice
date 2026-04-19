@@ -107,6 +107,11 @@ int config_unset(struct config *c, const char *key, enum config_scope scope);
  */
 const char *config_get(const char *key);
 
+/** Same as @ref config_get but reads from an arbitrary @p c instead of
+ *  the process-wide store.  Useful for one-shot loads of project files
+ *  that should not pollute the global cache. */
+const char *config_get_in(struct config *c, const char *key);
+
 /**
  * @brief Return the value of @p key from a specific scope.
  *
@@ -124,6 +129,10 @@ const char *config_get_at(const char *key, enum config_scope scope);
  * free() the outer array but NOT the individual entries.
  */
 int config_get_all(const char *key, struct config_entry ***out);
+
+/** Same as @ref config_get_all but reads from an arbitrary @p c. */
+int config_get_all_in(struct config *c, const char *key,
+		      struct config_entry ***out);
 
 /**
  * @brief Parse @p key as a signed int into @p *out.
