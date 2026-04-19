@@ -10,12 +10,12 @@
  *
  * The cmake-based "ice" commands (build, flash, menuconfig, clean,
  * ...) all operate on a project profile.  Each calls
- * load_profile(<name>) early to populate global_build_dir /
- * global_generator / global_defines from @b{[project "<name>"]} in
- * @b{.iceconfig}, set up the IDF's tool PATH, and derive
- * project-state config (target, mapfile, elf) from the build dir.
- * Then they call ensure_build_directory() / run_cmake_target() which
- * consume those globals.  Logs land under @b{<build-dir>/log/}.
+ * load_profile(<name>) early to read @b{[project "<name>"]} from
+ * @b{.iceconfig} into cmake.c's file-scope state, set up the IDF's
+ * tool PATH, and derive project-state config (target, mapfile, elf)
+ * from the build dir.  Then they call ensure_build_directory() /
+ * run_cmake_target() which consume that state.  Logs land under
+ * @b{<build-dir>/log/}.
  */
 #ifndef CMAKE_H
 #define CMAKE_H
@@ -24,8 +24,8 @@
  * Load profile @p name into process state.
  *
  * Reads @b{[project "<name>"]} from the config store and:
- *   - populates @c global_build_dir, @c global_generator,
- *     @c global_defines so the cmake primitives below pick them up;
+ *   - stores its build-dir / generator / cmake-define set in cmake.c
+ *     so the primitives below pick them up;
  *   - prepends the profile's IDF tools to @b{PATH};
  *   - derives @b{target} / @b{mapfile} / @b{elf} from the build
  *     directory's @b{CMakeCache.txt} and @b{project_description.json}.

@@ -161,9 +161,6 @@ extern const struct cmd_manual ice_root_manual;
 extern int global_no_color;
 extern int global_version;
 extern int global_verbose;
-extern const char *global_build_dir;
-extern const char *global_generator;
-extern struct svec global_defines;
 
 /* NULL-terminated chip target lists defined in cmd/set-target/set-target.c. */
 extern const char *const ice_supported_targets[];

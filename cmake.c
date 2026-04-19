@@ -9,10 +9,10 @@
  * @brief Shared cmake orchestration used by every cmake-based "ice" command.
  *
  * Public API:
- *   - load_profile() populates @c global_build_dir, @c global_generator,
- *     @c global_defines from the [project "<name>"] section of the
- *     config store, sets up the IDF tool PATH, and derives project-state
- *     keys (target, mapfile, elf) from the build directory.
+ *   - load_profile() reads [project "<name>"] from the config store
+ *     into the file-scope cmake state below, sets up the IDF tool
+ *     PATH, and derives project-state keys (target, mapfile, elf)
+ *     from the build directory.
  *   - ensure_build_directory() runs cmake's configure step.
  *   - run_cmake_target() ensures configured and invokes a target with
  *     progress + log capture.
@@ -26,6 +26,14 @@
 #include "ice.h"
 
 #define TAIL_LINES 30
+
+/* ------------------------------------------------------------------ */
+/*  Cmake state set by load_profile, consumed by the primitives       */
+/* ------------------------------------------------------------------ */
+
+static const char *cmake_build_dir;
+static const char *cmake_generator;
+static struct svec cmake_defines = SVEC_INIT;
 
 /* ------------------------------------------------------------------ */
 /*  Profile loading                                                   */
@@ -105,23 +113,23 @@ void load_profile(const char *name)
 		    "hint: run @b{ice init <chip> <idf> %s} first",
 		    name, name);
 	}
-	global_build_dir = build_dir;
+	cmake_build_dir = build_dir;
 
 	generator = profile_get(&key, name, "generator");
-	global_generator = generator ? generator : "Ninja";
+	cmake_generator = generator ? generator : "Ninja";
 
 	chip = profile_get(&key, name, "chip");
 	if (chip) {
 		sbuf_reset(&entry);
 		sbuf_addf(&entry, "IDF_TARGET=%s", chip);
-		svec_push(&global_defines, entry.buf);
+		svec_push(&cmake_defines, entry.buf);
 	}
 
 	sdkconfig = profile_get(&key, name, "sdkconfig");
 	if (sdkconfig) {
 		sbuf_reset(&entry);
 		sbuf_addf(&entry, "SDKCONFIG=%s", sdkconfig);
-		svec_push(&global_defines, entry.buf);
+		svec_push(&cmake_defines, entry.buf);
 	}
 
 	sbuf_reset(&key);
@@ -135,7 +143,7 @@ void load_profile(const char *name)
 				sbuf_addch(&entry, ';');
 			sbuf_addstr(&entry, entries[i]->value);
 		}
-		svec_push(&global_defines, entry.buf);
+		svec_push(&cmake_defines, entry.buf);
 	}
 	free(entries);
 
@@ -143,7 +151,7 @@ void load_profile(const char *name)
 	sbuf_addf(&key, "project.%s.define", name);
 	n = config_get_all(key.buf, &entries);
 	for (int i = 0; i < n; i++)
-		svec_push(&global_defines, entries[i]->value);
+		svec_push(&cmake_defines, entries[i]->value);
 	free(entries);
 
 	idf_path = profile_get(&key, name, "idf-path");
@@ -383,8 +391,8 @@ static int cache_needs_configure(const struct cmakecache *cache,
 
 int ensure_build_directory(int force)
 {
-	const char *build_dir = global_build_dir;
-	const char *generator = global_generator;
+	const char *build_dir = cmake_build_dir;
+	const char *generator = cmake_generator;
 	struct sbuf cache_path = SBUF_INIT;
 	struct cmakecache cache = CMAKECACHE_INIT;
 	struct sbuf logpath = SBUF_INIT;
@@ -408,9 +416,9 @@ int ensure_build_directory(int force)
 	sbuf_addf(&cache_path, "%s/CMakeCache.txt", build_dir);
 	has_cache = (cmakecache_load(&cache, cache_path.buf) == 0);
 
-	needs_configure = force || !has_cache ||
-			  (global_defines.nr &&
-			   cache_needs_configure(&cache, &global_defines));
+	needs_configure =
+	    force || !has_cache ||
+	    (cmake_defines.nr && cache_needs_configure(&cache, &cmake_defines));
 
 	/* Validate generator against existing cache. */
 	if (has_cache) {
@@ -436,8 +444,8 @@ int ensure_build_directory(int force)
 		svec_push(&args, "-B");
 		svec_push(&args, build_dir);
 
-		for (size_t i = 0; i < global_defines.nr; i++)
-			svec_pushf(&args, "-D%s", global_defines.v[i]);
+		for (size_t i = 0; i < cmake_defines.nr; i++)
+			svec_pushf(&args, "-D%s", cmake_defines.v[i]);
 
 		sbuf_addf(&logpath, "%s/log/configure.log", build_dir);
 
@@ -717,7 +725,7 @@ done:
 
 int run_cmake_target(const char *target, const char *label, int interactive)
 {
-	const char *build_dir = global_build_dir;
+	const char *build_dir = cmake_build_dir;
 	struct sbuf logpath = SBUF_INIT;
 	int rc;
 

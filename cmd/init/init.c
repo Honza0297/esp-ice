@@ -254,7 +254,30 @@ done:
 	sbuf_release(&old);
 }
 
-/** Persist the profile under @b{[project "<name>"]} in @b{.iceconfig}. */
+/** Set @p key to @p value in both @p file (the to-be-written copy) and
+ *  the process-wide @c config so a subsequent load_profile() picks up
+ *  what we just persisted without re-reading from disk. */
+static void persist_set(struct config *file, const char *key, const char *value)
+{
+	config_set(file, key, value, CONFIG_SCOPE_LOCAL);
+	config_set(&config, key, value, CONFIG_SCOPE_LOCAL);
+}
+
+static void persist_unset(struct config *file, const char *key)
+{
+	config_unset(file, key, CONFIG_SCOPE_LOCAL);
+	config_unset(&config, key, CONFIG_SCOPE_LOCAL);
+}
+
+static void persist_add(struct config *file, const char *key, const char *value)
+{
+	config_add(file, key, value, CONFIG_SCOPE_LOCAL);
+	config_add(&config, key, value, CONFIG_SCOPE_LOCAL);
+}
+
+/** Persist the profile under @b{[project "<name>"]} in @b{.iceconfig}
+ *  and mirror it into the process-wide config so load_profile() sees
+ *  the updated state immediately. */
 static void persist_profile(const char *name, const char *chip,
 			    const char *idf_path, const char *sdkconfig,
 			    const struct svec *sdkconfig_defaults,
@@ -270,40 +293,39 @@ static void persist_profile(const char *name, const char *chip,
 
 	config_load_file(&c, CONFIG_SCOPE_LOCAL, path);
 
-	/* Scalar entries (config_set replaces existing). */
+	/* Scalar entries. */
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.chip", name);
-	config_set(&c, key.buf, chip, CONFIG_SCOPE_LOCAL);
+	persist_set(&c, key.buf, chip);
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.idf-path", name);
-	config_set(&c, key.buf, idf_path, CONFIG_SCOPE_LOCAL);
+	persist_set(&c, key.buf, idf_path);
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.sdkconfig", name);
-	config_set(&c, key.buf, sdkconfig, CONFIG_SCOPE_LOCAL);
+	persist_set(&c, key.buf, sdkconfig);
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.build-dir", name);
-	config_set(&c, key.buf, build_dir, CONFIG_SCOPE_LOCAL);
+	persist_set(&c, key.buf, build_dir);
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.generator", name);
-	config_set(&c, key.buf, generator, CONFIG_SCOPE_LOCAL);
+	persist_set(&c, key.buf, generator);
 
 	/* Multi-values (clear + re-add so re-init replaces, not appends). */
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.sdkconfig-defaults", name);
-	config_unset(&c, key.buf, CONFIG_SCOPE_LOCAL);
+	persist_unset(&c, key.buf);
 	for (size_t i = 0; i < sdkconfig_defaults->nr; i++)
-		config_add(&c, key.buf, sdkconfig_defaults->v[i],
-			   CONFIG_SCOPE_LOCAL);
+		persist_add(&c, key.buf, sdkconfig_defaults->v[i]);
 
 	sbuf_reset(&key);
 	sbuf_addf(&key, "project.%s.define", name);
-	config_unset(&c, key.buf, CONFIG_SCOPE_LOCAL);
+	persist_unset(&c, key.buf);
 	for (size_t i = 0; i < defines->nr; i++)
-		config_add(&c, key.buf, defines->v[i], CONFIG_SCOPE_LOCAL);
+		persist_add(&c, key.buf, defines->v[i]);
 
 	if (config_write_file(&c, CONFIG_SCOPE_LOCAL, path))
 		die_errno("cannot write '%s'", path);
@@ -333,8 +355,6 @@ int cmd_init(int argc, const char **argv)
 	struct sbuf manifest = SBUF_INIT;
 	struct sbuf sdkconfig_buf = SBUF_INIT;
 	struct sbuf build_dir_buf = SBUF_INIT;
-	struct sbuf joined = SBUF_INIT;
-	struct sbuf entry = SBUF_INIT;
 	const char *sdkconfig;
 	const char *build_dir;
 	const char *generator;
@@ -407,10 +427,6 @@ int cmd_init(int argc, const char **argv)
 		return rc;
 	}
 
-	/* Prime PATH with the just-installed tools so the cmake invoked
-	 * by ensure_build_directory() can find compilers etc. */
-	setup_tool_env(idf_path);
-
 	/* Wipe the profile's build dir and back up its sdkconfig. */
 	backup_sdkconfig(sdkconfig);
 	rc = wipe_build_dir(build_dir);
@@ -419,33 +435,14 @@ int cmd_init(int argc, const char **argv)
 		return rc;
 	}
 
-	/* Plug build-dir / generator / defines into the globals
-	 * ensure_build_directory() consumes. */
-	global_build_dir = build_dir;
-	global_generator = generator;
-
-	sbuf_addf(&entry, "IDF_TARGET=%s", chip);
-	svec_push(&global_defines, entry.buf);
-	sbuf_reset(&entry);
-
-	sbuf_addf(&entry, "SDKCONFIG=%s", sdkconfig);
-	svec_push(&global_defines, entry.buf);
-	sbuf_reset(&entry);
-
-	if (opt_sdkconfig_defaults.nr) {
-		sbuf_addstr(&joined, "SDKCONFIG_DEFAULTS=");
-		for (size_t i = 0; i < opt_sdkconfig_defaults.nr; i++) {
-			if (i > 0)
-				sbuf_addch(&joined, ';');
-			sbuf_addstr(&joined, opt_sdkconfig_defaults.v[i]);
-		}
-		svec_push(&global_defines, joined.buf);
-	}
-	sbuf_release(&joined);
-	sbuf_release(&entry);
-
-	for (size_t i = 0; i < opt_defines.nr; i++)
-		svec_push(&global_defines, opt_defines.v[i]);
+	/*
+	 * Read the just-persisted profile back into cmake.c's state via
+	 * the same load_profile() that build/flash/etc. use.  This sets
+	 * up PATH, populates the cmake -D set (IDF_TARGET, SDKCONFIG,
+	 * SDKCONFIG_DEFAULTS, user defines), and seeds project-derived
+	 * keys.  Avoids duplicating that construction here.
+	 */
+	load_profile(name);
 
 	putenv(envstr);
 

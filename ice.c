@@ -113,9 +113,6 @@ static int try_expand_alias(int *argcp, const char ***argvp)
 int global_no_color;
 int global_version;
 int global_verbose;
-const char *global_build_dir;
-const char *global_generator;
-struct svec global_defines = SVEC_INIT;
 
 static void complete_aliases(void)
 {
