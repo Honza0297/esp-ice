@@ -63,6 +63,17 @@ void load_profile(const char *name)
 
 	config_load_profile(name);
 
+	/*
+	 * Distinguish "not an ice project" (no .iceconfig anywhere near)
+	 * from "project exists but this profile isn't bound yet" so the
+	 * hint is actionable in each case -- same shape as git refusing
+	 * to run outside a work tree.
+	 */
+	if (access(local_config_path(), F_OK) != 0)
+		die("not an ice project (no @b{.iceconfig} in cwd)\n"
+		    "hint: run @b{ice init <chip> <idf>} to bind, "
+		    "or cd to an existing ice project");
+
 	build_dir = config_get("project.build-dir");
 	if (!build_dir || !*build_dir) {
 		if (!strcmp(name, "default"))
@@ -74,8 +85,20 @@ void load_profile(const char *name)
 	}
 
 	idf_path = config_get("project.idf-path");
-	if (idf_path && *idf_path)
+	if (idf_path && *idf_path) {
+		struct sbuf env = SBUF_INIT;
+
 		setup_tool_env(idf_path);
+		/*
+		 * The profile owns the binding, so IDF_PATH in the
+		 * inherited shell env (e.g. a previously sourced
+		 * export.sh) must not win over what init recorded.
+		 * putenv keeps the pointer, so detach and leak -- the
+		 * process lifetime is the env entry's lifetime.
+		 */
+		sbuf_addf(&env, "IDF_PATH=%s", idf_path);
+		putenv(sbuf_detach(&env));
+	}
 }
 
 void require_project_initialized(void)
