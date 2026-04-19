@@ -143,6 +143,33 @@ static void complete_aliases(void)
 	svec_clear(&seen);
 }
 
+/*
+ * Walk a descriptor tree.  Parse @p desc's options, then if the first
+ * positional argument names a subcommand, recurse into it; otherwise
+ * fire @p desc->fn.  A pure namespace (fn=NULL, subcommands!=NULL) with
+ * no argv left dies with a "expected a subcommand" message.
+ *
+ * Used in Step 4+ by every namespace and by cmd_ice itself.  In earlier
+ * steps this function exists but has no callers.
+ */
+int ice_dispatch(int argc, const char **argv, const struct cmd_desc *desc)
+{
+	argc = parse_options(argc, argv, desc->opts, desc->manual);
+
+	if (desc->subcommands && argc > 0) {
+		for (const struct cmd_desc *const *p = desc->subcommands; *p;
+		     p++) {
+			if (!strcmp(argv[0], (*p)->name))
+				return ice_dispatch(argc, argv, *p);
+		}
+	}
+
+	if (desc->fn)
+		return desc->fn(argc, argv);
+
+	die("expected a subcommand. See '%s --help'.", desc->manual->name);
+}
+
 static subcmd_fn ice_fn;
 
 const struct option ice_global_opts[] = {

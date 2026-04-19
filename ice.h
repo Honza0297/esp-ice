@@ -90,6 +90,40 @@ int cmd_partition_table(int argc, const char **argv);
 int cmd_size(int argc, const char **argv);
 int cmd_target(int argc, const char **argv);
 
+/**
+ * @brief Descriptor for a command node (leaf or namespace).
+ *
+ * Every `ice <path>` command -- leaf or pure namespace -- is described
+ * by one of these.  ice_dispatch() walks a tree of them to parse
+ * options, recurse into subcommands, and fire the matching handler.
+ *
+ * @p opts is always non-NULL (use `{ OPT_END() }` for an empty table);
+ * @p manual is always non-NULL.  @p fn is NULL for pure namespace nodes
+ * that exist only to route into their @p subcommands array.  @p
+ * subcommands is a NULL-terminated array of descriptor pointers, or
+ * NULL for leaves.
+ */
+struct cmd_desc {
+	const char *name;		 /**< "build", "clone", ... */
+	int (*fn)(int, const char **);	 /**< Leaf handler; NULL for
+					  *   pure namespaces. */
+	const struct option *opts;	 /**< Option table (never NULL). */
+	const struct cmd_manual *manual; /**< Manual (never NULL). */
+	const struct cmd_desc *const *subcommands; /**< NULL-terminated
+						    *   array; NULL for
+						    *   leaves. */
+};
+
+/**
+ * @brief Recursively dispatch argv against a descriptor tree.
+ *
+ * Parses options for @p desc, then: if argv[0] names a subcommand,
+ * recurses into it; otherwise fires @p desc->fn.  For a pure
+ * namespace with no argv left, dies with a "expected a subcommand"
+ * message.
+ */
+int ice_dispatch(int argc, const char **argv, const struct cmd_desc *desc);
+
 /** Top-level option table and manual for `ice`. */
 extern const struct option ice_global_opts[];
 extern const struct cmd_manual ice_root_manual;
