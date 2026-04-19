@@ -28,7 +28,7 @@ void complete_profile_names(void)
 		struct sbuf nm = SBUF_INIT;
 		int duplicate = 0;
 
-		if (strncmp(key, "project.", 8))
+		if (strncmp(key, "project.", 8) != 0)
 			continue;
 		p = key + 8;
 		dot = strchr(p, '.');
