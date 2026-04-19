@@ -107,11 +107,6 @@ int config_unset(struct config *c, const char *key, enum config_scope scope);
  */
 const char *config_get(const char *key);
 
-/** Same as @ref config_get but reads from an arbitrary @p c instead of
- *  the process-wide store.  Useful for one-shot loads of project files
- *  that should not pollute the global cache. */
-const char *config_get_in(struct config *c, const char *key);
-
 /**
  * @brief Return the value of @p key from a specific scope.
  *
@@ -129,10 +124,6 @@ const char *config_get_at(const char *key, enum config_scope scope);
  * free() the outer array but NOT the individual entries.
  */
 int config_get_all(const char *key, struct config_entry ***out);
-
-/** Same as @ref config_get_all but reads from an arbitrary @p c. */
-int config_get_all_in(struct config *c, const char *key,
-		      struct config_entry ***out);
 
 /**
  * @brief Parse @p key as a signed int into @p *out.
@@ -269,6 +260,33 @@ int config_write_file(const struct config *c, enum config_scope scope,
  * NULL @p build_dir, or missing keys are silent -- this loader is
  * best-effort and should not complain outside a configured project.
  */
-void config_load_project(struct config *c, const char *build_dir);
+/**
+ * @brief Re-load @b{./.iceconfig} into the process-wide config store.
+ *
+ * Wipes every existing @c CONFIG_SCOPE_LOCAL entry first so re-loads
+ * don't accumulate duplicates.  Called by @b{ice init} after writing
+ * the file so a subsequent config_load_profile() picks up the freshly
+ * persisted @b{[project "<name>"]} entries without restarting ice.
+ */
+void config_reload_local(void);
+
+/**
+ * @brief Promote @b{[project "<name>"]} into a uniform @b{project.X}
+ *        namespace at @c CONFIG_SCOPE_PROJECT and derive build-state
+ *        from the profile's build directory.
+ *
+ * The promotion lets every project-aware command read @b{project.X}
+ * via config_get() without knowing which profile is active.  After
+ * the promotion the function reads the profile's build directory
+ * (if configured) and adds:
+ *
+ *   - @b{project.target}   from @c CMakeCache.txt's @c IDF_TARGET
+ *   - @b{project.mapfile}  derived from @c project_description.json
+ *   - @b{project.elf}      derived from @c project_description.json
+ *
+ * Re-runnable: every call clears the previous PROJECT-scope state
+ * first.
+ */
+void config_load_profile(const char *name);
 
 #endif /* CONFIG_H */

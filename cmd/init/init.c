@@ -395,10 +395,13 @@ int cmd_init(int argc, const char **argv)
 
 	generator = opt_generator ? opt_generator : "Ninja";
 
-	/* Persist the profile to .iceconfig. */
+	/* Persist the profile to .iceconfig, then refresh the in-memory
+	 * config from disk so the load_profile() below sees what we just
+	 * wrote -- without having to dual-write into the global config. */
 	persist_profile(name, chip, idf_path, sdkconfig,
 			&opt_sdkconfig_defaults, build_dir, generator,
 			&opt_defines);
+	config_reload_local();
 
 	/* Install (or skip if already installed) tools for this IDF.
 	 * Filtering by chip keeps target-specific tool sets minimal. */

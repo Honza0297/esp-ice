@@ -75,23 +75,21 @@ int config_unset(struct config *c, const char *key, enum config_scope scope)
 	return removed;
 }
 
-const char *config_get_in(struct config *c, const char *key)
+const char *config_get(const char *key)
 {
 	const char *value = NULL;
 	enum config_scope best = CONFIG_SCOPE_DEFAULT;
 
-	for (int i = 0; i < c->nr; i++) {
-		if (strcmp(c->entries[i].key, key) != 0)
+	for (int i = 0; i < config.nr; i++) {
+		if (strcmp(config.entries[i].key, key) != 0)
 			continue;
-		if (!value || c->entries[i].scope >= best) {
-			value = c->entries[i].value;
-			best = c->entries[i].scope;
+		if (!value || config.entries[i].scope >= best) {
+			value = config.entries[i].value;
+			best = config.entries[i].scope;
 		}
 	}
 	return value;
 }
-
-const char *config_get(const char *key) { return config_get_in(&config, key); }
 
 const char *config_get_at(const char *key, enum config_scope scope)
 {
@@ -105,25 +103,19 @@ const char *config_get_at(const char *key, enum config_scope scope)
 	return value;
 }
 
-int config_get_all_in(struct config *c, const char *key,
-		      struct config_entry ***out)
+int config_get_all(const char *key, struct config_entry ***out)
 {
 	struct config_entry **list = NULL;
 	int n = 0, alloc = 0;
 
-	for (int i = 0; i < c->nr; i++) {
-		if (strcmp(c->entries[i].key, key) != 0)
+	for (int i = 0; i < config.nr; i++) {
+		if (strcmp(config.entries[i].key, key) != 0)
 			continue;
 		ALLOC_GROW(list, n + 1, alloc);
-		list[n++] = &c->entries[i];
+		list[n++] = &config.entries[i];
 	}
 	*out = list;
 	return n;
-}
-
-int config_get_all(const char *key, struct config_entry ***out)
-{
-	return config_get_all_in(&config, key, out);
 }
 
 int config_has(const char *key)
@@ -632,23 +624,80 @@ int config_write_file(const struct config *c, enum config_scope scope,
 	return 0;
 }
 
-void config_load_project(struct config *c, const char *build_dir)
+/** Remove every entry at @p scope from @p c.  Returns count removed. */
+static int config_clear_scope(struct config *c, enum config_scope scope)
 {
+	int dst = 0;
+	int removed = 0;
+
+	for (int i = 0; i < c->nr; i++) {
+		if (c->entries[i].scope == scope) {
+			free(c->entries[i].key);
+			free(c->entries[i].value);
+			removed++;
+			continue;
+		}
+		if (dst != i)
+			c->entries[dst] = c->entries[i];
+		dst++;
+	}
+	c->nr = dst;
+	return removed;
+}
+
+void config_reload_local(void)
+{
+	config_clear_scope(&config, CONFIG_SCOPE_LOCAL);
+	config_load_file(&config, CONFIG_SCOPE_LOCAL, local_config_path());
+}
+
+void config_load_profile(const char *name)
+{
+	struct sbuf prefix = SBUF_INIT;
+	struct sbuf new_key = SBUF_INIT;
 	struct sbuf path = SBUF_INIT;
 	struct sbuf buf = SBUF_INIT;
 	struct sbuf derived = SBUF_INIT;
 	struct cmakecache cache = CMAKECACHE_INIT;
 	struct json_value *desc = NULL;
+	const char *build_dir;
+	int n_pre;
 
+	/* Re-runnable: clear any previous PROJECT-scope state first. */
+	config_clear_scope(&config, CONFIG_SCOPE_PROJECT);
+
+	/*
+	 * Promote @b{[project "<name>"]} entries (loaded from .iceconfig
+	 * at LOCAL scope) up to a uniform @b{project.X} namespace at
+	 * PROJECT scope so commands can read @b{project.build-dir} etc.
+	 * without knowing which profile they're in.
+	 */
+	sbuf_addf(&prefix, "project.%s.", name);
+	n_pre = config.nr;
+	for (int i = 0; i < n_pre; i++) {
+		const char *key = config.entries[i].key;
+		if (config.entries[i].scope != CONFIG_SCOPE_LOCAL)
+			continue;
+		if (strncmp(key, prefix.buf, prefix.len) != 0)
+			continue;
+		sbuf_reset(&new_key);
+		sbuf_addf(&new_key, "project.%s", key + prefix.len);
+		config_add(&config, new_key.buf, config.entries[i].value,
+			   CONFIG_SCOPE_PROJECT);
+	}
+
+	/* Derive project.target / project.mapfile / project.elf from the
+	 * profile's build directory, if it has been configured. */
+	build_dir = config_get("project.build-dir");
 	if (!build_dir)
-		return;
+		goto out;
 
 	sbuf_addf(&path, "%s/CMakeCache.txt", build_dir);
 	if (cmakecache_load(&cache, path.buf) == 0) {
 		const char *target = cmakecache_get(&cache, "IDF_TARGET");
-
 		if (target)
-			config_set(c, "target", target, CONFIG_SCOPE_PROJECT);
+			config_set(&config, "project.target", target,
+				   CONFIG_SCOPE_PROJECT);
 	}
 
 	sbuf_reset(&path);
@@ -657,21 +706,27 @@ void config_load_project(struct config *c, const char *build_dir)
 		desc = json_parse(buf.buf, buf.len);
 
 	if (desc) {
-		const char *name =
+		const char *project_name =
 		    json_as_string(json_get(desc, "project_name"));
-		if (name) {
-			sbuf_addf(&derived, "%s/%s.map", build_dir, name);
-			config_set(c, "mapfile", derived.buf,
+		if (project_name) {
+			sbuf_addf(&derived, "%s/%s.map", build_dir,
+				  project_name);
+			config_set(&config, "project.mapfile", derived.buf,
 				   CONFIG_SCOPE_PROJECT);
 
 			sbuf_reset(&derived);
-			sbuf_addf(&derived, "%s/%s.elf", build_dir, name);
-			config_set(c, "elf", derived.buf, CONFIG_SCOPE_PROJECT);
+			sbuf_addf(&derived, "%s/%s.elf", build_dir,
+				  project_name);
+			config_set(&config, "project.elf", derived.buf,
+				   CONFIG_SCOPE_PROJECT);
 		}
 	}
 
+out:
 	json_free(desc);
 	cmakecache_release(&cache);
+	sbuf_release(&prefix);
+	sbuf_release(&new_key);
 	sbuf_release(&path);
 	sbuf_release(&buf);
 	sbuf_release(&derived);

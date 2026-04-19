@@ -9,37 +9,26 @@
  * @brief Shared cmake orchestration used by every cmake-based "ice" command.
  *
  * Public API:
- *   - load_profile() reads [project "<name>"] from the config store
- *     into the file-scope cmake state below, sets up the IDF tool
- *     PATH, and derives project-state keys (target, mapfile, elf)
- *     from the build directory.
- *   - ensure_build_directory() runs cmake's configure step.
+ *   - load_profile() promotes [project "<name>"] keys into the
+ *     uniform project.X namespace at PROJECT scope (via
+ *     config_load_profile), validates the profile is configured,
+ *     and prepends the IDF tools to PATH.
+ *   - ensure_build_directory() runs cmake's configure step using
+ *     the now-uniform project.* config keys.
  *   - run_cmake_target() ensures configured and invokes a target with
  *     progress + log capture.
  *
  * Every cmake-based ice command calls load_profile() with its
  * @b{[<name>]} positional first, then ensure_build_directory() or
- * run_cmake_target().
+ * run_cmake_target().  The primitives never look at @b{global_*} or
+ * profile-specific keys; everything goes through @b{project.X} via
+ * config_get(), which load_profile populated.
  */
 #include <time.h>
 
 #include "ice.h"
 
 #define TAIL_LINES 30
-
-/* ------------------------------------------------------------------ */
-/*  Cmake state set by load_profile, consumed by the primitives       */
-/* ------------------------------------------------------------------ */
-
-static const char *cmake_build_dir;
-static const char *cmake_generator;
-static struct svec cmake_defines = SVEC_INIT;
-
-/* The .iceconfig snapshot load_profile reads from.  Held at file
- * scope (not released across load_profile calls) so cmake_build_dir /
- * cmake_generator -- which point into this struct's value strings --
- * stay valid for the life of the process. */
-static struct config project_config = CONFIG_INIT;
 
 /* ------------------------------------------------------------------ */
 /*  Profile loading                                                   */
@@ -84,36 +73,14 @@ void complete_profile_names(void)
 		printf("default\n");
 }
 
-/** Resolve project.@p name.@p suffix in @p c (one scalar value). */
-static const char *profile_get(struct config *c, struct sbuf *key,
-			       const char *name, const char *suffix)
-{
-	sbuf_reset(key);
-	sbuf_addf(key, "project.%s.%s", name, suffix);
-	return config_get_in(c, key->buf);
-}
-
 void load_profile(const char *name)
 {
-	struct sbuf key = SBUF_INIT;
-	struct sbuf entry = SBUF_INIT;
 	const char *build_dir;
-	const char *generator;
 	const char *idf_path;
-	const char *chip;
-	const char *sdkconfig;
-	struct config_entry **entries;
-	int n;
 
-	/* Re-read .iceconfig fresh into project_config so we see what
-	 * the most recent ice init wrote.  project_config is file-scope
-	 * and held alive for the rest of the process; the cmake_*
-	 * pointers below point into its value strings. */
-	config_release(&project_config);
-	config_load_file(&project_config, CONFIG_SCOPE_LOCAL,
-			 local_config_path());
+	config_load_profile(name);
 
-	build_dir = profile_get(&project_config, &key, name, "build-dir");
+	build_dir = config_get("project.build-dir");
 	if (!build_dir || !*build_dir) {
 		if (!strcmp(name, "default"))
 			die("project not initialised\n"
@@ -122,58 +89,52 @@ void load_profile(const char *name)
 		    "hint: run @b{ice init <chip> <idf> %s} first",
 		    name, name);
 	}
-	cmake_build_dir = build_dir;
 
-	generator = profile_get(&project_config, &key, name, "generator");
-	cmake_generator = generator ? generator : "Ninja";
-
-	chip = profile_get(&project_config, &key, name, "chip");
-	if (chip) {
-		sbuf_reset(&entry);
-		sbuf_addf(&entry, "IDF_TARGET=%s", chip);
-		svec_push(&cmake_defines, entry.buf);
-	}
-
-	sdkconfig = profile_get(&project_config, &key, name, "sdkconfig");
-	if (sdkconfig) {
-		sbuf_reset(&entry);
-		sbuf_addf(&entry, "SDKCONFIG=%s", sdkconfig);
-		svec_push(&cmake_defines, entry.buf);
-	}
-
-	sbuf_reset(&key);
-	sbuf_addf(&key, "project.%s.sdkconfig-defaults", name);
-	n = config_get_all_in(&project_config, key.buf, &entries);
-	if (n > 0) {
-		sbuf_reset(&entry);
-		sbuf_addstr(&entry, "SDKCONFIG_DEFAULTS=");
-		for (int i = 0; i < n; i++) {
-			if (i > 0)
-				sbuf_addch(&entry, ';');
-			sbuf_addstr(&entry, entries[i]->value);
-		}
-		svec_push(&cmake_defines, entry.buf);
-	}
-	free(entries);
-
-	sbuf_reset(&key);
-	sbuf_addf(&key, "project.%s.define", name);
-	n = config_get_all_in(&project_config, key.buf, &entries);
-	for (int i = 0; i < n; i++)
-		svec_push(&cmake_defines, entries[i]->value);
-	free(entries);
-
-	idf_path = profile_get(&project_config, &key, name, "idf-path");
+	idf_path = config_get("project.idf-path");
 	if (idf_path && *idf_path)
 		setup_tool_env(idf_path);
+}
 
-	/* Derive target/mapfile/elf from the profile's build dir so
-	 * subsequent commands (ice size auto-discovery, ...) can read
-	 * them via config_get(). */
-	config_load_project(&config, build_dir);
+/** Build the cmake @b{-D<key>=<value>} set from the active profile.
+ *  Caller owns @p out and must svec_clear() it after use. */
+static void build_define_set(struct svec *out)
+{
+	const char *chip = config_get("project.chip");
+	const char *sdkconfig = config_get("project.sdkconfig");
+	struct config_entry **entries;
+	int n;
 
-	sbuf_release(&key);
-	sbuf_release(&entry);
+	if (chip) {
+		struct sbuf e = SBUF_INIT;
+		sbuf_addf(&e, "IDF_TARGET=%s", chip);
+		svec_push(out, e.buf);
+		sbuf_release(&e);
+	}
+	if (sdkconfig) {
+		struct sbuf e = SBUF_INIT;
+		sbuf_addf(&e, "SDKCONFIG=%s", sdkconfig);
+		svec_push(out, e.buf);
+		sbuf_release(&e);
+	}
+
+	n = config_get_all("project.sdkconfig-defaults", &entries);
+	if (n > 0) {
+		struct sbuf e = SBUF_INIT;
+		sbuf_addstr(&e, "SDKCONFIG_DEFAULTS=");
+		for (int i = 0; i < n; i++) {
+			if (i > 0)
+				sbuf_addch(&e, ';');
+			sbuf_addstr(&e, entries[i]->value);
+		}
+		svec_push(out, e.buf);
+		sbuf_release(&e);
+	}
+	free(entries);
+
+	n = config_get_all("project.define", &entries);
+	for (int i = 0; i < n; i++)
+		svec_push(out, entries[i]->value);
+	free(entries);
 }
 
 /* ------------------------------------------------------------------ */
@@ -400,17 +361,24 @@ static int cache_needs_configure(const struct cmakecache *cache,
 
 int ensure_build_directory(int force)
 {
-	const char *build_dir = cmake_build_dir;
-	const char *generator = cmake_generator;
+	const char *build_dir = config_get("project.build-dir");
+	const char *generator = config_get("project.generator");
 	struct sbuf cache_path = SBUF_INIT;
 	struct cmakecache cache = CMAKECACHE_INIT;
 	struct sbuf logpath = SBUF_INIT;
+	struct svec defines = SVEC_INIT;
 	int has_cache;
 	int needs_configure;
 	int rc = 0;
 
+	if (!build_dir || !generator)
+		die("project not initialised\n"
+		    "hint: run @b{ice init <chip> <idf>} first");
+
 	if (access("CMakeLists.txt", F_OK) != 0)
 		die("no CMakeLists.txt found in current directory");
+
+	build_define_set(&defines);
 
 	/* Ensure build and log directories exist. */
 	{
@@ -427,7 +395,7 @@ int ensure_build_directory(int force)
 
 	needs_configure =
 	    force || !has_cache ||
-	    (cmake_defines.nr && cache_needs_configure(&cache, &cmake_defines));
+	    (defines.nr && cache_needs_configure(&cache, &defines));
 
 	/* Validate generator against existing cache. */
 	if (has_cache) {
@@ -453,8 +421,8 @@ int ensure_build_directory(int force)
 		svec_push(&args, "-B");
 		svec_push(&args, build_dir);
 
-		for (size_t i = 0; i < cmake_defines.nr; i++)
-			svec_pushf(&args, "-D%s", cmake_defines.v[i]);
+		for (size_t i = 0; i < defines.nr; i++)
+			svec_pushf(&args, "-D%s", defines.v[i]);
 
 		sbuf_addf(&logpath, "%s/log/configure.log", build_dir);
 
@@ -478,6 +446,7 @@ int ensure_build_directory(int force)
 		unlink(cache_path.buf);
 
 out:
+	svec_clear(&defines);
 	sbuf_release(&logpath);
 	sbuf_release(&cache_path);
 	return rc;
@@ -734,7 +703,7 @@ done:
 
 int run_cmake_target(const char *target, const char *label, int interactive)
 {
-	const char *build_dir = cmake_build_dir;
+	const char *build_dir = config_get("project.build-dir");
 	struct sbuf logpath = SBUF_INIT;
 	int rc;
 
