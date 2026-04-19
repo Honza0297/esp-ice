@@ -47,20 +47,8 @@ int cmd_build(int argc, const char **argv);
 int cmd_clean(int argc, const char **argv);
 int cmd_cmake(int argc, const char **argv);
 int cmd_flash(int argc, const char **argv);
-int cmd_fullclean(int argc, const char **argv);
 int cmd_init(int argc, const char **argv);
 int cmd_menuconfig(int argc, const char **argv);
-int cmd_reconfigure(int argc, const char **argv);
-int cmd_set_target(int argc, const char **argv);
-
-/**
- * @brief Wipe the contents of the configured build directory.
- *
- * Implements the body of "ice fullclean" and is also called by
- * cmd_set_target().  Returns 0 on success or when there was nothing
- * to clean, non-zero if any entry could not be removed.
- */
-int fullclean_run(void);
 
 /**
  * @brief Prepend installed tool directories to PATH and set export_vars.
@@ -153,7 +141,6 @@ extern const struct cmd_desc cmd_completion_desc;
 extern const struct cmd_desc cmd_config_desc;
 extern const struct cmd_desc cmd_configdep_desc;
 extern const struct cmd_desc cmd_flash_desc;
-extern const struct cmd_desc cmd_fullclean_desc;
 extern const struct cmd_desc cmd_help_desc;
 extern const struct cmd_desc cmd_image_desc;
 extern const struct cmd_desc cmd_init_desc;
@@ -161,9 +148,7 @@ extern const struct cmd_desc cmd_ldgen_desc;
 extern const struct cmd_desc cmd_menuconfig_desc;
 extern const struct cmd_desc cmd_monitor_desc;
 extern const struct cmd_desc cmd_partition_table_desc;
-extern const struct cmd_desc cmd_reconfigure_desc;
 extern const struct cmd_desc cmd_repo_desc;
-extern const struct cmd_desc cmd_set_target_desc;
 extern const struct cmd_desc cmd_size_desc;
 extern const struct cmd_desc cmd_target_desc;
 extern const struct cmd_desc cmd_tools_desc;

@@ -21,11 +21,11 @@ static const struct cmd_manual build_manual = {
 	       "command output is captured to "
 	       "@b{<build-dir>/log/build.log}, surfaced on failure or "
 	       "when @b{-v} / @b{core.verbose} is set.")
-	H_PARA("The build tree is configured on demand: cmake runs when "
-	       "@b{CMakeCache.txt} is missing, when any @b{cmake.define} "
-	       "entry has changed since the last configuration, or when "
-	       "@b{ice reconfigure} has been invoked.  No need to "
-	       "configure by hand before the first build."),
+	H_PARA("The project must already be initialised with @b{ice init "
+	       "<chip> <idf>}.  cmake re-runs automatically when its own "
+	       "tracked dependencies (top-level @b{CMakeLists.txt}, "
+	       "included @b{*.cmake} files) change.  For a from-scratch "
+	       "rebuild, re-run @b{ice init}."),
 
 	.examples =
 	H_EXAMPLE("ice build")
@@ -47,8 +47,8 @@ static const struct cmd_manual build_manual = {
 	       "cmake.")
 
 	H_SECTION("SEE ALSO")
-	H_ITEM("ice reconfigure",
-	       "Force a from-scratch cmake configuration.")
+	H_ITEM("ice init",
+	       "Bind/rebind the project (also re-runs cmake from scratch).")
 	H_ITEM("ice clean",
 	       "Remove build artifacts without touching the cmake "
 	       "configuration.")

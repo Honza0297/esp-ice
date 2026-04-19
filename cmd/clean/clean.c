@@ -28,9 +28,9 @@ static const struct cmd_manual clean_manual = {
 
 	.extras =
 	H_SECTION("SEE ALSO")
-	H_ITEM("ice reconfigure",
-	       "Force cmake to re-run configuration from scratch "
-	       "(full reset when combined with a fresh @b{core.build-dir})."),
+	H_ITEM("ice init",
+	       "Re-bind the project (wipes the build dir and runs cmake "
+	       "from scratch -- full reset)."),
 };
 /* clang-format on */
 

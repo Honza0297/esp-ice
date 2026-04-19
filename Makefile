@@ -125,7 +125,6 @@ LIB_SRCS := \
 	cmd/config/config.c \
 	cmd/configdep/configdep.c \
 	cmd/flash/flash.c \
-	cmd/fullclean/fullclean.c \
 	cmd/help/help.c \
 	cmd/image/image.c \
 	cmd/image/create.c \
@@ -138,9 +137,7 @@ LIB_SRCS := \
 	cmd/monitor/monitor.c \
 	cmd/menuconfig/menuconfig.c \
 	cmd/partition-table/partition-table.c \
-	cmd/reconfigure/reconfigure.c \
 	cmd/repo/repo.c \
-	cmd/set-target/set-target.c \
 	cmd/target/target.c \
 	cmd/tools/tools.c \
 	cmd/size/chip.c \

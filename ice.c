@@ -203,7 +203,6 @@ static const struct cmd_desc *const ice_subs[] = {
     &cmd_config_desc,
     &cmd_configdep_desc,
     &cmd_flash_desc,
-    &cmd_fullclean_desc,
     &cmd_help_desc,
     &cmd_image_desc,
     &cmd_init_desc,
@@ -211,9 +210,7 @@ static const struct cmd_desc *const ice_subs[] = {
     &cmd_menuconfig_desc,
     &cmd_monitor_desc,
     &cmd_partition_table_desc,
-    &cmd_reconfigure_desc,
     &cmd_repo_desc,
-    &cmd_set_target_desc,
     &cmd_size_desc,
     &cmd_target_desc,
     &cmd_tools_desc,
@@ -314,7 +311,7 @@ const struct cmd_manual ice_root_manual = {
 
 	.examples =
 	H_EXAMPLE("ice repo clone && ice repo checkout v5.4")
-	H_EXAMPLE("ice target set esp32s3")
+	H_EXAMPLE("ice init esp32s3 v5.4")
 	H_EXAMPLE("ice build")
 	H_EXAMPLE("ice flash")
 	H_EXAMPLE("ice help config"),
@@ -324,13 +321,12 @@ const struct cmd_manual ice_root_manual = {
 	H_PARA("Set up the ice-managed ESP-IDF reference:")
 	H_LINE("@y{$} @b{ice repo clone}                         clone ESP-IDF into ~/.ice/esp-idf")
 	H_RAW("")
-	H_PARA("Create a working checkout for a release and point ice at it:")
+	H_PARA("Create a working checkout for a release:")
 	H_LINE("@y{$} @b{ice repo checkout v5.4}                 creates ~/.ice/checkouts/v5.4")
-	H_LINE("@y{$} @b{ice config idf.path ~/.ice/checkouts/v5.4}")
 	H_RAW("")
-	H_PARA("Pick a target and install build tools:")
-	H_LINE("@y{$} @b{ice target set esp32s3}                set the chip target")
-	H_LINE("@y{$} @b{ice tools install}                     install build tools")
+	H_PARA("Bind the project to a chip + IDF (installs tools, runs cmake):")
+	H_LINE("@y{$} @b{ice init esp32s3 v5.4}                  default profile")
+	H_LINE("@y{$} @b{ice init esp32 v5.4 production}         named profile")
 	H_RAW("")
 	H_PARA("Build and flash:")
 	H_LINE("@y{$} @b{ice build}")

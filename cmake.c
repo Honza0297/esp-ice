@@ -280,8 +280,7 @@ int ensure_build_directory(int force)
 
 		if (cached_gen && strcmp(cached_gen, generator) != 0)
 			die("build is configured for generator '%s' "
-			    "not '%s' -- run 'ice reconfigure' or "
-			    "remove '%s'",
+			    "not '%s' -- re-run 'ice init' or remove '%s'",
 			    cached_gen, generator, build_dir);
 	}
 

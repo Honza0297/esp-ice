@@ -35,9 +35,9 @@ static const struct cmd_manual menuconfig_manual = {
 	H_ITEM("ice configdep",
 	       "Compiler wrapper that makes incremental builds "
 	       "sdkconfig-aware.")
-	H_ITEM("ice reconfigure",
-	       "Re-run cmake if menuconfig's results need to propagate "
-	       "to cache-time decisions."),
+	H_ITEM("ice init",
+	       "Re-bind the project from scratch if menuconfig's results "
+	       "need to propagate to cache-time decisions."),
 };
 /* clang-format on */
 
