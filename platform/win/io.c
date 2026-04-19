@@ -217,48 +217,54 @@ static int console_write_vt(HANDLE h, const char *buf)
 /**
  * @brief Write a formatted UTF-8 string to a stream.
  *
- * Handles three cases:
- *  - Redirected (pipe/file): expand colors, format, fwrite.
- *  - Console with VT: expand colors, format, WriteConsoleW.
- *  - Console without VT: expand colors, format, parse ANSI → Console API.
+ * Substitutes conversion specifiers first, then expands @x{...}
+ * tokens so that tokens arriving through %s arguments participate
+ * in expansion and nesting the same way as tokens in the literal
+ * format string.
+ *
+ * Handles three output cases:
+ *  - Redirected (pipe/file): fwrite the expanded bytes.
+ *  - Console with VT: WriteConsoleW (terminal interprets ANSI).
+ *  - Console without VT: parse ANSI → Console API.
  */
 int vfprintf_p(FILE *stream, const char *fmt, va_list args)
 {
+	struct sbuf formatted = SBUF_INIT;
 	struct sbuf expanded = SBUF_INIT;
-	struct sbuf output = SBUF_INIT;
+	const char *out_buf;
+	size_t out_len;
 	int n;
-	va_list args_copy;
 	DWORD dwMode;
 
 	/* NOLINTNEXTLINE(performance-no-int-to-ptr) */
 	HANDLE h = (HANDLE)_get_osfhandle(_fileno(stream));
 
-	expand_colors(&expanded, fmt, use_color_for(stream));
+	sbuf_vaddf(&formatted, fmt, args);
 
-	/* Redirected: format and fwrite. */
+	if (memchr(formatted.buf, '@', formatted.len)) {
+		expand_colors(&expanded, formatted.buf, use_color_for(stream));
+		out_buf = expanded.buf;
+		out_len = expanded.len;
+	} else {
+		out_buf = formatted.buf;
+		out_len = formatted.len;
+	}
+
 	if (!GetConsoleMode(h, &dwMode)) {
-		va_copy(args_copy, args);
-		sbuf_vaddf(&output, expanded.buf, args_copy);
-		va_end(args_copy);
-		n = (int)fwrite(output.buf, 1, output.len, stream);
-		if ((size_t)n != output.len)
+		n = (int)fwrite(out_buf, 1, out_len, stream);
+		if ((size_t)n != out_len)
 			n = -1;
 		goto out;
 	}
 
-	/* Console: format, then write with UTF-8 → wide-char. */
-	va_copy(args_copy, args);
-	sbuf_vaddf(&output, expanded.buf, args_copy);
-	va_end(args_copy);
-
 	if (use_vt)
-		n = console_write_vt(h, output.buf);
+		n = console_write_vt(h, out_buf);
 	else
-		n = console_write_legacy(h, output.buf);
+		n = console_write_legacy(h, out_buf);
 
 out:
-	sbuf_release(&output);
 	sbuf_release(&expanded);
+	sbuf_release(&formatted);
 	return n;
 }
 
