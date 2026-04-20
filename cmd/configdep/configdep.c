@@ -21,7 +21,10 @@
 #include "ice.h"
 
 /* clang-format off */
-static const struct cmd_manual manual = {
+static const struct cmd_manual configdep_manual = {
+	.name = "ice idf configdep",
+	.summary = "sdkconfig-aware compiler wrapper",
+
 	.description =
 	H_PARA("Compiler wrapper that rewrites GCC-style dependency "
 	       "files (@b{-MF}) so a translation unit only rebuilds "
@@ -44,7 +47,7 @@ static const struct cmd_manual manual = {
 	       "Ninja recompile precisely the affected sources."),
 
 	.examples =
-	H_EXAMPLE("ice configdep cc -c foo.c -o foo.o -MF foo.d"),
+	H_EXAMPLE("ice idf configdep cc -c foo.c -o foo.o -MF foo.d"),
 
 	.extras =
 	H_SECTION("SEE ALSO")
@@ -53,6 +56,15 @@ static const struct cmd_manual manual = {
 	       "pick up only the actually-affected sources."),
 };
 /* clang-format on */
+
+static const struct option cmd_configdep_opts[] = {OPT_END()};
+
+const struct cmd_desc cmd_configdep_desc = {
+    .name = "configdep",
+    .fn = cmd_configdep,
+    .opts = cmd_configdep_opts,
+    .manual = &configdep_manual,
+};
 
 /* ------------------------------------------------------------------ */
 /*  Parsed dependency file                                            */
@@ -368,23 +380,19 @@ int cmd_configdep(int argc, const char **argv)
 
 	/*
 	 * All args after argv[0] are forwarded verbatim to the real
-	 * compiler, so we can't call parse_options_manual here -- flags
+	 * compiler, so we can't call parse_options here -- flags
 	 * like -c, -MF etc. are not ours.  Intercept --help/-h manually
 	 * at the head of the argv before forwarding takes over.
 	 */
 	if (argc >= 2 &&
 	    (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"))) {
-		const char *usage[] = {
-		    "ice configdep <compiler> [<arg>...]",
-		    NULL,
-		};
-		print_manual("configdep", &manual, NULL, usage);
+		print_manual(configdep_manual.name, &cmd_configdep_desc);
 		return EXIT_SUCCESS;
 	}
 
 	/* argv[0] = "configdep", argv[1..] = compiler command */
 	if (argc < 2)
-		die("usage: ice configdep <cmd> <arg...>");
+		die("usage: ice idf configdep <cmd> <arg...>");
 
 	/* Step 1: run the compiler. */
 	struct process proc = PROCESS_INIT;

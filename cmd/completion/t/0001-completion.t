@@ -13,7 +13,7 @@ tap_setup
 # ---- `ice completion <shell>` prints the expected init script ----
 
 "$BINARY" completion bash >bash.out
-tap_check grep -q 'complete -o default -F _ice_complete ice' bash.out
+tap_check grep -q 'complete -o default -o nosort -F _ice_complete ice' bash.out
 tap_done "ice completion bash emits complete registration"
 
 "$BINARY" completion zsh >zsh.out
@@ -21,7 +21,7 @@ tap_check grep -q 'compdef _ice ice' zsh.out
 tap_done "ice completion zsh emits compdef registration"
 
 "$BINARY" completion fish >fish.out
-tap_check grep -q 'complete -c ice -f -a' fish.out
+tap_check grep -q 'complete -c ice -f -k -a' fish.out
 tap_done "ice completion fish emits complete registration"
 
 "$BINARY" completion powershell >pwsh.out
@@ -45,9 +45,15 @@ tap_done "subcommand list includes visible commands and hides __complete"
 "$BINARY" __complete 1 ice "co" >pref.out
 tap_check grep -qx 'completion' pref.out
 tap_check grep -qx 'config'     pref.out
-tap_check grep -qx 'configdep'  pref.out
-tap_check ! grep -qx 'build'    pref.out
-tap_done "prefix filtering matches subcommands starting with 'co'"
+tap_done "subcommand list includes all visible commands (shell does prefix filtering)"
+
+"$BINARY" __complete 2 ice idf "" >idfsubs.out
+tap_check grep -qx 'monitor'         idfsubs.out
+tap_check grep -qx 'size'            idfsubs.out
+tap_check grep -qx 'configdep'       idfsubs.out
+tap_check grep -qx 'ldgen'           idfsubs.out
+tap_check grep -qx 'partition-table' idfsubs.out
+tap_done "ice idf <TAB> lists bundled IDF tools"
 
 # ---- `ice __complete`: per-subcommand flag candidates ----
 
@@ -60,11 +66,11 @@ tap_check grep -qx -- '--local' cfgflags.out
 tap_done "config --<TAB> walks cmd_struct.opts"
 
 "$BINARY" __complete 1 ice "-" >globflags.out
-tap_check grep -qx -- '--build-dir' globflags.out
-tap_check grep -qx -- '-B'          globflags.out
-tap_check grep -qx -- '--verbose'   globflags.out
-tap_check grep -qx -- '-h'          globflags.out
-tap_check grep -qx -- '--help'      globflags.out
+tap_check grep -qx -- '--verbose' globflags.out
+tap_check grep -qx -- '-v'        globflags.out
+tap_check grep -qx -- '--version' globflags.out
+tap_check grep -qx -- '-h'        globflags.out
+tap_check grep -qx -- '--help'    globflags.out
 tap_done "global flag completion walks ice_global_opts (plus -h/--help)"
 
 "$BINARY" __complete 2 ice config "-" >cfghelp.out
@@ -77,8 +83,7 @@ tap_done "per-subcommand flag completion emits -h/--help"
 "$BINARY" __complete 1 ice "t" >tpref.out
 tap_check grep -qx 'target'    tpref.out
 tap_check grep -qx 'tools'     tpref.out
-tap_check ! grep -qx 'build'   tpref.out
-tap_done "prefix 't' matches target and tools but not build"
+tap_done "subcommand list includes target and tools (shell does prefix filtering)"
 
 "$BINARY" __complete 2 ice help "" >helpcmds.out
 tap_check grep -qx 'build'       helpcmds.out
@@ -93,10 +98,10 @@ tap_check grep -qx 'fish'       shells.out
 tap_check grep -qx 'powershell' shells.out
 tap_done "completion <TAB> lists supported shells"
 
-# ---- `ice __complete`: option value falls through to file completion ----
+# ---- `ice __complete`: positional with no completion callback ----
 
-"$BINARY" __complete 2 ice -B "" >bval.out
-tap_check test ! -s bval.out
-tap_done "-B <TAB> emits nothing (shell handles file completion)"
+"$BINARY" __complete 4 ice repo checkout v5.4 "" >posfile.out
+tap_check test ! -s posfile.out
+tap_done "positional with NULL callback emits nothing (shell handles file completion)"
 
 tap_result

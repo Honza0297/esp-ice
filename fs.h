@@ -72,4 +72,39 @@ int write_file_atomic(const char *path, const void *data, size_t len);
  */
 int rmtree(const char *path, int verbose);
 
+/**
+ * @brief Check whether @p name is an executable on PATH.
+ * @return 1 if found and executable, 0 otherwise.
+ */
+int find_in_path(const char *name);
+
+/**
+ * @brief Acquire an exclusive advisory lock by creating @p path.
+ *
+ * Uses open(O_CREAT | O_EXCL) to atomically create @p path (git's
+ * "<filename>.lock" pattern).  If the file already exists, fails with
+ * errno == EEXIST so the caller can report that another ice process
+ * holds the lock.  On success the PID of the current process is
+ * written into the file for diagnostics and @p path is registered
+ * with atexit() so the lock is removed even if die() is called before
+ * lock_release().
+ *
+ * Works cross-filesystem and cross-platform -- the atomicity is
+ * guaranteed by the kernel, not by filesystem semantics.  Signals
+ * that bypass atexit (SIGKILL, default SIGINT) will leave the file
+ * behind; callers should document how to remove stale locks.
+ *
+ * @return 0 on success, -1 on failure (errno set).
+ */
+int lock_acquire(const char *path);
+
+/**
+ * @brief Release a lock previously acquired with lock_acquire().
+ *
+ * Unlinks @p path and deregisters it from the atexit cleanup list.
+ * Safe to call after a successful lock_acquire only -- releasing a
+ * lock we don't own would unlink another process's file.
+ */
+void lock_release(const char *path);
+
 #endif /* FS_H */

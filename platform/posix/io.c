@@ -8,8 +8,8 @@
  * @file platform/posix/io.c
  * @brief Color-aware I/O overrides for POSIX.
  *
- * IMPORTANT: This file captures real C-library fprintf/vfprintf/fputs
- * pointers before ice.h overrides them. ice.h is NOT the first include.
+ * IMPORTANT: This file captures the real C-library fputs pointer
+ * before ice.h overrides it. ice.h is NOT the first include.
  * (Same pattern as platform/win/wconv.c -- see its file-level comment.)
  */
 #include <dirent.h>
@@ -18,8 +18,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 
-/** Real C-library functions, captured before platform.h overrides them. */
-static int (*real_vfprintf)(FILE *, const char *, va_list) = vfprintf;
+/** Real C-library fputs, captured before platform.h overrides it. */
 static int (*real_fputs)(const char *, FILE *) = fputs;
 
 #include "ice.h"
@@ -27,22 +26,29 @@ static int (*real_fputs)(const char *, FILE *) = fputs;
 /**
  * @brief Color-aware vfprintf for POSIX.
  *
- * Fast path: if the format string contains no '@', calls the real
- * vfprintf directly (zero overhead). Otherwise expands @x{...} tokens
- * and then calls the real vfprintf with the expanded format string.
+ * Substitutes conversion specifiers first, then expands @x{...}
+ * tokens on the substituted result.  This ordering lets tokens in
+ * %s arguments participate in expansion (and in the nesting stack)
+ * instead of being spliced in literally after expand_colors runs.
  */
 int vfprintf_p(FILE *stream, const char *fmt, va_list ap)
 {
-	struct sbuf expanded = SBUF_INIT;
+	struct sbuf formatted = SBUF_INIT;
 	int n;
 
-	/* Fast path: no color tokens. */
-	if (!memchr(fmt, '@', strlen(fmt)))
-		return real_vfprintf(stream, fmt, ap);
+	sbuf_vaddf(&formatted, fmt, ap);
 
-	expand_colors(&expanded, fmt, use_color_for(stream));
-	n = real_vfprintf(stream, expanded.buf, ap);
-	sbuf_release(&expanded);
+	if (memchr(formatted.buf, '@', formatted.len)) {
+		struct sbuf expanded = SBUF_INIT;
+
+		expand_colors(&expanded, formatted.buf, use_color_for(stream));
+		n = real_fputs(expanded.buf, stream);
+		sbuf_release(&expanded);
+	} else {
+		n = real_fputs(formatted.buf, stream);
+	}
+
+	sbuf_release(&formatted);
 	return n;
 }
 

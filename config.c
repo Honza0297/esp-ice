@@ -173,10 +173,8 @@ int config_get_int(const char *key, int *out)
 	return 0;
 }
 
-int config_get_bool(const char *key, int *out)
+int config_parse_bool(const char *s, int *out)
 {
-	const char *s = config_get(key);
-
 	if (!s)
 		return -1;
 
@@ -193,6 +191,11 @@ int config_get_bool(const char *key, int *out)
 	return -2;
 }
 
+int config_get_bool(const char *key, int *out)
+{
+	return config_parse_bool(config_get(key), out);
+}
+
 const char *scope_name(enum config_scope scope)
 {
 	switch (scope) {
@@ -204,10 +207,6 @@ const char *scope_name(enum config_scope scope)
 		return "local";
 	case CONFIG_SCOPE_PROJECT:
 		return "project";
-	case CONFIG_SCOPE_ENV:
-		return "env";
-	case CONFIG_SCOPE_CLI:
-		return "cli";
 	}
 	return "unknown";
 }
@@ -268,11 +267,20 @@ static int valid_name_char(int ch)
 	return isalnum((unsigned char)ch) || ch == '-' || ch == '_';
 }
 
+/*
+ * Accepts both:
+ *   [section]
+ *   [section "subsection"]           (git-style; key becomes
+ * section.subsection.key)
+ *
+ * Section names are restricted to valid_name_char; subsection names
+ * are free-form between the quotes (supports \" and \\ escapes).
+ */
 static void parse_section(const char *path, int lineno, char *line,
 			  struct sbuf *section)
 {
 	char *start = line + 1; /* past '[' */
-	char *end, *after, *p;
+	char *end, *after, *p, *name_end;
 
 	end = strchr(start, ']');
 	if (!end) {
@@ -298,7 +306,12 @@ static void parse_section(const char *path, int lineno, char *line,
 		return;
 	}
 
-	for (p = start; p < end; p++) {
+	/* Section name runs until whitespace or end. */
+	name_end = start;
+	while (name_end < end && *name_end != ' ' && *name_end != '\t')
+		name_end++;
+
+	for (p = start; p < name_end; p++) {
 		if (!valid_name_char((unsigned char)*p)) {
 			warn("%s:%d: invalid character in section name", path,
 			     lineno);
@@ -307,7 +320,42 @@ static void parse_section(const char *path, int lineno, char *line,
 	}
 
 	sbuf_reset(section);
-	sbuf_add(section, start, end - start);
+	sbuf_add(section, start, name_end - start);
+
+	/* Optional subsection in quotes. */
+	p = name_end;
+	while (p < end && (*p == ' ' || *p == '\t'))
+		p++;
+	if (p == end)
+		return;
+
+	if (*p != '"') {
+		warn("%s:%d: expected '\"' to start subsection", path, lineno);
+		sbuf_reset(section);
+		return;
+	}
+	p++;
+
+	sbuf_addch(section, '.');
+	while (p < end && *p != '"') {
+		if (*p == '\\' && p + 1 < end) {
+			p++; /* skip escape; take next char literally */
+		}
+		sbuf_addch(section, *p++);
+	}
+	if (p >= end || *p != '"') {
+		warn("%s:%d: unterminated subsection", path, lineno);
+		sbuf_reset(section);
+		return;
+	}
+	p++;
+	while (p < end && (*p == ' ' || *p == '\t'))
+		p++;
+	if (p != end) {
+		warn("%s:%d: garbage after subsection", path, lineno);
+		sbuf_reset(section);
+		return;
+	}
 }
 
 static void parse_kv(struct config *c, enum config_scope scope,
@@ -407,14 +455,26 @@ static void parse_line(struct config *c, enum config_scope scope,
 		parse_kv(c, scope, path, lineno, line, section);
 }
 
-int config_load_file(struct config *c, enum config_scope scope,
-		     const char *path)
+void config_load_buf(struct config *c, enum config_scope scope,
+		     const char *label, char *buf, size_t len)
 {
-	struct sbuf sb = SBUF_INIT;
 	struct sbuf section = SBUF_INIT;
 	size_t pos = 0;
 	char *line;
 	int lineno = 0;
+
+	while ((line = sbuf_getline(buf, len, &pos)) != NULL) {
+		lineno++;
+		parse_line(c, scope, label, lineno, line, &section);
+	}
+
+	sbuf_release(&section);
+}
+
+int config_load_file(struct config *c, enum config_scope scope,
+		     const char *path)
+{
+	struct sbuf sb = SBUF_INIT;
 
 	if (!path)
 		return 0;
@@ -430,13 +490,8 @@ int config_load_file(struct config *c, enum config_scope scope,
 		return -1;
 	}
 
-	while ((line = sbuf_getline(sb.buf, sb.len, &pos)) != NULL) {
-		lineno++;
-		parse_line(c, scope, path, lineno, line, &section);
-	}
-
+	config_load_buf(c, scope, path, sb.buf, sb.len);
 	sbuf_release(&sb);
-	sbuf_release(&section);
 	return 0;
 }
 
@@ -495,62 +550,87 @@ int config_write_file(const struct config *c, enum config_scope scope,
 		      const char *path)
 {
 	struct sbuf out = SBUF_INIT;
-	struct svec sections = SVEC_INIT;
+	struct svec headers = SVEC_INIT;
 	FILE *fp;
 	size_t written;
 
-	/* Collect unique section names (order of first appearance). */
+	/*
+	 * Group by the key's parent path -- everything up to the last
+	 * dot.  "alias.b" has parent "alias"; "project.default.chip"
+	 * has parent "project.default".  A parent with a dot is written
+	 * as a git-style [section "subsection"] header; the subsection
+	 * carries characters (. in particular) that a bare section
+	 * header's key-validator would reject on reload.
+	 */
 	for (int i = 0; i < c->nr; i++) {
-		const char *dot;
-		char *sec;
+		const char *last_dot;
+		char *hdr;
 		int already;
 
 		if (c->entries[i].scope != scope)
 			continue;
 
-		dot = strchr(c->entries[i].key, '.');
-		if (!dot)
+		last_dot = strrchr(c->entries[i].key, '.');
+		if (!last_dot)
 			continue; /* section-less keys are not written */
 
-		sec = sbuf_strndup(c->entries[i].key,
-				   (size_t)(dot - c->entries[i].key));
+		hdr = sbuf_strndup(c->entries[i].key,
+				   (size_t)(last_dot - c->entries[i].key));
 
 		already = 0;
-		for (size_t j = 0; j < sections.nr; j++) {
-			if (!strcmp(sections.v[j], sec)) {
+		for (size_t j = 0; j < headers.nr; j++) {
+			if (!strcmp(headers.v[j], hdr)) {
 				already = 1;
 				break;
 			}
 		}
 		if (!already)
-			svec_push(&sections, sec);
-		free(sec);
+			svec_push(&headers, hdr);
+		free(hdr);
 	}
 
-	for (size_t s = 0; s < sections.nr; s++) {
-		const char *section = sections.v[s];
-		size_t sec_len = strlen(section);
+	for (size_t h = 0; h < headers.nr; h++) {
+		const char *header = headers.v[h];
+		size_t hdr_len = strlen(header);
+		const char *dot = strchr(header, '.');
 
-		if (s > 0)
+		if (h > 0)
 			sbuf_addch(&out, '\n');
-		sbuf_addf(&out, "[%s]\n", section);
+
+		if (dot) {
+			sbuf_addch(&out, '[');
+			sbuf_add(&out, header, dot - header);
+			sbuf_addstr(&out, " \"");
+			for (const char *p = dot + 1; *p; p++) {
+				if (*p == '"' || *p == '\\')
+					sbuf_addch(&out, '\\');
+				sbuf_addch(&out, *p);
+			}
+			sbuf_addstr(&out, "\"]\n");
+		} else {
+			sbuf_addf(&out, "[%s]\n", header);
+		}
 
 		for (int i = 0; i < c->nr; i++) {
 			const char *key = c->entries[i].key;
 
 			if (c->entries[i].scope != scope)
 				continue;
-			if (strncmp(key, section, sec_len) != 0 ||
-			    key[sec_len] != '.')
+			if (strncmp(key, header, hdr_len) != 0 ||
+			    key[hdr_len] != '.')
+				continue;
+			/* Only direct children of this header; deeper
+			 * nesting belongs to a different header entry. */
+			if (strchr(key + hdr_len + 1, '.'))
 				continue;
 
-			sbuf_addf(&out, "\t%s = ", key + sec_len + 1);
+			sbuf_addf(&out, "\t%s = ", key + hdr_len + 1);
 			write_value(c->entries[i].value, &out);
 			sbuf_addch(&out, '\n');
 		}
 	}
 
-	svec_clear(&sections);
+	svec_clear(&headers);
 
 	fp = fopen(path, "w");
 	if (!fp) {
@@ -569,42 +649,80 @@ int config_write_file(const struct config *c, enum config_scope scope,
 	return 0;
 }
 
-void config_load_env(struct config *c)
+/** Remove every entry at @p scope from @p c.  Returns count removed. */
+static int config_clear_scope(struct config *c, enum config_scope scope)
 {
-	static const struct {
-		const char *env;
-		const char *key;
-	} map[] = {
-	    {"ESPPORT", "serial.port"},
-	    {"ESPBAUD", "serial.baud"},
-	    {"IDF_TARGET", "target"},
-	};
+	int dst = 0;
+	int removed = 0;
 
-	for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
-		const char *val = getenv(map[i].env);
-
-		if (val && *val)
-			config_set(c, map[i].key, val, CONFIG_SCOPE_ENV);
+	for (int i = 0; i < c->nr; i++) {
+		if (c->entries[i].scope == scope) {
+			free(c->entries[i].key);
+			free(c->entries[i].value);
+			removed++;
+			continue;
+		}
+		if (dst != i)
+			c->entries[dst] = c->entries[i];
+		dst++;
 	}
+	c->nr = dst;
+	return removed;
 }
 
-void config_load_project(struct config *c, const char *build_dir)
+void config_reload_local(void)
 {
+	config_clear_scope(&config, CONFIG_SCOPE_LOCAL);
+	config_load_file(&config, CONFIG_SCOPE_LOCAL, local_config_path());
+}
+
+void config_load_profile(const char *name)
+{
+	struct sbuf prefix = SBUF_INIT;
+	struct sbuf new_key = SBUF_INIT;
 	struct sbuf path = SBUF_INIT;
 	struct sbuf buf = SBUF_INIT;
 	struct sbuf derived = SBUF_INIT;
 	struct cmakecache cache = CMAKECACHE_INIT;
 	struct json_value *desc = NULL;
+	const char *build_dir;
+	int n_pre;
 
+	/* Re-runnable: clear any previous PROJECT-scope state first. */
+	config_clear_scope(&config, CONFIG_SCOPE_PROJECT);
+
+	/*
+	 * Promote @b{[project "<name>"]} entries (loaded from .iceconfig
+	 * at LOCAL scope) up to a uniform @b{project.X} namespace at
+	 * PROJECT scope so commands can read @b{project.build-dir} etc.
+	 * without knowing which profile they're in.
+	 */
+	sbuf_addf(&prefix, "project.%s.", name);
+	n_pre = config.nr;
+	for (int i = 0; i < n_pre; i++) {
+		const char *key = config.entries[i].key;
+		if (config.entries[i].scope != CONFIG_SCOPE_LOCAL)
+			continue;
+		if (strncmp(key, prefix.buf, prefix.len) != 0)
+			continue;
+		sbuf_reset(&new_key);
+		sbuf_addf(&new_key, "project.%s", key + prefix.len);
+		config_add(&config, new_key.buf, config.entries[i].value,
+			   CONFIG_SCOPE_PROJECT);
+	}
+
+	/* Derive project.target / project.mapfile / project.elf from the
+	 * profile's build directory, if it has been configured. */
+	build_dir = config_get("project.build-dir");
 	if (!build_dir)
-		return;
+		goto out;
 
 	sbuf_addf(&path, "%s/CMakeCache.txt", build_dir);
 	if (cmakecache_load(&cache, path.buf) == 0) {
 		const char *target = cmakecache_get(&cache, "IDF_TARGET");
-
 		if (target)
-			config_set(c, "target", target, CONFIG_SCOPE_PROJECT);
+			config_set(&config, "project.target", target,
+				   CONFIG_SCOPE_PROJECT);
 	}
 
 	sbuf_reset(&path);
@@ -613,21 +731,27 @@ void config_load_project(struct config *c, const char *build_dir)
 		desc = json_parse(buf.buf, buf.len);
 
 	if (desc) {
-		const char *name =
+		const char *project_name =
 		    json_as_string(json_get(desc, "project_name"));
-		if (name) {
-			sbuf_addf(&derived, "%s/%s.map", build_dir, name);
-			config_set(c, "mapfile", derived.buf,
+		if (project_name) {
+			sbuf_addf(&derived, "%s/%s.map", build_dir,
+				  project_name);
+			config_set(&config, "project.mapfile", derived.buf,
 				   CONFIG_SCOPE_PROJECT);
 
 			sbuf_reset(&derived);
-			sbuf_addf(&derived, "%s/%s.elf", build_dir, name);
-			config_set(c, "elf", derived.buf, CONFIG_SCOPE_PROJECT);
+			sbuf_addf(&derived, "%s/%s.elf", build_dir,
+				  project_name);
+			config_set(&config, "project.elf", derived.buf,
+				   CONFIG_SCOPE_PROJECT);
 		}
 	}
 
+out:
 	json_free(desc);
 	cmakecache_release(&cache);
+	sbuf_release(&prefix);
+	sbuf_release(&new_key);
 	sbuf_release(&path);
 	sbuf_release(&buf);
 	sbuf_release(&derived);

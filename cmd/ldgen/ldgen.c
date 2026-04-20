@@ -12,7 +12,10 @@
 #include "lf.h"
 
 /* clang-format off */
-static const struct cmd_manual manual = {
+static const struct cmd_manual ldgen_manual = {
+	.name = "ice idf ldgen",
+	.summary = "analyse linker fragment (.lf) files",
+
 	.description =
 	H_PARA("Parses ESP-IDF linker fragment (@b{.lf}) files and "
 	       "reports the number of @b{sections}, @b{schemes}, and "
@@ -26,9 +29,9 @@ static const struct cmd_manual manual = {
 	       "pipeline merges them into a single generated @b{.ld}."),
 
 	.examples =
-	H_EXAMPLE("ice ldgen components/freertos/linker.lf")
-	H_EXAMPLE("ice ldgen --dump app.lf")
-	H_EXAMPLE("ice ldgen app.lf bootloader.lf"),
+	H_EXAMPLE("ice idf ldgen components/freertos/linker.lf")
+	H_EXAMPLE("ice idf ldgen --dump app.lf")
+	H_EXAMPLE("ice idf ldgen app.lf bootloader.lf"),
 
 	.extras =
 	H_SECTION("SEE ALSO")
@@ -41,21 +44,23 @@ static const struct cmd_manual manual = {
 /* File-scope so the table can be const and reachable via cmd_struct.opts. */
 static int opt_dump;
 
-const struct option cmd_ldgen_opts[] = {
+static const struct option cmd_ldgen_opts[] = {
     OPT_BOOL('d', "dump", &opt_dump, "dump parsed AST"),
     OPT_END(),
 };
 
+const struct cmd_desc cmd_ldgen_desc = {
+    .name = "ldgen",
+    .fn = cmd_ldgen,
+    .opts = cmd_ldgen_opts,
+    .manual = &ldgen_manual,
+};
+
 int cmd_ldgen(int argc, const char **argv)
 {
-	const char *usage[] = {
-	    "ice ldgen [--dump] <file.lf> [...]",
-	    NULL,
-	};
-
-	argc = parse_options_manual(argc, argv, cmd_ldgen_opts, usage, &manual);
+	argc = parse_options(argc, argv, &cmd_ldgen_desc);
 	if (argc < 1)
-		die("no input files; see 'ice ldgen --help'");
+		die("no input files; see 'ice idf ldgen --help'");
 
 	for (int i = 0; i < argc; i++) {
 		struct sbuf sb = SBUF_INIT;

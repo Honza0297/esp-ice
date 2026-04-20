@@ -28,7 +28,10 @@
 #include "ice.h"
 
 /* clang-format off */
-static const struct cmd_manual manual = {
+static const struct cmd_manual size_manual = {
+	.name = "ice idf size",
+	.summary = "analyse firmware memory usage by region",
+
 	.description =
 	H_PARA("Reads a GCC/LD linker map file and prints a table of "
 	       "memory usage per chip memory region (IRAM, DRAM, Flash, "
@@ -49,9 +52,9 @@ static const struct cmd_manual manual = {
 	       "misleading."),
 
 	.examples =
-	H_EXAMPLE("ice size build/hello-world.map")
-	H_EXAMPLE("ice size --target esp32s3 build/app.map")
-	H_EXAMPLE("ice size --format table build/app.map"),
+	H_EXAMPLE("ice idf size build/hello-world.map")
+	H_EXAMPLE("ice idf size --target esp32s3 build/app.map")
+	H_EXAMPLE("ice idf size --format table build/app.map"),
 
 	.extras =
 	H_SECTION("SEE ALSO")
@@ -64,11 +67,18 @@ static const struct cmd_manual manual = {
 static const char *opt_target;
 static const char *opt_format = "table";
 
-const struct option cmd_size_opts[] = {
-    OPT_STRING('t', "target", &opt_target, "chip",
-	       "target chip (e.g. esp32s3)"),
-    OPT_STRING(0, "format", &opt_format, "fmt", "output format (table)"),
+static const struct option cmd_size_opts[] = {
+    OPT_STRING('t', "target", &opt_target, "chip", "target chip (e.g. esp32s3)",
+	       NULL),
+    OPT_STRING(0, "format", &opt_format, "fmt", "output format (table)", NULL),
     OPT_END(),
+};
+
+const struct cmd_desc cmd_size_desc = {
+    .name = "size",
+    .fn = cmd_size,
+    .opts = cmd_size_opts,
+    .manual = &size_manual,
 };
 
 /* ---- helpers -------------------------------------------------------- */
@@ -573,14 +583,9 @@ static void output_table(struct memmap *mm)
 
 int cmd_size(int argc, const char **argv)
 {
-	const char *usage[] = {
-	    "ice size [--format <fmt>] [--target <chip>] <map-file>",
-	    NULL,
-	};
-
-	argc = parse_options_manual(argc, argv, cmd_size_opts, usage, &manual);
+	argc = parse_options(argc, argv, &cmd_size_desc);
 	if (argc < 1)
-		die("no map file; see 'ice size --help'");
+		die("no map file; see 'ice idf size --help'");
 
 	struct sbuf sb = SBUF_INIT;
 	if (sbuf_read_file(&sb, argv[0]) < 0)

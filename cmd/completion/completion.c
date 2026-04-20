@@ -23,256 +23,13 @@
  *     re-invokes the hidden __complete backend on every TAB.
  *
  *   ice __complete <cword> <word>...
- *     Hidden.  Inspects the partial argv (word[0] == "ice", cword is
- *     the cursor word index) and prints newline-separated candidates
- *     on stdout.  Filtering by the current prefix happens here so the
- *     shell glue can set COMPREPLY / compadd / complete directly.
- *
- * The split keeps shell glue tiny and shell-agnostic; all the real
- * knowledge (subcommands, option names, aliases, targets, config keys)
- * lives in C and stays in sync with the binary by construction.
+ *     Hidden.  Transforms the partial command line into a call to
+ *     cmd_ice() with --ice-complete appended.  The normal dispatch
+ *     chain routes to the deepest handler, whose parse_options()
+ *     sees --ice-complete and prints candidates to stdout before
+ *     exiting.  The shell captures the output.
  */
 #include "ice.h"
-
-/* ---- small helpers -------------------------------------------------- */
-
-static int has_prefix(const char *s, const char *prefix)
-{
-	return !strncmp(s, prefix, strlen(prefix));
-}
-
-static void emit(const char *candidate, const char *prefix)
-{
-	if (!prefix || !*prefix || has_prefix(candidate, prefix))
-		printf("%s\n", candidate);
-}
-
-static const struct cmd_struct *find_cmd(const char *name)
-{
-	for (const struct cmd_struct *c = ice_commands; c->name; c++)
-		if (!strcmp(c->name, name))
-			return c;
-	return NULL;
-}
-
-/* ---- candidate lists ------------------------------------------------ */
-
-/* Visible subcommand names plus any alias.<name> the user has defined. */
-static void complete_subcommands(const char *prefix)
-{
-	struct svec seen = SVEC_INIT;
-
-	for (const struct cmd_struct *c = ice_commands; c->name; c++) {
-		if (c->hidden)
-			continue;
-		svec_push(&seen, c->name);
-		emit(c->name, prefix);
-	}
-
-	for (int i = 0; i < config.nr; i++) {
-		const char *key = config.entries[i].key;
-		const char *name;
-		int dup = 0;
-
-		if (strncmp(key, "alias.", 6) != 0)
-			continue;
-		name = key + 6;
-		if (!*name)
-			continue;
-		for (size_t j = 0; j < seen.nr; j++)
-			if (!strcmp(seen.v[j], name)) {
-				dup = 1;
-				break;
-			}
-		if (!dup) {
-			svec_push(&seen, name);
-			emit(name, prefix);
-		}
-	}
-	svec_clear(&seen);
-}
-
-/*
- * Long (--foo) and short (-x) flag names from @p opts, plus the
- * implicit -h / --help that parse_options_manual accepts for every
- * command.
- */
-static void complete_flags(const struct option *opts, const char *prefix)
-{
-	emit("-h", prefix);
-	emit("--help", prefix);
-
-	if (!opts)
-		return;
-	for (const struct option *o = opts; o->type != OPTION_END; o++) {
-		char buf[64];
-
-		if (o->long_opt) {
-			snprintf(buf, sizeof(buf), "--%s", o->long_opt);
-			emit(buf, prefix);
-		}
-		if (o->short_opt) {
-			snprintf(buf, sizeof(buf), "-%c", o->short_opt);
-			emit(buf, prefix);
-		}
-	}
-}
-
-/* `ice help <cmd>` */
-static void complete_help_arg(const char *prefix)
-{
-	for (const struct cmd_struct *c = ice_commands; c->name; c++) {
-		if (c->hidden)
-			continue;
-		emit(c->name, prefix);
-	}
-}
-
-/* `ice completion <shell>` */
-static void complete_completion_arg(const char *prefix)
-{
-	emit("bash", prefix);
-	emit("zsh", prefix);
-	emit("fish", prefix);
-	emit("powershell", prefix);
-}
-
-/*
- * `ice set-target <target>`.  Reuses the authoritative lists from
- * set-target.c, so preview targets surface on TAB too -- the command
- * still refuses them at run-time without --preview.
- */
-static void complete_target_arg(const char *prefix)
-{
-	for (const char *const *t = ice_supported_targets; *t; t++)
-		emit(*t, prefix);
-	for (const char *const *t = ice_preview_targets; *t; t++)
-		emit(*t, prefix);
-}
-
-/*
- * `ice config <key>`.  Lists well-known keys plus whatever the active
- * config currently has set, so alias.<name> and user-defined keys also
- * surface on TAB.
- */
-static const char *const completion_config_keys[] = {
-    "core.build-dir", "core.generator", "core.verbose", "cmake.define",
-    "serial.port",    "serial.baud",	NULL,
-};
-
-static void complete_config_arg(const char *prefix)
-{
-	struct svec seen = SVEC_INIT;
-
-	for (const char *const *k = completion_config_keys; *k; k++) {
-		svec_push(&seen, *k);
-		emit(*k, prefix);
-	}
-
-	for (int i = 0; i < config.nr; i++) {
-		const char *key = config.entries[i].key;
-		int dup = 0;
-
-		for (size_t j = 0; j < seen.nr; j++)
-			if (!strcmp(seen.v[j], key)) {
-				dup = 1;
-				break;
-			}
-		if (!dup) {
-			svec_push(&seen, key);
-			emit(key, prefix);
-		}
-	}
-	svec_clear(&seen);
-}
-
-/* ---- argv classification ------------------------------------------- */
-
-/*
- * Does @p word take a separate value under @p opts (i.e. does the next
- * argv slot get consumed)?  Returns 0 for bools, for attached-value
- * forms (-Bdir, --build-dir=dir), and for unknown options.
- */
-static int opt_takes_value(const struct option *opts, const char *word)
-{
-	if (!opts || word[0] != '-' || word[1] == '\0')
-		return 0;
-
-	if (word[1] == '-') {
-		if (strchr(word, '='))
-			return 0;
-	} else if (word[2] != '\0') {
-		return 0;
-	}
-
-	for (const struct option *o = opts; o->type != OPTION_END; o++) {
-		int match = 0;
-
-		if (word[1] == '-') {
-			if (o->long_opt && !strcmp(word + 2, o->long_opt))
-				match = 1;
-		} else if (o->short_opt && word[1] == o->short_opt &&
-			   !word[2]) {
-			match = 1;
-		}
-		if (!match)
-			continue;
-		return o->type != OPTION_BOOL && o->type != OPTION_CONFIG_BOOL;
-	}
-	return 0;
-}
-
-/*
- * Walk words[1..cword-1] mirroring parse_options_manual's view of
- * argv: first honour global options, then on the first non-option
- * word switch to that subcommand's option table.  Populates:
- *
- *   *subpos_out  index of the subcommand word (-1 if not yet present)
- *   *argpos_out  0-indexed position of the cursor word within the
- *                subcommand's positional arguments (0 = first
- *                positional, 1 = second, ...).  Only meaningful when
- *                subpos >= 0.
- *   *opts_out    active option table at cword (global until the
- *                subcommand is crossed; the subcommand's table after).
- */
-static void classify(const char **words, int cword, int *subpos_out,
-		     int *argpos_out, const struct option **opts_out)
-{
-	const struct option *opts = ice_global_opts;
-	int in_sub = 0;
-	int argpos = 0;
-	int i = 1;
-
-	*subpos_out = -1;
-
-	while (i < cword) {
-		const char *w = words[i];
-
-		if (!strcmp(w, "--")) {
-			i++;
-			continue;
-		}
-		if (w[0] == '-' && w[1]) {
-			i += opt_takes_value(opts, w) ? 2 : 1;
-			continue;
-		}
-		if (!in_sub) {
-			const struct cmd_struct *c = find_cmd(w);
-
-			if (c) {
-				*subpos_out = i;
-				opts = c->opts;
-				in_sub = 1;
-			}
-		} else {
-			argpos++;
-		}
-		i++;
-	}
-
-	*argpos_out = argpos;
-	*opts_out = opts;
-}
 
 /* ---- public: `ice completion <shell>` ------------------------------ */
 
@@ -281,18 +38,23 @@ static const char bash_script[] =
 	"# ice bash completion (install: eval \"$(ice completion bash)\")\n"
 	"_ice_complete() {\n"
 	"    local IFS=$'\\n'\n"
-	"    COMPREPLY=( $(ice __complete \"$COMP_CWORD\" \"${COMP_WORDS[@]}\" 2>/dev/null) )\n"
+	"    local cur=\"${COMP_WORDS[COMP_CWORD]}\"\n"
+	"    COMPREPLY=( $(compgen -W \"$(ice __complete \"$COMP_CWORD\" \"${COMP_WORDS[@]}\" 2>/dev/null)\" -- \"$cur\") )\n"
 	"}\n"
-	"complete -o default -F _ice_complete ice\n";
+	"complete -o default -o nosort -F _ice_complete ice\n";
 
 static const char zsh_script[] =
 	"# ice zsh completion (install: eval \"$(ice completion zsh)\")\n"
+	"(( $+functions[compdef] )) || { autoload -Uz compinit && compinit -u; }\n"
 	"_ice() {\n"
 	"    local -a candidates\n"
 	"    local IFS=$'\\n'\n"
 	"    candidates=( ${(f)\"$(ice __complete $((CURRENT - 1)) \"${words[@]}\" 2>/dev/null)\"} )\n"
-	"    compadd -a candidates && return\n"
-	"    _files\n"
+	"    if (( ${#candidates} )); then\n"
+	"        compadd -V ice -a candidates\n"
+	"    else\n"
+	"        _files\n"
+	"    fi\n"
 	"}\n"
 	"compdef _ice ice\n";
 
@@ -302,7 +64,7 @@ static const char fish_script[] =
 	"    set -l words (commandline -opc) (commandline -ct)\n"
 	"    ice __complete (math (count $words) - 1) $words 2>/dev/null\n"
 	"end\n"
-	"complete -c ice -f -a '(__ice_complete)'\n";
+	"complete -c ice -f -k -a '(__ice_complete)'\n";
 
 static const char powershell_script[] =
 	"# ice PowerShell completion\n"
@@ -314,7 +76,8 @@ static const char powershell_script[] =
 	"    if ($wordToComplete -eq '') { $words += '' }\n"
 	"    $cword = $words.Count - 1\n"
 	"\n"
-	"    $results = @(& ice __complete $cword @words 2>$null | Where-Object { $_ })\n"
+	"    $results = @(& ice __complete $cword @words 2>$null |\n"
+	"        Where-Object { $_ -and $_.StartsWith($wordToComplete) })\n"
 	"    if ($results.Count -gt 0) {\n"
 	"        $results | ForEach-Object {\n"
 	"            [System.Management.Automation.CompletionResult]::new(\n"
@@ -330,6 +93,9 @@ static const char powershell_script[] =
 	"}\n";
 
 static const struct cmd_manual completion_manual = {
+	.name = "ice completion",
+	.summary = "print shell completion script",
+
 	.description =
 	H_PARA("Emits a shell-specific completion script on standard "
 	       "output, meant to be evaluated from the user's rc file.  "
@@ -369,13 +135,23 @@ static const struct cmd_manual completion_manual = {
 };
 /* clang-format on */
 
+static void complete_shells(void) { printf("bash\nzsh\nfish\npowershell\n"); }
+
+static const struct option cmd_completion_opts[] = {
+    OPT_POSITIONAL("shell", complete_shells),
+    OPT_END(),
+};
+
+const struct cmd_desc cmd_completion_desc = {
+    .name = "completion",
+    .fn = cmd_completion,
+    .opts = cmd_completion_opts,
+    .manual = &completion_manual,
+};
+
 int cmd_completion(int argc, const char **argv)
 {
-	const char *usage[] = {"ice completion bash|zsh|fish|powershell", NULL};
-	struct option opts[] = {OPT_END()};
-
-	argc =
-	    parse_options_manual(argc, argv, opts, usage, &completion_manual);
+	argc = parse_options(argc, argv, &cmd_completion_desc);
 	if (argc != 1)
 		die("usage: ice completion bash|zsh|fish|powershell");
 
@@ -396,14 +172,34 @@ int cmd_completion(int argc, const char **argv)
 
 /* ---- hidden: `ice __complete <cword> <word>...` -------------------- */
 
+static const struct cmd_manual complete_manual = {.name = "ice __complete"};
+static const struct option cmd___complete_opts[] = {OPT_END()};
+
+const struct cmd_desc cmd___complete_desc = {
+    .name = "__complete",
+    .fn = cmd_complete,
+    .opts = cmd___complete_opts,
+    .manual = &complete_manual,
+};
+
+/**
+ * Transform the partial command line into a cmd_ice() call with
+ * --ice-complete appended.
+ *
+ * argv layout:  ["__complete", "<cword>", "ice", "target", "set", "es"]
+ *
+ * We take words[0..cword-1] (the resolved context before the cursor
+ * word), append "--ice-complete", and call cmd_ice().  The normal
+ * dispatch chain routes through subcommands until the deepest
+ * parse_options() sees --ice-complete, dumps candidates, and exits.
+ * The shell does prefix filtering.
+ */
 int cmd_complete(int argc, const char **argv)
 {
+	struct svec av = SVEC_INIT;
 	int cword;
 	int nwords;
 	const char **words;
-	const char *cur;
-	int subpos, argpos;
-	const struct option *opts_ctx;
 
 	/* argv[0]="__complete", argv[1]=cword, argv[2..]=words. */
 	if (argc < 3)
@@ -415,49 +211,15 @@ int cmd_complete(int argc, const char **argv)
 
 	if (cword < 0 || cword >= nwords)
 		return EXIT_SUCCESS;
-	cur = words[cword];
 
-	classify(words, cword, &subpos, &argpos, &opts_ctx);
+	/* Build argv: words[0..cword-1] + "--ice-complete". */
+	for (int i = 0; i < cword; i++)
+		svec_push(&av, words[i]);
+	svec_push(&av, "--ice-complete");
 
-	/* Flag: complete from whichever option table is active at cword. */
-	if (cur[0] == '-' && cword > 0) {
-		complete_flags(opts_ctx, cur);
-		return EXIT_SUCCESS;
-	}
+	cmd_ice((int)av.nr, (const char **)av.v);
 
-	/*
-	 * Value of a preceding -X / --foo that takes a separate value:
-	 * emit custom candidates when known, otherwise let the shell's
-	 * file completion take over (bash '-o default', zsh '_files').
-	 */
-	if (cword > 0 && words[cword - 1][0] == '-' &&
-	    opt_takes_value(opts_ctx, words[cword - 1])) {
-		if (!strcmp(words[cword - 1], "--target"))
-			complete_target_arg(cur);
-		return EXIT_SUCCESS;
-	}
-
-	/* Before the subcommand: complete the subcommand name itself. */
-	if (subpos < 0) {
-		complete_subcommands(cur);
-		return EXIT_SUCCESS;
-	}
-
-	/* After the subcommand: per-subcommand positional candidates. */
-	{
-		const char *sub = words[subpos];
-
-		if (argpos == 0) {
-			if (!strcmp(sub, "help"))
-				complete_help_arg(cur);
-			else if (!strcmp(sub, "completion"))
-				complete_completion_arg(cur);
-			else if (!strcmp(sub, "set-target"))
-				complete_target_arg(cur);
-			else if (!strcmp(sub, "config"))
-				complete_config_arg(cur);
-		}
-	}
-
+	/* cmd_ice -> ... -> parse_options -> exit(0); normally unreached. */
+	svec_clear(&av);
 	return EXIT_SUCCESS;
 }

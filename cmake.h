@@ -6,39 +6,63 @@
 
 /**
  * @file cmake.h
- * @brief Shared cmake orchestration for "ice" commands.
+ * @brief Profile loading + init-gate checks for cmake-using commands.
  *
- * Every cmake-based "ice" command calls one of the two primitives
- * below.  Each reads core.build-dir / core.generator / core.verbose
- * / cmake.define from the config store, so callers don't thread the
- * same settings through.  Logs land under <build-dir>/log/.
+ * @b{ice init} owns the cmake configure-time state (generator, -D
+ * flags, build-dir layout, build.ninja fixups); the functions here
+ * are what every other cmake-using command needs in common: load the
+ * profile, verify init has been run, and (for completion) list the
+ * profile names defined in @b{.iceconfig}.
+ *
+ * Typical call sequence in a cmake-using subcommand:
+ *
+ *   parse_options(...)              // figure out the profile name
+ *   load_profile(name);             // PATH + project.* config
+ *   require_project_initialized();  // dies if user hasn't run ice init
+ *   // ... exec cmake --build <project.build-dir> --target <...>
  */
 #ifndef CMAKE_H
 #define CMAKE_H
 
 /**
- * Configure the build directory.
+ * Load profile @p name into process state.
  *
- * Runs cmake when CMakeCache.txt is missing, when a cmake.define
- * differs from the cached value, or when @p force is non-zero.
+ * Reads @b{[project "<name>"]} from the config store and:
+ *   - promotes its keys to the uniform @b{project.X} namespace at
+ *     PROJECT scope so commands can read @b{project.build-dir},
+ *     @b{project.chip}, etc. without knowing which profile is active;
+ *   - derives @b{project.target} / @b{project.mapfile} /
+ *     @b{project.elf} from the build directory's @b{CMakeCache.txt}
+ *     and @b{project_description.json};
+ *   - prepends the profile's IDF tools (compilers, ninja, cmake,
+ *     openocd, ...) to @b{PATH} and sets the IDF's export_vars so
+ *     later @b{cmake --build} calls resolve the toolchain without
+ *     @b{export.sh}.
  *
- * @return 0 on success, non-zero on failure.
+ * Dies if the profile is not bound (no @b{ice init} has been run for
+ * it).  @p name = "default" loads the default profile.
  */
-int ensure_build_directory(int force);
+void load_profile(const char *name);
 
 /**
- * Ensure the build directory is configured, then invoke @p target.
+ * Print profile names from @b{[project "<name>"]} sections of the
+ * loaded config to stdout, one per line.  Always emits "default"
+ * even when no @b{[project "default"]} section exists yet.
  *
- * @p label is shown in the progress display as "Running <label>:",
- * and on completion as "<label>" (success) or "<label> failed"
- * (failure).
- *
- * @p interactive non-zero runs the target with stdio connected to
- * the terminal (no capture, no progress display) -- required for
- * ncurses TUI targets like menuconfig.
- *
- * @return 0 on success, non-zero on failure.
+ * Suitable as an OPT_POSITIONAL completion callback for the
+ * @b{[<name>]} slot on every profile-consuming command.
  */
-int run_cmake_target(const char *target, const char *label, int interactive);
+void complete_profile_names(void);
+
+/**
+ * Verify that @b{ice init} has been run successfully for the active
+ * profile.  Checks that @b{project.build-dir} is set and contains a
+ * @b{CMakeCache.txt}; dies with a "run ice init" hint otherwise.
+ *
+ * Post-init commands (build, flash, clean, menuconfig) call this to
+ * fail fast when the user has skipped init or wiped the build
+ * directory by hand.
+ */
+void require_project_initialized(void);
 
 #endif /* CMAKE_H */

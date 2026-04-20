@@ -11,6 +11,9 @@
 #include "fs.h"
 #include "ice.h"
 
+#include <fcntl.h>
+#include <signal.h>
+
 int mkdirp(const char *dir)
 {
 	struct sbuf sb = SBUF_INIT;
@@ -149,4 +152,131 @@ int rmtree(const char *path, int verbose)
 		return -1;
 	}
 	return ctx.rc;
+}
+
+/* ------------------------------------------------------------------ */
+/* Lockfiles                                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * One process never holds more than a handful of locks, so a tiny
+ * fixed-size registry avoids pulling in svec.  Paths are duplicated
+ * on acquire and freed on release (or at exit).
+ */
+#define LOCK_MAX 4
+static char *held_locks[LOCK_MAX];
+static size_t held_locks_nr;
+static int lock_handlers_registered;
+
+static void lock_atexit_cleanup(void)
+{
+	for (size_t i = 0; i < held_locks_nr; i++) {
+		unlink(held_locks[i]);
+		free(held_locks[i]);
+		held_locks[i] = NULL;
+	}
+	held_locks_nr = 0;
+}
+
+/*
+ * Called from a signal handler -- must stay async-signal-safe.
+ *
+ * POSIX: unlink(2) is on the async-signal-safe list; free() is not,
+ * so we leak the strdup'd paths (the process is terminating anyway).
+ *
+ * Windows: unlink macro-expands to unlink_w (mbs_to_wcs + _wunlink +
+ * free), which isn't strictly AS-safe on paper because of the
+ * internal malloc/free.  In practice this doesn't matter: MSVCRT
+ * delivers SIGINT on a brand-new thread -- not on the interrupted
+ * thread's stack -- so the usual "handler re-entering a half-done
+ * malloc" hazard that motivates the POSIX AS-safe list doesn't
+ * apply.  Same tradeoff lock_acquire() already documents.  The
+ * NOLINT below silences bugprone-signal-handler, which (correctly)
+ * can't see past the platform macro to know it's intentional.
+ */
+static void lock_signal_cleanup(int sig)
+{
+	for (size_t i = 0; i < held_locks_nr; i++)
+		/* NOLINTNEXTLINE(bugprone-signal-handler) */
+		unlink(held_locks[i]);
+	_exit(128 + sig);
+}
+
+int lock_acquire(const char *path)
+{
+	int fd;
+
+	if (held_locks_nr >= LOCK_MAX) {
+		errno = EMFILE;
+		return -1;
+	}
+
+	fd = open(path, O_CREAT | O_EXCL | O_WRONLY, 0644);
+	if (fd < 0)
+		return -1;
+	close(fd);
+
+	if (!lock_handlers_registered) {
+		atexit(lock_atexit_cleanup);
+		/*
+		 * Best-effort: SIGINT and SIGTERM are ISO C, defined on
+		 * POSIX and Windows.  Windows' SIGINT delivery via the
+		 * MSVCRT runs on a separate thread and is timing-dependent,
+		 * so a Ctrl-C on Windows may still leave a stale lock --
+		 * same tradeoff git makes.  Users see the clear
+		 * "remove the lock if no ice is running" hint either way.
+		 */
+		signal(SIGINT, lock_signal_cleanup);
+		signal(SIGTERM, lock_signal_cleanup);
+		lock_handlers_registered = 1;
+	}
+	held_locks[held_locks_nr++] = sbuf_strdup(path);
+	return 0;
+}
+
+void lock_release(const char *path)
+{
+	for (size_t i = 0; i < held_locks_nr; i++) {
+		if (!strcmp(held_locks[i], path)) {
+			unlink(path);
+			free(held_locks[i]);
+			held_locks[i] = held_locks[--held_locks_nr];
+			held_locks[held_locks_nr] = NULL;
+			return;
+		}
+	}
+}
+
+int find_in_path(const char *name)
+{
+	const char *p = getenv("PATH");
+	struct sbuf buf = SBUF_INIT;
+
+	if (!p || !*p)
+		return 0;
+
+	while (*p) {
+		const char *end = p;
+		while (*end && *end != ':')
+			end++;
+
+		sbuf_reset(&buf);
+		if (end != p) {
+			sbuf_add(&buf, p, (size_t)(end - p));
+			sbuf_addch(&buf, '/');
+		}
+		sbuf_addstr(&buf, name);
+
+		if (!access(buf.buf, X_OK)) {
+			sbuf_release(&buf);
+			return 1;
+		}
+
+		if (!*end)
+			break;
+		p = end + 1;
+	}
+
+	sbuf_release(&buf);
+	return 0;
 }

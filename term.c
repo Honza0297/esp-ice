@@ -199,9 +199,19 @@ void color_text(struct sbuf *out, const char *text, size_t len,
  * The expanded result is a valid printf format string.
  *
  * Escaping: @@ -> literal @, }} -> literal } inside a color block.
+ *
+ * Nested tokens (e.g. @r{fatal: @b{hint} tail}) work: the stack tracks
+ * each pushed code so that closing an inner block emits a reset and
+ * re-emits the outer codes, restoring the parent style.  Depth beyond
+ * STACK_MAX still parses correctly but doesn't restyle -- only visual
+ * fidelity is lost, not content.
  */
+#define EXPAND_STACK_MAX 8
+#define EXPAND_CODE_MAX 32
+
 void expand_colors(struct sbuf *out, const char *fmt, int colorize)
 {
+	char stack[EXPAND_STACK_MAX][EXPAND_CODE_MAX];
 	int depth = 0;
 
 	while (*fmt) {
@@ -220,21 +230,32 @@ void expand_colors(struct sbuf *out, const char *fmt, int colorize)
 		if (*fmt == '@' && fmt[1] == '[') {
 			const char *end = strchr(fmt + 2, ']');
 			if (end && end[1] == '{') {
-				if (colorize) {
-					const char *s = fmt + 2;
-					size_t len = (size_t)(end - s);
-					const char *code =
-					    find_color_name(s, len);
-					if (code) {
-						sbuf_addstr(out, code);
-					} else {
-						sbuf_addstr(out, "\033[");
-						sbuf_add(out, s, len);
-						sbuf_addch(out, 'm');
-					}
+				const char *s = fmt + 2;
+				size_t len = (size_t)(end - s);
+				const char *named = find_color_name(s, len);
+				char code[EXPAND_CODE_MAX];
+
+				if (named) {
+					size_t clen = strlen(named);
+					if (clen >= sizeof(code))
+						clen = sizeof(code) - 1;
+					memcpy(code, named, clen);
+					code[clen] = '\0';
+				} else {
+					int n =
+					    snprintf(code, sizeof(code),
+						     "\033[%.*sm", (int)len, s);
+					if (n < 0 || n >= (int)sizeof(code))
+						code[sizeof(code) - 1] = '\0';
 				}
-				fmt = end + 2;
+
+				if (colorize)
+					sbuf_addstr(out, code);
+				if (depth < EXPAND_STACK_MAX)
+					memcpy(stack[depth], code,
+					       sizeof(code));
 				depth++;
+				fmt = end + 2;
 				continue;
 			}
 		}
@@ -273,8 +294,12 @@ void expand_colors(struct sbuf *out, const char *fmt, int colorize)
 			if (code) {
 				if (colorize)
 					sbuf_addstr(out, code);
-				fmt += 3;
+				if (depth < EXPAND_STACK_MAX) {
+					size_t clen = strlen(code);
+					memcpy(stack[depth], code, clen + 1);
+				}
 				depth++;
+				fmt += 3;
 				continue;
 			}
 			/* Unrecognized: fall through, emit '@' as literal */
@@ -287,11 +312,15 @@ void expand_colors(struct sbuf *out, const char *fmt, int colorize)
 			continue;
 		}
 
-		/* } -> close color block */
+		/* } -> close color block: reset, restore outer codes */
 		if (*fmt == '}' && depth > 0) {
-			if (colorize)
-				sbuf_addstr(out, "\033[0m");
 			depth--;
+			if (colorize) {
+				sbuf_addstr(out, "\033[0m");
+				for (int i = 0;
+				     i < depth && i < EXPAND_STACK_MAX; i++)
+					sbuf_addstr(out, stack[i]);
+			}
 			fmt++;
 			continue;
 		}

@@ -21,7 +21,10 @@
 #include "vendor/sha256/sha256.h"
 
 /* clang-format off */
-static const struct cmd_manual manual = {
+static const struct cmd_manual image_info_manual = {
+	.name = "ice image info",
+	.summary = "display the structure of an ESP flash image",
+
 	.description =
 	H_PARA("Display the structure of an ESP flash image.  Equivalent "
 	       "to @b{esptool image_info}: shows the common / extended "
@@ -47,17 +50,21 @@ static const struct cmd_manual manual = {
 };
 /* clang-format on */
 
-static const char *usage[] = {
-    "ice image info [--chip <name>] <image.bin>",
-    NULL,
-};
-
 static const char *opt_chip;
 
-const struct option cmd_image_info_opts[] = {
+int cmd_image_info(int argc, const char **argv);
+
+static const struct option cmd_image_info_opts[] = {
     OPT_STRING(0, "chip", &opt_chip, "name",
-	       "override the auto-detected target chip"),
+	       "override the auto-detected target chip", NULL),
     OPT_END(),
+};
+
+const struct cmd_desc cmd_image_info_desc = {
+    .name = "info",
+    .fn = cmd_image_info,
+    .opts = cmd_image_info_opts,
+    .manual = &image_info_manual,
 };
 
 /* ------------------------------------------------------------------ */
@@ -176,8 +183,7 @@ int cmd_image_info(int argc, const char **argv)
 {
 	struct sbuf img = SBUF_INIT;
 
-	argc = parse_options_manual(argc, argv, cmd_image_info_opts, usage,
-				    &manual);
+	argc = parse_options(argc, argv, &cmd_image_info_desc);
 
 	if (argc < 1)
 		die("missing <image.bin> argument");

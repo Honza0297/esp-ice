@@ -6,213 +6,98 @@
 
 /**
  * @file target.c
- * @brief `ice target` -- manage the chip target.
+ * @brief `ice target` -- chip-bound operations (esptool replacement).
  *
- * Subcommands:
- *   set   - switch the project to a new chip target
- *   list  - list supported chip targets
- *   info  - show the current target
+ * Today only `list` lives here (static enumeration of supported
+ * chips).  This namespace will grow esptool-replacement subcommands
+ * (flash, erase, reset, info, ...) as the native rewrites land --
+ * each operates on a connected chip via an explicit serial port and
+ * does not consume project state.
+ *
+ * Setting the project's chip is done by `ice init <chip> <idf>`,
+ * not from this namespace.
  */
 #include "ice.h"
 
-#include "cmake.h"
-
-#include <string.h>
-
-/* ------------------------------------------------------------------ */
-/* Subcommands                                                         */
-/* ------------------------------------------------------------------ */
-
-static int opt_preview;
-
-const struct option cmd_target_set_opts[] = {
-    OPT_BOOL(0, "preview", &opt_preview, "allow preview targets"),
-    OPT_END(),
+/*
+ * Mirrors esp-idf/tools/idf_py_actions/constants.py.  Preview targets
+ * require --preview to enable.  Exposed via ice.h so callers (init,
+ * install, completion) can reuse the same lists.
+ */
+const char *const ice_supported_targets[] = {
+    "esp32",   "esp32s2", "esp32c3", "esp32s3",	 "esp32c2", "esp32c6",
+    "esp32h2", "esp32p4", "esp32c5", "esp32c61", NULL,
+};
+const char *const ice_preview_targets[] = {
+    "linux", "esp32h21", "esp32h4", "esp32s31", NULL,
 };
 
-static int in_list(const char *target, const char *const *list)
-{
-	for (; *list; list++)
-		if (!strcmp(target, *list))
-			return 1;
-	return 0;
-}
+/* ------------------------------------------------------------------ */
+/* ice target list                                                     */
+/* ------------------------------------------------------------------ */
 
-static int cmd_target_set(int argc, const char **argv)
-{
-	static char envstr[] = "_IDF_PY_SET_TARGET_ACTION=1";
-	static const char *usage[] = {
-	    "ice target set [--preview] <target>",
-	    NULL,
-	};
+static int cmd_target_list(int argc, const char **argv);
 
-	/* clang-format off */
-	static const struct cmd_manual manual = {
-		.description =
-		H_PARA("Switch the project to build for chip @b{<target>} "
-		       "(e.g. @b{esp32}, @b{esp32s3}, @b{esp32c6}).  Wipes the "
-		       "build directory, renames any existing @b{sdkconfig} to "
-		       "@b{sdkconfig.old}, then reconfigures cmake with the new "
-		       "@b{IDF_TARGET}.")
-		H_PARA("Use this when switching chips.  For ad-hoc cmake cache "
-		       "tweaks that should not discard the current @b{sdkconfig}, "
-		       "run @b{ice reconfigure} with a @b{-D IDF_TARGET=...} "
-		       "override instead."),
+static const struct cmd_manual target_list_manual = {
+    .name = "ice target list",
+};
 
-		.examples =
-		H_EXAMPLE("ice target set esp32")
-		H_EXAMPLE("ice target set esp32s3")
-		H_EXAMPLE("ice target set --preview linux"),
-	};
-	/* clang-format on */
+static const struct option cmd_target_list_opts[] = {OPT_END()};
 
-	const char *target;
-	struct sbuf define = SBUF_INIT;
-	int rc;
-
-	argc = parse_options_manual(argc, argv, cmd_target_set_opts, usage,
-				    &manual);
-
-	if (argc < 1)
-		die("missing <target> argument");
-	if (argc > 1)
-		die("too many arguments");
-	target = argv[0];
-
-	if (!in_list(target, ice_supported_targets)) {
-		if (in_list(target, ice_preview_targets)) {
-			if (!opt_preview)
-				die("'%s' is a preview target; "
-				    "pass --preview to use it",
-				    target);
-		} else {
-			die("'%s' is not a supported target", target);
-		}
-	}
-
-	rc = fullclean_run();
-	if (rc)
-		return rc;
-
-	sbuf_addf(&define, "IDF_TARGET=%s", target);
-	config_add(&config, "cmake.define", define.buf, CONFIG_SCOPE_CLI);
-	sbuf_release(&define);
-
-	putenv(envstr);
-
-	printf("Set target to: %s, new sdkconfig will be created.\n", target);
-	return ensure_build_directory(1);
-}
+static const struct cmd_desc cmd_target_list_desc = {
+    .name = "list",
+    .fn = cmd_target_list,
+    .opts = cmd_target_list_opts,
+    .manual = &target_list_manual,
+};
 
 static int cmd_target_list(int argc, const char **argv)
 {
-	(void)argc;
-	(void)argv;
+	parse_options(argc, argv, &cmd_target_list_desc);
 
 	printf("Supported targets:\n");
 	for (const char *const *t = ice_supported_targets; *t; t++)
 		printf("  %s\n", *t);
 
-	printf("\nPreview targets (use --preview with 'ice target set'):\n");
+	printf("\nPreview targets (use 'ice init --preview' to enable):\n");
 	for (const char *const *t = ice_preview_targets; *t; t++)
 		printf("  %s\n", *t);
 
 	return 0;
 }
 
-static int cmd_target_info(int argc, const char **argv)
-{
-	const char *target;
-
-	(void)argc;
-	(void)argv;
-
-	target = config_get("target");
-	if (!target || !*target) {
-		fprintf(stderr, "No target set.\n"
-				"hint: run @b{ice target set <chip>}\n");
-		return 1;
-	}
-
-	printf("Target: %s\n", target);
-	return 0;
-}
-
 /* ------------------------------------------------------------------ */
-/* Dispatcher                                                          */
+/* ice target -- namespace dispatcher                                  */
 /* ------------------------------------------------------------------ */
 
-struct target_sub {
-	const char *name;
-	int (*fn)(int argc, const char **argv);
-	const char *summary;
-};
-
-static const struct target_sub target_subs[] = {
-    {"set", cmd_target_set, "switch the project to a new chip target"},
-    {"list", cmd_target_list, "list supported chip targets"},
-    {"info", cmd_target_info, "show the current target"},
-    {NULL, NULL, NULL},
-};
-
-static const char *target_usage[] = {
-    "ice target <subcommand> [<args>]",
-    NULL,
-};
+static const struct option cmd_target_opts[] = {OPT_END()};
 
 /* clang-format off */
-static const struct cmd_manual manual = {
+static const struct cmd_manual target_manual = {
+	.name = "ice target",
+	.summary = "chip-bound operations (esptool replacement)",
+
 	.description =
-	H_PARA("Manage the chip target for the current project.")
-	H_PARA("Run @b{ice target <subcommand> --help} for details."),
+	H_PARA("Operations on a connected chip via an explicit serial "
+	       "port -- the future home of esptool-replacement commands "
+	       "(flash, erase, reset, info, ...).  Today only @b{list} "
+	       "lives here; the rest land as the native rewrites do.")
+	H_PARA("Setting the project's chip is done by "
+	       "@b{ice init <chip> <idf>}, not from this namespace."),
 
 	.examples =
-	H_EXAMPLE("ice target set esp32s3")
-	H_EXAMPLE("ice target list")
-	H_EXAMPLE("ice target info"),
-
-	.extras =
-	H_SECTION("SUBCOMMANDS")
-	H_ITEM("set <target>",
-	       "Switch the project to build for @b{<target>}.  Wipes the "
-	       "build directory and reconfigures cmake.")
-	H_ITEM("list",
-	       "List all supported and preview chip targets.")
-	H_ITEM("info",
-	       "Show the current target for the project.")
+	H_EXAMPLE("ice target list"),
 };
 /* clang-format on */
 
-static void print_subs(FILE *fp)
-{
-	fprintf(fp, "Subcommands:\n");
-	for (const struct target_sub *s = target_subs; s->name; s++)
-		fprintf(fp, "  %-12s  %s\n", s->name, s->summary);
-}
+static const struct cmd_desc *const target_subs[] = {
+    &cmd_target_list_desc,
+    NULL,
+};
 
-int cmd_target(int argc, const char **argv)
-{
-	if (argc >= 2 && (!strcmp(argv[1], "--help") ||
-			  !strcmp(argv[1], "-h") || !strcmp(argv[1], "help"))) {
-		print_manual(argv[0], &manual, NULL, target_usage);
-		return 0;
-	}
-
-	if (argc < 2) {
-		fprintf(stderr, "usage: ice target <subcommand> [<args>]\n");
-		print_subs(stderr);
-		return 1;
-	}
-
-	for (const struct target_sub *s = target_subs; s->name; s++) {
-		if (!strcmp(argv[1], s->name))
-			return s->fn(argc - 1, argv + 1);
-	}
-
-	fprintf(stderr,
-		"ice target: '%s' is not a subcommand. "
-		"See 'ice target --help'.\n",
-		argv[1]);
-	print_subs(stderr);
-	return 1;
-}
+const struct cmd_desc cmd_target_desc = {
+    .name = "target",
+    .opts = cmd_target_opts,
+    .manual = &target_manual,
+    .subcommands = target_subs,
+};

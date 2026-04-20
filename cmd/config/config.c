@@ -21,22 +21,18 @@
  */
 #include "ice.h"
 
-static const char *usage[] = {
-    "ice config [--list]",
-    "ice config [--user | --local] <key>",
-    "ice config [--user | --local] <key> <value>",
-    "ice config [--user | --local] --add <key> <value>",
-    "ice config [--user | --local] --unset <key>",
-    NULL,
-};
-
 /* clang-format off */
-static const struct cmd_manual manual = {
+static const struct cmd_manual config_manual = {
+	.name = "ice config",
+	.summary = "inspect and modify configuration entries",
+
 	.description =
 	H_PARA("@b{ice config} reads and writes configuration entries "
 	       "across a stack of cascading scopes.  The effective value "
-	       "of a key is resolved in precedence order: @b{cli > env > "
-	       "project > local > user > defaults}.")
+	       "of a key is resolved in precedence order: @b{project > "
+	       "local > user > defaults}.  Environment variables and CLI "
+	       "flags are not stored in the config -- they seed command "
+	       "options directly (see @b{ice <command> --help}).")
 	H_PARA("With no flags: one positional argument prints the "
 	       "effective value of that key (exits non-zero if unset), "
 	       "and two positional arguments set the key in the target "
@@ -46,29 +42,20 @@ static const struct cmd_manual manual = {
 	H_PARA("@b{--list} dumps every entry in the active configuration "
 	       "together with the scope it came from.  @b{--add} appends "
 	       "an entry for keys with multi-value semantics "
-	       "(e.g. @b{cmake.define}).  @b{--unset} removes every "
-	       "entry for a key at the target scope.  These three modes "
-	       "are mutually exclusive."),
+	       "(e.g. @b{project.<name>.define}).  @b{--unset} removes "
+	       "every entry for a key at the target scope.  These three "
+	       "modes are mutually exclusive."),
 
 	.examples =
 	H_EXAMPLE("ice config --list")
-	H_EXAMPLE("ice config core.build-dir")
-	H_EXAMPLE("ice config core.build-dir out")
+	H_EXAMPLE("ice config project.default.chip")
+	H_EXAMPLE("ice config project.default.build-dir out")
 	H_EXAMPLE("ice config --user alias.b \"build -v\"")
-	H_EXAMPLE("ice config --add cmake.define MY_OPT=ON")
+	H_EXAMPLE("ice config --add project.default.define MY_OPT=ON")
 	H_EXAMPLE("ice config --unset alias.b"),
 
 	.extras =
 	H_SECTION("SCOPES")
-	H_ITEM("cli",
-	       "Flags and @b{-D} entries passed on the command line "
-	       "(highest precedence).")
-	H_ITEM("env",
-	       "Variables named @b{ICE_<SECTION>_<KEY>}, e.g. "
-	       "@b{ICE_CORE_BUILD_DIR} or @b{ICE_SERIAL_PORT}.  Legacy "
-	       "@b{ESPPORT} and @b{ESPBAUD} are also mapped to "
-	       "@b{serial.port} and @b{serial.baud} for idf.py "
-	       "compatibility.")
 	H_ITEM("project",
 	       "Auto-derived from build artifacts in @b{<build-dir>} -- "
 	       "@b{target} from CMakeCache.txt, @b{mapfile} / @b{elf} "
@@ -79,8 +66,7 @@ static const struct cmd_manual manual = {
 	H_ITEM("user",
 	       "@b{~/.iceconfig} in the user's home directory.")
 	H_ITEM("defaults",
-	       "Built-in fallbacks (@b{core.build-dir=build}, "
-	       "@b{core.generator=Ninja}, @b{core.verbose=false}).")
+	       "Built-in fallbacks (currently only @b{core.verbose=false}).")
 
 	H_SECTION("FILES")
 	H_ITEM("./.iceconfig",
@@ -94,11 +80,12 @@ static const struct cmd_manual manual = {
 	       "@b{[section]} header are stored as @b{section.key}.")
 	H_LINE("")
 	H_LINE("    @b{[core]}")
-	H_LINE("    build-dir = build")
-	H_LINE("    generator = Ninja")
 	H_LINE("    verbose = false")
 	H_LINE("")
-	H_LINE("    @b{[cmake]}")
+	H_LINE("    @b{[project \"default\"]}")
+	H_LINE("    chip = esp32s3")
+	H_LINE("    idf-path = /home/me/.ice/checkouts/v5.4")
+	H_LINE("    build-dir = build")
 	H_LINE("    define = MY_OPT=ON")
 	H_LINE("    define = ANOTHER=1")
 	H_LINE("")
@@ -108,16 +95,19 @@ static const struct cmd_manual manual = {
 	H_LINE("")
 	H_PARA("Rules:")
 	H_LINE("  - Section names and keys allow @b{[A-Za-z0-9_-]}.")
+	H_LINE("  - A subsection in double quotes (@b{[project \"name\"]}) "
+	       "yields keys")
+	H_LINE("    of the form @b{section.subsection.key}.")
 	H_LINE("  - Values are trimmed of surrounding whitespace; wrap "
 	       "in double")
 	H_LINE("    quotes to preserve leading/trailing spaces or "
 	       "embedded @b{#} / @b{;}.")
 	H_LINE("  - Lines starting with @b{#} or @b{;} are comments.")
 	H_LINE("  - Blank lines are ignored.")
-	H_LINE("  - Multi-value keys (e.g. @b{cmake.define}): use "
-	       "@b{--add} to append;")
-	H_LINE("    direct assignment replaces every entry at that "
-	       "scope.")
+	H_LINE("  - Multi-value keys (e.g. @b{project.<name>.define}): "
+	       "use @b{--add}")
+	H_LINE("    to append; direct assignment replaces every entry at "
+	       "that scope.")
 	H_LINE("  - Files are rewritten whole on every write; existing "
 	       "comments")
 	H_LINE("    and blank lines are @b{not} preserved.")
@@ -158,14 +148,28 @@ static int opt_unset;
 static int opt_user;
 static int opt_local;
 
-const struct option cmd_config_opts[] = {
+static void complete_config_keys(void)
+{
+	for (int i = 0; i < config.nr; i++)
+		printf("%s\n", config.entries[i].key);
+}
+
+static const struct option cmd_config_opts[] = {
     OPT_BOOL('l', "list", &opt_list, "list entries with scope"),
     OPT_BOOL(0, "add", &opt_add, "append a value (multi-value keys)"),
     OPT_BOOL(0, "unset", &opt_unset, "remove all entries for a key"),
     OPT_BOOL(0, "user", &opt_user, "act on the user config (~/.iceconfig)"),
     OPT_BOOL(0, "local", &opt_local,
 	     "act on the local config (./.iceconfig) [default]"),
+    OPT_POSITIONAL("key", complete_config_keys),
     OPT_END(),
+};
+
+const struct cmd_desc cmd_config_desc = {
+    .name = "config",
+    .fn = cmd_config,
+    .opts = cmd_config_opts,
+    .manual = &config_manual,
 };
 
 static enum config_scope target_scope(int user, int local)
@@ -268,8 +272,7 @@ int cmd_config(int argc, const char **argv)
 	int modes;
 	enum config_scope scope;
 
-	argc =
-	    parse_options_manual(argc, argv, cmd_config_opts, usage, &manual);
+	argc = parse_options(argc, argv, &cmd_config_desc);
 
 	modes = opt_list + opt_add + opt_unset;
 	if (modes > 1)

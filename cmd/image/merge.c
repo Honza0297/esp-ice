@@ -20,7 +20,10 @@
 #include "ice.h"
 
 /* clang-format off */
-static const struct cmd_manual manual = {
+static const struct cmd_manual image_merge_manual = {
+	.name = "ice image merge",
+	.summary = "combine multiple flash images at offsets into one",
+
 	.description =
 	H_PARA("Concatenate multiple flash images at given offsets into "
 	       "a single output file, padding the gaps with 0xFF (the "
@@ -48,23 +51,26 @@ static const struct cmd_manual manual = {
 };
 /* clang-format on */
 
-static const char *usage[] = {
-    "ice image merge [options] -o <out.bin> "
-    "<off1> <in1.bin> [<off2> <in2.bin> ...]",
-    NULL,
-};
-
 static const char *opt_out;
 static const char *opt_pad_to_size;
 static const char *opt_target_offset;
 
-const struct option cmd_image_merge_opts[] = {
-    OPT_STRING('o', NULL, &opt_out, "path", "output image path"),
+static const struct option cmd_image_merge_opts[] = {
+    OPT_STRING('o', NULL, &opt_out, "path", "output image path", NULL),
     OPT_STRING(0, "pad-to-size", &opt_pad_to_size, "size",
-	       "pad output to this flash size (e.g. 4MB) with 0xFF"),
+	       "pad output to this flash size (e.g. 4MB) with 0xFF", NULL),
     OPT_STRING(0, "target-offset", &opt_target_offset, "hex",
-	       "subtract this base offset from every placement"),
+	       "subtract this base offset from every placement", NULL),
     OPT_END(),
+};
+
+int cmd_image_merge(int argc, const char **argv);
+
+const struct cmd_desc cmd_image_merge_desc = {
+    .name = "merge",
+    .fn = cmd_image_merge,
+    .opts = cmd_image_merge_opts,
+    .manual = &image_merge_manual,
 };
 
 static uint32_t parse_hex(const char *s, const char *flag)
@@ -105,8 +111,7 @@ static size_t flash_size_bytes(const char *s)
 
 int cmd_image_merge(int argc, const char **argv)
 {
-	argc = parse_options_manual(argc, argv, cmd_image_merge_opts, usage,
-				    &manual);
+	argc = parse_options(argc, argv, &cmd_image_merge_desc);
 
 	if (!opt_out)
 		die("-o <output.bin> is required");

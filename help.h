@@ -37,24 +37,15 @@
 #define HELP_H
 
 struct option;
+struct cmd_desc;
 
 struct cmd_manual {
-	/**
-	 * One-line tagline after the dash on the NAME line.  Optional
-	 * override; when NULL, print_manual() falls back to
-	 * ice_cmd_summary(cmd_name).
-	 */
-	const char *summary;
+	const char *name; /**< Display name (e.g. "ice target set"). */
+	const char
+	    *summary; /**< One-line tagline after the dash on the NAME line. */
 	const char *description; /**< Prose built with H_PARA/H_LINE. */
 	const char *examples;	 /**< Optional; built with H_EXAMPLE. */
 	const char *extras; /**< Optional; extra sections with H_SECTION. */
-
-	/**
-	 * When non-zero, print_manual() auto-emits a COMMANDS section
-	 * listing every entry in ice_commands[] with its summary.
-	 * Used by the top-level `ice --help` manual.
-	 */
-	int list_commands;
 
 	/**
 	 * When non-zero, print_manual() auto-emits an ALIASES section
@@ -102,17 +93,18 @@ struct cmd_manual {
 /**
  * @brief Render a full manual page to stdout.
  *
- * Emits NAME, SYNOPSIS (from @p usage), DESCRIPTION, OPTIONS
- * (auto-generated from @p opts), EXAMPLES, optional COMMANDS
- * (when @p m->list_commands is set), then any extras.  All
- * @c \@x{...} color tokens are expanded by the platform printf override.
+ * Emits NAME, SYNOPSIS, DESCRIPTION, OPTIONS (auto-generated from
+ * @c desc->opts), CONFIG / ENVIRONMENT, COMMANDS (auto-generated from
+ * @c desc->subcommands when non-empty), EXAMPLES, and @c extras.
+ * All @c \@x{...} color tokens are expanded by the platform printf
+ * override.
  *
- * @param cmd_name  Subcommand name as typed by the user (e.g. "config").
+ * @param cmd_name  Display name as typed by the user (e.g. "config").
  *                  "ice" is the top-level manual.  Used to synthesize
- *                  "ice-<name>" for NAME and to look up the summary
- *                  from ice_commands[] when @p m->summary is NULL.
+ *                  "ice-<name>" for NAME.
+ * @param desc      Command descriptor.  @c NULL is tolerated but
+ *                  yields a nearly-empty manual page.
  */
-void print_manual(const char *cmd_name, const struct cmd_manual *m,
-		  const struct option *opts, const char **usage);
+void print_manual(const char *cmd_name, const struct cmd_desc *desc);
 
 #endif /* HELP_H */

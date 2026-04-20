@@ -26,7 +26,10 @@
 /* ------------------------------------------------------------------ */
 
 /* clang-format off */
-static const struct cmd_manual manual = {
+static const struct cmd_manual tools_install_manual = {
+	.name = "ice tools install",
+	.summary = "download and install tools from a manifest",
+
 	.description =
 	H_PARA("Read an ESP-IDF @b{tools.json} manifest and install the "
 	       "recommended version of each tool for the current platform.  "
@@ -47,27 +50,28 @@ static const struct cmd_manual manual = {
 };
 /* clang-format on */
 
-static const char *usage[] = {
-    "ice install [--target <chip>] [--tool <name>] [--path <dir>] [--force] "
-    "<tools.json>",
-    NULL,
-};
-
 static const char *opt_tool;
 static const char *opt_target;
 static const char *opt_path;
 static int opt_force;
 
-const struct option cmd_install_opts[] = {
+static const struct option cmd_install_opts[] = {
     OPT_STRING(0, "target", &opt_target, "chip",
-	       "only install tools that support this chip target"),
+	       "only install tools that support this chip target", NULL),
     OPT_STRING(0, "tool", &opt_tool, "name",
-	       "install a specific tool (includes on_request tools)"),
+	       "install a specific tool (includes on_request tools)", NULL),
     OPT_STRING(0, "path", &opt_path, "dir",
-	       "tools install directory (default: ~/.ice)"),
+	       "tools install directory (default: ~/.ice)", NULL),
     OPT_BOOL(0, "force", &opt_force,
 	     "re-download and overwrite existing installations"),
     OPT_END(),
+};
+
+const struct cmd_desc cmd_tools_install_desc = {
+    .name = "install",
+    .fn = cmd_install,
+    .opts = cmd_install_opts,
+    .manual = &tools_install_manual,
 };
 
 /* ------------------------------------------------------------------ */
@@ -401,7 +405,8 @@ out:
 /* Command entry point                                                 */
 /* ------------------------------------------------------------------ */
 
-int cmd_install(int argc, const char **argv)
+int install_from_manifest(const char *manifest_path, const char *target_filter,
+			  const char *tool_filter, int force)
 {
 	struct sbuf manifest = SBUF_INIT;
 	struct json_value *root;
@@ -412,30 +417,26 @@ int cmd_install(int argc, const char **argv)
 	int installed = 0, skipped = 0, failed = 0;
 	int tool_found = 0;
 
-	argc =
-	    parse_options_manual(argc, argv, cmd_install_opts, usage, &manual);
-	if (argc != 1)
-		die("expected exactly one argument: path to tools.json");
+	if (target_filter && !is_known_target(target_filter))
+		die("'%s' is not a known target", target_filter);
 
-	if (opt_target && !is_known_target(opt_target))
-		die("'%s' is not a known target", opt_target);
-
-	if (sbuf_read_file(&manifest, argv[0]) < 0)
-		die_errno("cannot read '%s'", argv[0]);
+	if (sbuf_read_file(&manifest, manifest_path) < 0)
+		die_errno("cannot read '%s'", manifest_path);
 
 	root = json_parse(manifest.buf, manifest.len);
 	if (!root)
-		die("failed to parse '%s'", argv[0]);
+		die("failed to parse '%s'", manifest_path);
 
 	/* Validate schema version */
 	double ver = json_as_number(json_get(root, "version"));
 	if (ver < 1) {
-		die("missing or invalid 'version' field in '%s'", argv[0]);
+		die("missing or invalid 'version' field in '%s'",
+		    manifest_path);
 	}
 
 	tools = json_get(root, "tools");
 	if (!tools) {
-		die("no 'tools' array in '%s'", argv[0]);
+		die("no 'tools' array in '%s'", manifest_path);
 	}
 
 	platform = platform_key();
@@ -453,8 +454,8 @@ int cmd_install(int argc, const char **argv)
 		if (!name)
 			continue;
 
-		if (opt_tool) {
-			if (strcmp(name, opt_tool) != 0)
+		if (tool_filter) {
+			if (strcmp(name, tool_filter) != 0)
 				continue;
 			tool_found = 1;
 		} else {
@@ -464,20 +465,21 @@ int cmd_install(int argc, const char **argv)
 			}
 		}
 
-		if (opt_target && !tool_supports_target(tool, opt_target)) {
+		if (target_filter &&
+		    !tool_supports_target(tool, target_filter)) {
 			skipped++;
 			continue;
 		}
 
-		int rc = install_tool(tool, platform, base_dir, opt_force);
+		int rc = install_tool(tool, platform, base_dir, force);
 		if (rc < 0)
 			failed++;
 		else
 			installed++;
 	}
 
-	if (opt_tool && !tool_found)
-		die("tool '%s' not found in manifest", opt_tool);
+	if (tool_filter && !tool_found)
+		die("tool '%s' not found in manifest", tool_filter);
 
 	fprintf(stderr, "Done: @b{%d} installed, %d skipped, %d failed\n",
 		installed, skipped, failed);
@@ -485,4 +487,13 @@ int cmd_install(int argc, const char **argv)
 	json_free(root);
 	sbuf_release(&manifest);
 	return failed ? 1 : 0;
+}
+
+int cmd_install(int argc, const char **argv)
+{
+	argc = parse_options(argc, argv, &cmd_tools_install_desc);
+	if (argc != 1)
+		die("expected exactly one argument: path to tools.json");
+
+	return install_from_manifest(argv[0], opt_target, opt_tool, opt_force);
 }

@@ -15,7 +15,11 @@
  * for cmake.define).
  *
  * Scope precedence, low -> high:
- *   DEFAULT -> USER -> LOCAL -> PROJECT -> ENV -> CLI
+ *   DEFAULT -> USER -> LOCAL -> PROJECT
+ *
+ * Environment variables and CLI flags do NOT live in this store -- they
+ * seed the per-option C variables directly via the option table (see
+ * options.h).
  *
  * Usage:
  *   config_init(&config);
@@ -28,6 +32,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include <stddef.h>
+
 /** Config source, ordered low -> high precedence. */
 enum config_scope {
 	CONFIG_SCOPE_DEFAULT, /**< Built-in defaults. */
@@ -35,8 +41,6 @@ enum config_scope {
 	CONFIG_SCOPE_LOCAL, /**< .iceconfig in project root. */
 	CONFIG_SCOPE_PROJECT, /**< Auto-derived from CMakeCache, sdkconfig, etc.
 			       */
-	CONFIG_SCOPE_ENV,     /**< Environment variables (ESPPORT, ...). */
-	CONFIG_SCOPE_CLI,     /**< Global and command-line args. */
 };
 
 /** A single (key, value, scope) entry in the config store. */
@@ -138,6 +142,15 @@ int config_get_int(const char *key, int *out);
  */
 int config_get_bool(const char *key, int *out);
 
+/**
+ * @brief Parse @p s as a boolean into @p *out without consulting the
+ *        config store.
+ *
+ * Same token set as config_get_bool().  Returns 0 on success, -1 if
+ * @p s is NULL, -2 on parse error.
+ */
+int config_parse_bool(const char *s, int *out);
+
 /** Return 1 if @p key is set in any scope, 0 otherwise. */
 int config_has(const char *key);
 
@@ -200,24 +213,24 @@ int config_load_file(struct config *c, enum config_scope scope,
 		     const char *path);
 
 /**
+ * @brief Parse config content from an in-memory buffer.
+ *
+ * Same semantics as config_load_file() but reads from @p buf (of
+ * @p len bytes).  @p label is used only for diagnostic messages
+ * (e.g. "HEAD:.gitmodules").  The buffer is modified in place by
+ * sbuf_getline() while walking lines, so the caller must pass a
+ * writable buffer it owns.
+ */
+void config_load_buf(struct config *c, enum config_scope scope,
+		     const char *label, char *buf, size_t len);
+
+/**
  * @brief Populate @p c with built-in default values at DEFAULT scope.
  *
  * Currently: core.build-dir=build, core.generator=Ninja,
  * core.verbose=false.
  */
 void config_load_defaults(struct config *c);
-
-/**
- * @brief Import recognised environment variables at ENV scope.
- *
- * Table-driven mapping:
- *   ESPPORT    -> serial.port
- *   ESPBAUD    -> serial.baud
- *   IDF_TARGET -> target
- *
- * Empty or unset variables are ignored.
- */
-void config_load_env(struct config *c);
 
 /**
  * @brief Write all entries at @p scope to @p path as an INI file.
@@ -247,6 +260,33 @@ int config_write_file(const struct config *c, enum config_scope scope,
  * NULL @p build_dir, or missing keys are silent -- this loader is
  * best-effort and should not complain outside a configured project.
  */
-void config_load_project(struct config *c, const char *build_dir);
+/**
+ * @brief Re-load @b{./.iceconfig} into the process-wide config store.
+ *
+ * Wipes every existing @c CONFIG_SCOPE_LOCAL entry first so re-loads
+ * don't accumulate duplicates.  Called by @b{ice init} after writing
+ * the file so a subsequent config_load_profile() picks up the freshly
+ * persisted @b{[project "<name>"]} entries without restarting ice.
+ */
+void config_reload_local(void);
+
+/**
+ * @brief Promote @b{[project "<name>"]} into a uniform @b{project.X}
+ *        namespace at @c CONFIG_SCOPE_PROJECT and derive build-state
+ *        from the profile's build directory.
+ *
+ * The promotion lets every project-aware command read @b{project.X}
+ * via config_get() without knowing which profile is active.  After
+ * the promotion the function reads the profile's build directory
+ * (if configured) and adds:
+ *
+ *   - @b{project.target}   from @c CMakeCache.txt's @c IDF_TARGET
+ *   - @b{project.mapfile}  derived from @c project_description.json
+ *   - @b{project.elf}      derived from @c project_description.json
+ *
+ * Re-runnable: every call clears the previous PROJECT-scope state
+ * first.
+ */
+void config_load_profile(const char *name);
 
 #endif /* CONFIG_H */

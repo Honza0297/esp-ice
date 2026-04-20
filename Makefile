@@ -120,30 +120,29 @@ LIB_SRCS := \
 	cmakecache.c \
 	cmd/build/build.c \
 	cmd/clean/clean.c \
-	cmd/cmake/cmake.c \
 	cmd/completion/completion.c \
 	cmd/config/config.c \
 	cmd/configdep/configdep.c \
 	cmd/flash/flash.c \
-	cmd/fullclean/fullclean.c \
 	cmd/help/help.c \
 	cmd/image/image.c \
 	cmd/image/create.c \
 	cmd/image/info.c \
 	cmd/image/merge.c \
 	cmd/idf/idf.c \
+	cmd/init/init.c \
 	cmd/install/install.c \
 	cmd/ldgen/ldgen.c \
 	cmd/ldgen/lf.c \
 	cmd/monitor/monitor.c \
 	cmd/menuconfig/menuconfig.c \
 	cmd/partition-table/partition-table.c \
-	cmd/reconfigure/reconfigure.c \
-	cmd/set-target/set-target.c \
+	cmd/repo/repo.c \
 	cmd/target/target.c \
 	cmd/tools/tools.c \
 	cmd/size/chip.c \
 	cmd/size/size.c \
+	cmd/status/status.c \
 	config.c \
 	csv.c \
 	fs.c \

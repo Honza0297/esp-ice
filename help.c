@@ -17,10 +17,7 @@
 #define INDENT "    "
 #define MIN_WIDTH 40
 
-static int is_bool_opt(enum option_type t)
-{
-	return t == OPTION_BOOL || t == OPTION_CONFIG_BOOL;
-}
+static int is_bool_opt(enum option_type t) { return t == OPTION_BOOL; }
 
 static int has_options(const struct option *opts)
 {
@@ -292,28 +289,95 @@ static void print_options_body(const struct option *opts)
 		fputs("\n", stdout);
 		if (o->help)
 			printf(INDENT INDENT "%s\n", o->help);
+		if (o->config_key || o->env_var) {
+			fputs(INDENT INDENT, stdout);
+			if (o->config_key)
+				printf("[config: @b{%s}]", o->config_key);
+			if (o->config_key && o->env_var)
+				fputs(" ", stdout);
+			if (o->env_var)
+				printf("[env: @b{%s}]", o->env_var);
+			fputs("\n", stdout);
+		}
 		fputs("\n", stdout);
 	}
 }
 
-static void print_commands_body(void)
+static int has_config_sources(const struct option *opts)
+{
+	if (!opts)
+		return 0;
+	for (const struct option *o = opts; o->type != OPTION_END; o++)
+		if (o->config_key)
+			return 1;
+	return 0;
+}
+
+static int has_env_sources(const struct option *opts)
+{
+	if (!opts)
+		return 0;
+	for (const struct option *o = opts; o->type != OPTION_END; o++)
+		if (o->env_var)
+			return 1;
+	return 0;
+}
+
+/*
+ * Emit a definition list of <source name> -> description pairs for
+ * each option that has the requested source set.  The @p key_of
+ * callback picks between config_key and env_var so one body routine
+ * serves both CONFIG and ENVIRONMENT sections.
+ */
+static void print_source_body(const struct option *opts,
+			      const char *(*key_of)(const struct option *))
+{
+	for (const struct option *o = opts; o->type != OPTION_END; o++) {
+		const char *key = key_of(o);
+		const char *desc;
+
+		if (!key)
+			continue;
+
+		desc = o->config_help ? o->config_help : o->help;
+		printf(INDENT "@b{%s}\n", key);
+		if (desc) {
+			fputs(INDENT INDENT, stdout);
+			fputs(desc, stdout);
+			fputs("\n", stdout);
+		}
+		fputs("\n", stdout);
+	}
+}
+
+static const char *opt_config_key(const struct option *o)
+{
+	return o->config_key;
+}
+
+static const char *opt_env_var(const struct option *o) { return o->env_var; }
+
+static void print_commands_body(const struct cmd_desc *const *subs)
 {
 	size_t maxlen = 0;
 
-	for (const struct cmd_struct *c = ice_commands; c->name; c++) {
+	for (const struct cmd_desc *const *p = subs; *p; p++) {
 		size_t l;
-		if (c->hidden)
+		/* Skip internal commands (leading underscore). */
+		if ((*p)->name[0] == '_')
 			continue;
-		l = strlen(c->name);
+		l = strlen((*p)->name);
 		if (l > maxlen)
 			maxlen = l;
 	}
 
-	for (const struct cmd_struct *c = ice_commands; c->name; c++) {
-		if (c->hidden)
+	for (const struct cmd_desc *const *p = subs; *p; p++) {
+		const char *summary;
+		if ((*p)->name[0] == '_')
 			continue;
-		printf(INDENT "@b{%-*s}   %s\n", (int)maxlen, c->name,
-		       c->summary ? c->summary : "");
+		summary = (*p)->manual ? (*p)->manual->summary : NULL;
+		printf(INDENT "@b{%-*s}   %s\n", (int)maxlen, (*p)->name,
+		       summary ? summary : "");
 	}
 	fputs("\n", stdout);
 }
@@ -385,35 +449,59 @@ static const char *basename_of(const char *p)
 	return last;
 }
 
-void print_manual(const char *cmd_name, const struct cmd_manual *m,
-		  const struct option *opts, const char **usage)
+void print_manual(const char *cmd_name, const struct cmd_desc *desc)
 {
+	const struct cmd_manual *m = desc ? desc->manual : NULL;
+	const struct option *opts = desc ? desc->opts : NULL;
 	const char *summary;
+	int has_flags = 0;
+	int has_subcmds = 0;
+	const char *positional = NULL;
 
 	cmd_name = basename_of(cmd_name);
-	summary = m && m->summary
-		      ? m->summary
-		      : (cmd_name ? ice_cmd_summary(cmd_name) : NULL);
+	summary = m ? m->summary : NULL;
+
+	if (opts) {
+		if (opts->type != OPTION_END)
+			has_flags = 1;
+		{
+			const struct option *end = opts;
+			while (end->type != OPTION_END)
+				end++;
+			positional = end->argh;
+		}
+	}
+	if (desc && desc->subcommands && *desc->subcommands)
+		has_subcmds = 1;
 
 	pager_start();
 
 	/* NAME */
 	fputs("@b{NAME}\n" INDENT, stdout);
-	if (cmd_name && strcmp(cmd_name, "ice") != 0)
-		printf("ice-%s", cmd_name);
-	else
-		fputs("ice", stdout);
+	fputs(cmd_name ? cmd_name : "ice", stdout);
 	if (summary)
 		printf(" - %s", summary);
 	fputs("\n\n", stdout);
 
 	/* SYNOPSIS */
-	if (usage && usage[0]) {
-		fputs("@b{SYNOPSIS}\n", stdout);
-		for (int i = 0; usage[i]; i++)
-			printf(INDENT "%s\n", usage[i]);
-		fputs("\n", stdout);
+	fputs("@b{SYNOPSIS}\n" INDENT, stdout);
+	printf("%s", cmd_name ? cmd_name : "ice");
+	if (has_flags)
+		printf(" [<options>]");
+	if (has_subcmds)
+		printf(" <subcommand> [<args>]");
+	else if (positional) {
+		/*
+		 * Mirrors print_usage: argh with '<' or '[' is a
+		 * pre-formatted fragment (multi-positional commands),
+		 * a bare word gets wrapped in <>.
+		 */
+		if (strchr(positional, '<') || strchr(positional, '['))
+			printf(" %s", positional);
+		else
+			printf(" <%s>", positional);
 	}
+	fputs("\n\n", stdout);
 
 	/* DESCRIPTION */
 	if (m && m->description) {
@@ -427,10 +515,20 @@ void print_manual(const char *cmd_name, const struct cmd_manual *m,
 		print_options_body(opts);
 	}
 
-	/* COMMANDS -- only for the top-level manual. */
-	if (m && m->list_commands) {
+	/* CONFIG / ENVIRONMENT -- auto-generated from option source fields. */
+	if (has_config_sources(opts)) {
+		fputs("@b{CONFIG}\n", stdout);
+		print_source_body(opts, opt_config_key);
+	}
+	if (has_env_sources(opts)) {
+		fputs("@b{ENVIRONMENT}\n", stdout);
+		print_source_body(opts, opt_env_var);
+	}
+
+	/* COMMANDS -- auto-emitted from desc->subcommands. */
+	if (desc && desc->subcommands && *desc->subcommands) {
 		fputs("@b{COMMANDS}\n", stdout);
-		print_commands_body();
+		print_commands_body(desc->subcommands);
 	}
 
 	/* ALIASES -- skipped entirely when no aliases are configured. */
