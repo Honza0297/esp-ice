@@ -455,19 +455,18 @@ void print_manual(const char *cmd_name, const struct cmd_desc *desc)
 	const char *summary;
 	int has_flags = 0;
 	int has_subcmds = 0;
-	const char *positional = NULL;
+	int has_positionals = 0;
 
 	cmd_name = basename_of(cmd_name);
 	summary = m ? m->summary : NULL;
 
 	if (opts) {
-		if (opts->type != OPTION_END)
-			has_flags = 1;
-		{
-			const struct option *end = opts;
-			while (end->type != OPTION_END)
-				end++;
-			positional = end->argh;
+		for (const struct option *o = opts; o->type != OPTION_END;
+		     o++) {
+			if (o->type == OPTION_POSITIONAL)
+				has_positionals = 1;
+			else
+				has_flags = 1;
 		}
 	}
 	if (desc && desc->subcommands && *desc->subcommands)
@@ -487,18 +486,24 @@ void print_manual(const char *cmd_name, const struct cmd_desc *desc)
 	printf("%s", cmd_name ? cmd_name : "ice");
 	if (has_flags)
 		printf(" [<options>]");
-	if (has_subcmds)
+	if (has_subcmds) {
 		printf(" <subcommand> [<args>]");
-	else if (positional) {
+	} else if (has_positionals) {
 		/*
-		 * Mirrors print_usage: argh with '<' or '[' is a
-		 * pre-formatted fragment (multi-positional commands),
-		 * a bare word gets wrapped in <>.
+		 * Render every OPT_POSITIONAL slot in declaration order.
+		 * argh containing '<' or '[' is pre-formatted (optional
+		 * slots, multi-word fragments); a bare word gets wrapped
+		 * in <> -- matches print_usage().
 		 */
-		if (strchr(positional, '<') || strchr(positional, '['))
-			printf(" %s", positional);
-		else
-			printf(" <%s>", positional);
+		for (const struct option *o = opts; o->type != OPTION_END;
+		     o++) {
+			if (o->type != OPTION_POSITIONAL || !o->argh)
+				continue;
+			if (strchr(o->argh, '<') || strchr(o->argh, '['))
+				printf(" %s", o->argh);
+			else
+				printf(" <%s>", o->argh);
+		}
 	}
 	fputs("\n\n", stdout);
 

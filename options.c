@@ -387,6 +387,21 @@ static int set_value(const struct option *o, const char *val)
 	}
 }
 
+/*
+ * A positional slot is "required" when its argh does NOT start with
+ * '[' -- the bracket convention in OPT_POSITIONAL marks optional slots
+ * (e.g. "[<name>]") verbatim in the synopsis.
+ */
+static int has_required_positional(const struct option *opts)
+{
+	for (const struct option *o = opts; o->type != OPTION_END; o++) {
+		if (o->type == OPTION_POSITIONAL && o->argh &&
+		    o->argh[0] != '[')
+			return 1;
+	}
+	return 0;
+}
+
 int parse_options(int argc, const char **argv, const struct cmd_desc *desc)
 {
 	const struct option *opts = desc->opts;
@@ -394,6 +409,16 @@ int parse_options(int argc, const char **argv, const struct cmd_desc *desc)
 	const char *name = (manual && manual->name) ? manual->name : argv[0];
 	int out = 0;
 	int i;
+
+	/*
+	 * Bare invocation of a leaf that declares required positionals:
+	 * mirror the namespace behaviour (ice.c::ice_dispatch) and show the
+	 * full manual instead of dying with a "usage: ..." one-liner.
+	 */
+	if (argc == 1 && manual && has_required_positional(opts)) {
+		print_manual(name, desc);
+		exit(1);
+	}
 
 	seed_defaults(opts);
 
