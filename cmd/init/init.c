@@ -337,7 +337,6 @@ static int cmake_configure(void)
 	const char *generator = config_get("project.generator");
 	struct svec defines = SVEC_INIT;
 	struct svec args = SVEC_INIT;
-	struct sbuf logdir = SBUF_INIT;
 	struct process proc = PROCESS_INIT;
 	int rc;
 
@@ -346,10 +345,7 @@ static int cmake_configure(void)
 
 	build_define_set(&defines);
 
-	sbuf_addf(&logdir, "%s/log", build_dir);
 	mkdir(build_dir, 0755);
-	mkdir(logdir.buf, 0755);
-	sbuf_release(&logdir);
 
 	svec_push(&args, "cmake");
 	svec_push(&args, "-G");
@@ -360,7 +356,7 @@ static int cmake_configure(void)
 		svec_pushf(&args, "-D%s", defines.v[i]);
 
 	proc.argv = args.v;
-	rc = process_run(&proc);
+	rc = process_run_progress(&proc, "Configuring", "init-configure");
 
 	if (rc) {
 		struct sbuf cache = SBUF_INIT;
