@@ -84,9 +84,8 @@ static int cmd_tools_list(int argc, const char **argv)
 	sbuf_addf(&tools_dir, "%s/tools", ice_home());
 
 	if (access(tools_dir.buf, F_OK) != 0) {
-		fprintf(stderr,
-			"No tools installed.\n"
-			"hint: run @b{ice tools install <tools.json>}\n");
+		fprintf(stderr, "No tools installed.\n");
+		hint("run @b{ice tools install <tools.json>}");
 		sbuf_release(&tools_dir);
 		return 1;
 	}

@@ -82,11 +82,12 @@ static void reference_lock(void)
 		die_errno("cannot create parent of '%s'", lock);
 
 	if (lock_acquire(lock) < 0) {
-		if (errno == EEXIST)
+		if (errno == EEXIST) {
+			hint("remove it if no ice is running");
 			die("another @b{ice} process holds the reference "
-			    "lock at @b{%s}\n"
-			    "hint: remove it if no ice is running",
+			    "lock at @b{%s}",
 			    lock);
+		}
 		die_errno("cannot create lock '%s'", lock);
 	}
 }
@@ -151,10 +152,10 @@ static int run_git_capture(const char *dir, const char **argv, struct sbuf *out)
 /** die if ~/.ice/esp-idf doesn't exist. */
 static void ensure_reference(void)
 {
-	if (access(reference_path(), F_OK) != 0)
-		die("no ESP-IDF reference at @b{%s}\n"
-		    "hint: run @b{ice repo clone} first",
-		    reference_path());
+	if (access(reference_path(), F_OK) != 0) {
+		hint("run @b{ice repo clone} first");
+		die("no ESP-IDF reference at @b{%s}", reference_path());
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -506,10 +507,10 @@ static int cmd_repo_clone(int argc, const char **argv)
 
 	reference_lock();
 
-	if (!access(reference_path(), F_OK))
-		die("ESP-IDF already cloned at @b{%s}\n"
-		    "hint: use @b{ice repo pull} to update",
-		    reference_path());
+	if (!access(reference_path(), F_OK)) {
+		hint("use @b{ice repo pull} to update");
+		die("ESP-IDF already cloned at @b{%s}", reference_path());
+	}
 
 	if (clone_jobs < 1)
 		clone_jobs = 1;
@@ -1007,8 +1008,8 @@ static int cmd_repo_info(int argc, const char **argv)
 	parse_options(argc, argv, &cmd_repo_info_desc);
 
 	if (access(base, F_OK) != 0) {
-		fprintf(stderr, "No ESP-IDF reference configured.\n"
-				"hint: run @b{ice repo clone}\n");
+		fprintf(stderr, "No ESP-IDF reference configured.\n");
+		hint("run @b{ice repo clone}");
 		return 1;
 	}
 
