@@ -131,7 +131,6 @@ LIB_SRCS := \
 	cmd/image/merge.c \
 	cmd/idf/idf.c \
 	cmd/init/init.c \
-	cmd/install/install.c \
 	cmd/ldgen/ldgen.c \
 	cmd/ldgen/lf.c \
 	cmd/monitor/monitor.c \
