@@ -79,11 +79,10 @@ static size_t visible_len(const char *s, size_t len)
 	size_t depth = 0;
 
 	while (i < len) {
-		/* "@@" (anywhere) or "}}" (inside a token) -- doubled char
-		 * that stands for one literal, visible character. */
-		if ((s[i] == '@' && i + 1 < len && s[i + 1] == '@') ||
-		    (depth > 0 && s[i] == '}' && i + 1 < len &&
-		     s[i + 1] == '}')) {
+		/* "@@" (literal @) or "@}" (literal }) -- two bytes that
+		 * stand for one visible character. */
+		if (s[i] == '@' && i + 1 < len &&
+		    (s[i + 1] == '@' || s[i + 1] == '}')) {
 			vw++;
 			i += 2;
 		} else if (s[i] == '@' && i + 2 < len && s[i + 2] == '{') {
@@ -125,13 +124,13 @@ static const char *word_end(const char *p)
 {
 	while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\x02' &&
 	       *p != '\x03') {
-		if (*p == '@' && p[1] == '@') {
+		if (*p == '@' && (p[1] == '@' || p[1] == '}')) {
 			p += 2;
 		} else if (*p == '@' && p[1] && p[2] == '{') {
 			p += 3;
 			int depth = 1;
 			while (*p && depth > 0) {
-				if (*p == '}' && p[1] == '}')
+				if (*p == '@' && (p[1] == '@' || p[1] == '}'))
 					p += 2;
 				else if (*p == '}') {
 					depth--;
@@ -150,7 +149,7 @@ static const char *word_end(const char *p)
 				p++;
 			int depth = 1;
 			while (*p && depth > 0) {
-				if (*p == '}' && p[1] == '}')
+				if (*p == '@' && (p[1] == '@' || p[1] == '}'))
 					p += 2;
 				else if (*p == '}') {
 					depth--;
