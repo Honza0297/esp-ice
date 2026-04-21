@@ -66,6 +66,7 @@ void kc_expr_free(struct kc_expr *expr)
 	case KC_E_GT:
 	case KC_E_LTE:
 	case KC_E_GTE:
+	case KC_E_RANGE:
 		kc_expr_free(expr->data.children.left);
 		kc_expr_free(expr->data.children.right);
 		break;
@@ -123,6 +124,13 @@ void kc_expr_print(const struct kc_expr *expr, struct sbuf *sb)
 		sbuf_addch(sb, ' ');
 		kc_expr_print(expr->data.children.right, sb);
 		sbuf_addch(sb, ')');
+		break;
+	case KC_E_RANGE:
+		sbuf_addstr(sb, "[");
+		kc_expr_print(expr->data.children.left, sb);
+		sbuf_addstr(sb, ", ");
+		kc_expr_print(expr->data.children.right, sb);
+		sbuf_addstr(sb, "]");
 		break;
 	case KC_E_NONE:
 		sbuf_addstr(sb, "<none>");
