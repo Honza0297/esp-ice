@@ -344,6 +344,13 @@ static int cmake_configure(void)
 	svec_push(&args, generator);
 	svec_push(&args, "-B");
 	svec_push(&args, build_dir);
+	/*
+	 * Short-circuit IDF's `__build_check_python` -- ice runs the build
+	 * without a Python venv, so the dependency check would fail on the
+	 * very first import.  The property is consulted in project.cmake
+	 * before the check runs, so setting it via -D is enough.
+	 */
+	svec_push(&args, "-DPYTHON_DEPS_CHECKED=1");
 	for (size_t i = 0; i < defines.nr; i++)
 		svec_pushf(&args, "-D%s", defines.v[i]);
 
@@ -692,6 +699,14 @@ int cmd_init(int argc, const char **argv)
 	 * outlive the call -- a function-static array provides that.
 	 */
 	static char envstr[] = "_IDF_PY_SET_TARGET_ACTION=1";
+	/*
+	 * Disable IDF's component manager -- it's a Python tool that shells
+	 * out from cmake to resolve registry components, and ice runs without
+	 * a Python venv.  Projects that already have their dependencies
+	 * vendored don't need it; a native replacement is out of scope for
+	 * the PoC.
+	 */
+	static char cm_envstr[] = "IDF_COMPONENT_MANAGER=0";
 	const char *chip;
 	const char *name;
 	char *idf_path = NULL;
@@ -809,6 +824,7 @@ int cmd_init(int argc, const char **argv)
 	load_profile(name);
 
 	putenv(envstr);
+	putenv(cm_envstr);
 
 	rc = cmake_configure();
 	if (rc == 0) {
