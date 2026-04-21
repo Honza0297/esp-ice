@@ -122,6 +122,7 @@ LIB_SRCS := \
 	cconfig/expr.c \
 	cconfig/lexer.c \
 	cconfig/parser.c \
+	cconfig/preproc.c \
 	cconfig/symbol.c \
 	cmake.c \
 	cmakecache.c \
