@@ -84,8 +84,29 @@ void kc_symtab_release(struct kc_symtab *tab)
 		tab->buckets[idx] = NULL;
 	}
 
+	{
+		struct kc_intern_str *istr = tab->interned_strings;
+		while (istr) {
+			struct kc_intern_str *next = istr->next;
+			free(istr->str);
+			free(istr);
+			istr = next;
+		}
+		tab->interned_strings = NULL;
+	}
+
 	kc_sym_yes = NULL;
 	kc_sym_no = NULL;
+}
+
+const char *kc_symtab_intern_string(struct kc_symtab *tab, const char *str)
+{
+	struct kc_intern_str *node = xcalloc(1, sizeof(*node));
+
+	node->str = sbuf_strdup(str);
+	node->next = tab->interned_strings;
+	tab->interned_strings = node;
+	return node->str;
 }
 
 struct kc_symbol *kc_symtab_lookup(const struct kc_symtab *tab,
