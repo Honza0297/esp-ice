@@ -17,7 +17,7 @@
 #include "esf_port.h"
 #include "ice.h"
 
-/* Plumbing entry point declared in cmd/target/flash.c. */
+/* Plumbing entry point declared in cmd/target/flash/flash.c. */
 int cmd_target_flash(int argc, const char **argv);
 
 static const char *opt_port;

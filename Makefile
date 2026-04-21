@@ -150,7 +150,7 @@ LIB_SRCS := \
 	cmd/status/status.c \
 	cmd/target/target.c \
 	cmd/monitor/monitor.c \
-	cmd/target/flash.c \
+	cmd/target/flash/flash.c \
 	cmd/target/list/list.c \
 	cmd/target/monitor/monitor.c \
 	cmd/tools/tools.c \
