@@ -8,9 +8,11 @@
  * @file parser.c
  * @brief Recursive descent parser for Kconfig structural elements.
  *
- * Parses mainmenu, config, menu/endmenu, and comment entries from a
- * token stream produced by the lexer.  Builds a menu tree and populates
- * symbol properties.  Expression parsing follows standard precedence:
+ * Parses mainmenu, config, menuconfig, menu/endmenu, choice/endchoice,
+ * comment, if/endif, and source/rsource/osource/orsource entries from
+ * a token stream produced by the lexer.  Builds a menu tree and
+ * populates symbol properties.  Expression parsing follows standard
+ * precedence:
  *   || (lowest) > && > ! (prefix) > atoms/comparisons (highest).
  */
 #include "ice.h"
@@ -296,6 +298,21 @@ static int is_config_property(enum kc_token_type tok)
 	}
 }
 
+static int is_choice_property(enum kc_token_type tok)
+{
+	switch (tok) {
+	case KC_TOK_BOOL:  case KC_TOK_INT:   case KC_TOK_HEX:
+	case KC_TOK_STRING: case KC_TOK_FLOAT:
+	case KC_TOK_TRISTATE: case KC_TOK_DEF_TRISTATE:
+	case KC_TOK_PROMPT: case KC_TOK_DEFAULT:
+	case KC_TOK_DEPENDS: case KC_TOK_OPTIONAL:
+	case KC_TOK_HELP:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 /* ------------------------------------------------------------------ */
 /*  depends on inheritance                                             */
 /* ------------------------------------------------------------------ */
@@ -327,10 +344,12 @@ static void apply_deps(struct kc_menu_node *node, struct kc_symbol *sym,
 }
 
 /* ------------------------------------------------------------------ */
-/*  Config entry                                                       */
+/*  Config / menuconfig entry                                          */
 /* ------------------------------------------------------------------ */
 
-static void parse_config(struct parser *p, struct kc_menu_node *parent)
+static void parse_config_inner(struct parser *p,
+			       struct kc_menu_node *parent,
+			       int is_menuconfig)
 {
 	struct kc_menu_node *node;
 	struct kc_symbol *sym;
@@ -340,8 +359,9 @@ static void parse_config(struct parser *p, struct kc_menu_node *parent)
 	advance(p);
 
 	if (p->cur.type != KC_TOK_WORD)
-		die("error: %s:%d: expected symbol name after 'config'",
-		    p->filename, p->cur.line);
+		die("error: %s:%d: expected symbol name after '%s'",
+		    p->filename, p->cur.line,
+		    is_menuconfig ? "menuconfig" : "config");
 
 	sym = kc_symtab_intern(p->tab, p->cur.value);
 	advance(p);
@@ -349,6 +369,7 @@ static void parse_config(struct parser *p, struct kc_menu_node *parent)
 
 	node = alloc_node(parent, p->filename, entry_line);
 	node->sym = sym;
+	node->is_menuconfig = is_menuconfig;
 	sym->menu_node = node;
 
 	skip_newlines(p);
@@ -550,6 +571,364 @@ static void parse_config(struct parser *p, struct kc_menu_node *parent)
 	apply_deps(node, sym, deps);
 }
 
+static void parse_config(struct parser *p, struct kc_menu_node *parent)
+{
+	parse_config_inner(p, parent, 0);
+}
+
+static void parse_menuconfig(struct parser *p, struct kc_menu_node *parent)
+{
+	parse_config_inner(p, parent, 1);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Choice block                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Recursively mark all config symbols under a choice node with
+ * KC_SYM_CHOICEVAL.  Descends into sym-less nodes (e.g. if-blocks)
+ * so that conditional choice members are properly flagged.
+ */
+static void mark_choice_members(struct kc_menu_node *node)
+{
+	struct kc_menu_node *child;
+
+	for (child = node->child; child; child = child->next) {
+		if (child->sym)
+			child->sym->flags |= KC_SYM_CHOICEVAL;
+		if (!child->sym && child->child)
+			mark_choice_members(child);
+	}
+}
+
+static void parse_choice(struct parser *p, struct kc_menu_node *parent)
+{
+	struct kc_menu_node *node;
+	struct kc_symbol *choice_sym;
+	struct kc_expr *deps = NULL;
+	int entry_line = p->cur.line;
+	char name_buf[64];
+
+	advance(p);
+	expect_newline(p);
+
+	snprintf(name_buf, sizeof(name_buf), "<choice_%u>",
+		 p->tab->choice_counter++);
+	choice_sym = kc_symtab_intern(p->tab, name_buf);
+	choice_sym->flags |= KC_SYM_CHOICE;
+
+	node = alloc_node(parent, p->filename, entry_line);
+	node->sym = choice_sym;
+	choice_sym->menu_node = node;
+
+	skip_newlines(p);
+	while (is_choice_property(p->cur.type)) {
+		int prop_line = p->cur.line;
+
+		switch (p->cur.type) {
+		case KC_TOK_TRISTATE:
+		case KC_TOK_DEF_TRISTATE:
+			die("error: %s:%d: tristate type is not supported",
+			    p->filename, p->cur.line);
+			break;
+
+		case KC_TOK_BOOL:
+		case KC_TOK_INT:
+		case KC_TOK_HEX:
+		case KC_TOK_STRING:
+		case KC_TOK_FLOAT:
+		{
+			choice_sym->type = tok_to_type(p->cur.type);
+			advance(p);
+
+			if (p->cur.type == KC_TOK_QUOTED) {
+				struct kc_property *prop;
+				struct kc_symbol *text;
+
+				text = kc_symtab_intern(p->tab,
+							p->cur.value);
+				advance(p);
+
+				prop = kc_sym_add_prop(choice_sym,
+						       KC_PROP_PROMPT);
+				prop->value = kc_expr_alloc_sym(text);
+				set_prop_loc(prop, p, prop_line);
+				prop->cond = parse_if_cond(p);
+
+				if (!node->prompt)
+					node->prompt = text->name;
+			}
+
+			expect_newline(p);
+			break;
+		}
+
+		case KC_TOK_PROMPT:
+		{
+			struct kc_property *prop;
+			struct kc_symbol *text;
+
+			advance(p);
+
+			if (p->cur.type != KC_TOK_QUOTED)
+				die("error: %s:%d: expected quoted string "
+				    "after 'prompt'",
+				    p->filename, p->cur.line);
+
+			text = kc_symtab_intern(p->tab, p->cur.value);
+			advance(p);
+
+			prop = kc_sym_add_prop(choice_sym, KC_PROP_PROMPT);
+			prop->value = kc_expr_alloc_sym(text);
+			set_prop_loc(prop, p, prop_line);
+			prop->cond = parse_if_cond(p);
+
+			if (!node->prompt)
+				node->prompt = text->name;
+
+			expect_newline(p);
+			break;
+		}
+
+		case KC_TOK_DEFAULT:
+		{
+			struct kc_property *prop;
+
+			advance(p);
+
+			prop = kc_sym_add_prop(choice_sym, KC_PROP_DEFAULT);
+			prop->value = kc_expr_alloc_sym(parse_symbol(p));
+			set_prop_loc(prop, p, prop_line);
+			prop->cond = parse_if_cond(p);
+			expect_newline(p);
+			break;
+		}
+
+		case KC_TOK_DEPENDS:
+		{
+			struct kc_expr *dep;
+
+			advance(p);
+			if (p->cur.type != KC_TOK_ON)
+				die("error: %s:%d: expected 'on' after "
+				    "'depends'",
+				    p->filename, p->cur.line);
+			advance(p);
+
+			dep = parse_expr(p);
+			deps = expr_and(deps, dep);
+			expect_newline(p);
+			break;
+		}
+
+		case KC_TOK_OPTIONAL:
+			/* TODO: store optional flag on choice symbol once evaluator needs it */
+			advance(p);
+			expect_newline(p);
+			break;
+
+		case KC_TOK_HELP:
+			advance(p);
+			if (p->cur.type == KC_TOK_HELP_TEXT) {
+				node->help = sbuf_strdup(p->cur.value);
+				advance(p);
+			}
+			break;
+
+		default:
+			die("BUG: unhandled choice property token %s",
+			    kc_token_type_name(p->cur.type));
+		}
+
+		skip_newlines(p);
+	}
+
+	if (deps)
+		node->visibility = expr_and(node->visibility, deps);
+
+	parse_block(p, node);
+
+	mark_choice_members(node);
+
+	if (p->cur.type != KC_TOK_ENDCHOICE)
+		die("error: %s:%d: expected 'endchoice'",
+		    p->filename, p->cur.line);
+	advance(p);
+	expect_newline(p);
+}
+
+/* ------------------------------------------------------------------ */
+/*  if/endif block                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Parse an if/endif conditional block.
+ *
+ * Creates a transparent menu node (no symbol, no prompt) that stores
+ * the condition as its visibility.  Propagation of the if-condition
+ * to child entries happens at evaluation time via the visibility tree
+ * walk, not during parsing.
+ */
+static void parse_if_block(struct parser *p, struct kc_menu_node *parent)
+{
+	struct kc_menu_node *node;
+	int entry_line = p->cur.line;
+
+	advance(p);
+
+	node = alloc_node(parent, p->filename, entry_line);
+	node->visibility = parse_expr(p);
+	expect_newline(p);
+
+	parse_block(p, node);
+
+	if (p->cur.type != KC_TOK_ENDIF)
+		die("error: %s:%d: expected 'endif'",
+		    p->filename, p->cur.line);
+	advance(p);
+	expect_newline(p);
+}
+
+/* ------------------------------------------------------------------ */
+/*  source/rsource/osource/orsource                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Expand $(NAME) patterns in @p raw using getenv().
+ *
+ * Only handles simple, non-nested $(NAME) references — the common
+ * case for environment variables in source paths.  Nested forms like
+ * $(A$(B)), bare $NAME, and Kconfig-level macro assignments are not
+ * supported here; those require the full macro preprocessor (T05).
+ */
+static char *expand_env_vars(const char *raw)
+{
+	struct sbuf sb = SBUF_INIT;
+	const char *ptr = raw;
+
+	while (*ptr) {
+		if (ptr[0] == '$' && ptr[1] == '(') {
+			const char *name_start = ptr + 2;
+			const char *closing = strchr(name_start, ')');
+			if (closing) {
+				char *var_name = sbuf_strndup(
+					name_start,
+					(size_t)(closing - name_start));
+				const char *val = getenv(var_name);
+				if (val)
+					sbuf_addstr(&sb, val);
+				free(var_name);
+				ptr = closing + 1;
+				continue;
+			}
+		}
+		sbuf_addch(&sb, *ptr);
+		ptr++;
+	}
+
+	return sbuf_detach(&sb);
+}
+
+static void parse_source(struct parser *p, struct kc_menu_node *parent,
+			  int is_relative, int is_optional)
+{
+	struct kc_menu_node *included;
+	char *expanded;
+	char *resolved = NULL;
+	const char *interned;
+	int src_line = p->cur.line;
+
+	advance(p);
+
+	if (p->cur.type != KC_TOK_QUOTED)
+		die("error: %s:%d: expected quoted file path after source "
+		    "directive",
+		    p->filename, p->cur.line);
+
+	expanded = expand_env_vars(p->cur.value);
+	advance(p);
+	expect_newline(p);
+
+	if (is_relative) {
+		struct sbuf path_buf = SBUF_INIT;
+		const char *slash;
+
+		slash = strrchr(p->filename, '/');
+		if (slash) {
+			sbuf_add(&path_buf, p->filename,
+				 (size_t)(slash - p->filename + 1));
+		}
+		sbuf_addstr(&path_buf, expanded);
+		free(expanded);
+		resolved = sbuf_detach(&path_buf);
+	} else {
+		resolved = expanded;
+	}
+
+	{
+		struct sbuf probe = SBUF_INIT;
+
+		if (sbuf_read_file(&probe, resolved) < 0) {
+			if (is_optional) {
+				free(resolved);
+				sbuf_release(&probe);
+				return;
+			}
+			die("error: %s:%d: cannot read source file '%s'",
+			    p->filename, src_line, resolved);
+		}
+
+		if (p->tab->source_depth >= KC_SOURCE_DEPTH_MAX)
+			die("error: %s:%d: source inclusion depth exceeds "
+			    "%d (cycle?)",
+			    p->filename, src_line, KC_SOURCE_DEPTH_MAX);
+
+		p->tab->source_depth++;
+		interned = kc_symtab_intern_string(p->tab, resolved);
+		free(resolved);
+		included = kc_parse_buffer(probe.buf, interned, p->tab);
+		p->tab->source_depth--;
+		sbuf_release(&probe);
+	}
+
+	if (included->prompt)
+		die("error: %s:%d: included file '%s' contains a "
+		    "mainmenu directive (only allowed in root file)",
+		    p->filename, src_line, interned);
+
+	/* Graft included children into the current tree. */
+	{
+		struct kc_menu_node *child = included->child;
+		struct kc_menu_node *tail = NULL;
+
+		if (parent->child) {
+			tail = parent->child;
+			while (tail->next)
+				tail = tail->next;
+		}
+
+		while (child) {
+			struct kc_menu_node *next_sib = child->next;
+
+			child->parent = parent;
+			child->next = NULL;
+
+			if (!tail) {
+				parent->child = child;
+			} else {
+				tail->next = child;
+			}
+			tail = child;
+
+			child = next_sib;
+		}
+	}
+
+	included->child = NULL;
+	kc_menu_free(included);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Menu block                                                         */
 /* ------------------------------------------------------------------ */
@@ -704,11 +1083,32 @@ static void parse_block(struct parser *p, struct kc_menu_node *parent)
 		case KC_TOK_CONFIG:
 			parse_config(p, parent);
 			break;
+		case KC_TOK_MENUCONFIG:
+			parse_menuconfig(p, parent);
+			break;
 		case KC_TOK_MENU:
 			parse_menu(p, parent);
 			break;
 		case KC_TOK_COMMENT:
 			parse_comment_entry(p, parent);
+			break;
+		case KC_TOK_CHOICE:
+			parse_choice(p, parent);
+			break;
+		case KC_TOK_IF:
+			parse_if_block(p, parent);
+			break;
+		case KC_TOK_SOURCE:
+			parse_source(p, parent, 0, 0);
+			break;
+		case KC_TOK_RSOURCE:
+			parse_source(p, parent, 1, 0);
+			break;
+		case KC_TOK_OSOURCE:
+			parse_source(p, parent, 0, 1);
+			break;
+		case KC_TOK_ORSOURCE:
+			parse_source(p, parent, 1, 1);
 			break;
 		default:
 			die("error: %s:%d: unexpected token %s",
