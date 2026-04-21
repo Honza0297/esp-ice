@@ -699,14 +699,6 @@ int cmd_init(int argc, const char **argv)
 	 * outlive the call -- a function-static array provides that.
 	 */
 	static char envstr[] = "_IDF_PY_SET_TARGET_ACTION=1";
-	/*
-	 * Disable IDF's component manager -- it's a Python tool that shells
-	 * out from cmake to resolve registry components, and ice runs without
-	 * a Python venv.  Projects that already have their dependencies
-	 * vendored don't need it; a native replacement is out of scope for
-	 * the PoC.
-	 */
-	static char cm_envstr[] = "IDF_COMPONENT_MANAGER=0";
 	const char *chip;
 	const char *name;
 	char *idf_path = NULL;
@@ -824,7 +816,6 @@ int cmd_init(int argc, const char **argv)
 	load_profile(name);
 
 	putenv(envstr);
-	putenv(cm_envstr);
 
 	rc = cmake_configure();
 	if (rc == 0) {
