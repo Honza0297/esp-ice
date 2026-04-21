@@ -50,7 +50,7 @@ int main(void)
 	map_read(buf, strlen(fixture), &mf);
 
 	/* Memory Configuration: two named regions plus *default* are all
-	 * represented (cmd/size filters out *default* later when it walks
+	 * represented (cmd/idf/size filters out *default* later when it walks
 	 * the regions). */
 	tap_check(mf.nr_regions == 3);
 	tap_done("Memory Configuration section yields all three regions");

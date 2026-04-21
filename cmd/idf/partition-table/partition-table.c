@@ -5,14 +5,14 @@
  */
 
 /**
- * @file cmd/partition-table/partition-table.c
+ * @file cmd/idf/partition-table/partition-table.c
  * @brief "ice idf partition-table" subcommand.
  */
 #include "ice.h"
 #include "partition_table.h"
 
 /* clang-format off */
-static const struct cmd_manual partition_table_manual = {
+static const struct cmd_manual idf_partition_table_manual = {
 	.name = "ice idf partition-table",
 	.summary = "generate partition table binary from CSV",
 
@@ -64,7 +64,7 @@ static int quiet;
 /* --extra-partition-subtypes: accepted, ignored (numeric always works). */
 static const char *extra_subtypes;
 
-static const struct option cmd_partition_table_opts[] = {
+static const struct option cmd_idf_partition_table_opts[] = {
     OPT_BOOL('q', "quiet", &quiet, "suppress non-error output"),
     OPT_STRING(0, "offset", &offset_str, "hex",
 	       "partition table offset in flash (default 0x8000)", NULL),
@@ -82,14 +82,16 @@ static const struct option cmd_partition_table_opts[] = {
     OPT_END(),
 };
 
-const struct cmd_desc cmd_partition_table_desc = {
+int cmd_idf_partition_table(int argc, const char **argv);
+
+const struct cmd_desc cmd_idf_partition_table_desc = {
     .name = "partition-table",
-    .fn = cmd_partition_table,
-    .opts = cmd_partition_table_opts,
-    .manual = &partition_table_manual,
+    .fn = cmd_idf_partition_table,
+    .opts = cmd_idf_partition_table_opts,
+    .manual = &idf_partition_table_manual,
 };
 
-int cmd_partition_table(int argc, const char **argv)
+int cmd_idf_partition_table(int argc, const char **argv)
 {
 	struct pt_options pt_opts;
 	struct pt_entry entries[PT_MAX_ENTRIES];
@@ -99,7 +101,7 @@ int cmd_partition_table(int argc, const char **argv)
 	const char *output_path;
 	FILE *fp;
 
-	argc = parse_options(argc, argv, &cmd_partition_table_desc);
+	argc = parse_options(argc, argv, &cmd_idf_partition_table_desc);
 
 	if (argc < 2)
 		die("usage: ice idf partition-table [options] <input.csv> "

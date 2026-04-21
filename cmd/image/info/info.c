@@ -5,7 +5,7 @@
  */
 
 /**
- * @file cmd/image/info.c
+ * @file cmd/image/info/info.c
  * @brief "ice image info" subcommand -- inspect an ESP flash image.
  *
  * Inverse of `ice image elf2image`: read a flash image produced by

@@ -57,12 +57,16 @@ tap_check cand_present 'config'     pref.out
 tap_done "subcommand list includes all visible commands (shell does prefix filtering)"
 
 "$BINARY" __complete 2 ice idf "" >idfsubs.out
-tap_check cand_present 'monitor'         idfsubs.out
 tap_check cand_present 'size'            idfsubs.out
 tap_check cand_present 'configdep'       idfsubs.out
 tap_check cand_present 'ldgen'           idfsubs.out
 tap_check cand_present 'partition-table' idfsubs.out
 tap_done "ice idf <TAB> lists bundled IDF tools"
+
+"$BINARY" __complete 2 ice target "" >targetsubs.out
+tap_check cand_present 'list'    targetsubs.out
+tap_check cand_present 'monitor' targetsubs.out
+tap_done "ice target <TAB> lists chip-bound operations"
 
 # ---- `ice __complete`: per-subcommand flag candidates ----
 

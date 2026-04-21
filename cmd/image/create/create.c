@@ -5,7 +5,7 @@
  */
 
 /**
- * @file cmd/image/create.c
+ * @file cmd/image/create/create.c
  * @brief "ice image create" subcommand.
  *
  * Thin CLI wrapper around the @ref elf2image.h engine.  Parses the
