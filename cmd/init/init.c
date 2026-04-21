@@ -236,16 +236,14 @@ static char *resolve_idf_arg(const char *arg)
 /**
  * Wipe the contents of @p build_dir.
  *
- * Safety checks (kept verbatim from the old `ice fullclean`): refuse
- * to clean a directory that does not have @b{CMakeCache.txt} or that
- * contains source-tree markers (@b{CMakeLists.txt}, @b{.git},
- * @b{.svn}) -- guards against a misconfigured build-dir.
+ * Refuse only if @p build_dir looks like a source tree
+ * (@b{CMakeLists.txt}, @b{.git}, @b{.svn}) -- guards against a
+ * misconfigured build-dir pointing at the project itself.
  */
 static int wipe_build_dir(const char *build_dir)
 {
 	DIR *dir;
 	struct dirent *de;
-	int has_cache = 0;
 	int n_entries = 0;
 
 	if (access(build_dir, F_OK) != 0)
@@ -259,8 +257,6 @@ static int wipe_build_dir(const char *build_dir)
 		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
 			continue;
 		n_entries++;
-		if (!strcmp(de->d_name, "CMakeCache.txt"))
-			has_cache = 1;
 		if (!strcmp(de->d_name, "CMakeLists.txt") ||
 		    !strcmp(de->d_name, ".git") ||
 		    !strcmp(de->d_name, ".svn")) {
@@ -273,10 +269,6 @@ static int wipe_build_dir(const char *build_dir)
 
 	if (n_entries == 0)
 		return 0;
-	if (!has_cache)
-		die("'%s' does not look like a cmake build directory "
-		    "(no CMakeCache.txt); delete it manually",
-		    build_dir);
 
 	return rmtree(build_dir, global_verbose) < 0 ? -1 : 0;
 }
