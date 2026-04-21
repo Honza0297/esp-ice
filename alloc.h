@@ -61,4 +61,37 @@
 		}                                                              \
 	} while (0)
 
+/**
+ * @brief Allocate zeroed memory; die on failure.
+ */
+static inline void *xcalloc(size_t nmemb, size_t size)
+{
+	void *ptr = calloc(nmemb, size);
+	if (!ptr)
+		die_errno("calloc");
+	return ptr;
+}
+
+/**
+ * @brief Allocate memory; die on failure.
+ */
+static inline void *xmalloc(size_t size)
+{
+	void *ptr = malloc(size);
+	if (!ptr)
+		die_errno("malloc");
+	return ptr;
+}
+
+/**
+ * @brief Reallocate memory; die on failure.
+ */
+static inline void *xrealloc(void *ptr, size_t size)
+{
+	void *newptr = realloc(ptr, size);
+	if (!newptr)
+		die_errno("realloc");
+	return newptr;
+}
+
 #endif /* ALLOC_H */

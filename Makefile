@@ -15,7 +15,7 @@ LDFLAGS ?=
 #   make test T=cmd/completion/t
 #   make test T=cmd/idf/size/t
 #   make test T=cmd/completion/t/0001-completion.t
-T ?= $(wildcard cmd/*/t) $(wildcard cmd/*/*/t) t
+T ?= $(wildcard cmd/*/t) $(wildcard cmd/*/*/t) $(wildcard cconfig/t) t
 
 # Run prove with one worker per core by default; override PFLAGS to
 # re-serialize (PFLAGS=-j1) or to add verbosity (PFLAGS="-j4 -v").
@@ -119,6 +119,8 @@ PKG_NAME := $(NAME)-$(VERSION)-$(S)-$(ARCH)$(PKG_SUFFIX)
 # (today: ar.c, elf.c, http.c have no live callers from main()).
 LIB_SRCS := \
 	ar.c \
+	cconfig/expr.c \
+	cconfig/symbol.c \
 	cmake.c \
 	cmakecache.c \
 	cmd/__complete/__complete.c \
