@@ -297,6 +297,8 @@ unsigned long long mono_ms(void)
 	return (unsigned long long)GetTickCount64();
 }
 
+void delay_ms(uint32_t ms) { Sleep((DWORD)ms); }
+
 const char *process_exe(void)
 {
 	static char buf[4096];

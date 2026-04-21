@@ -10,7 +10,9 @@
  */
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -230,4 +232,115 @@ int serial_flush_input(struct serial *s)
 	if (tcflush(s->fd, TCIFLUSH) < 0)
 		return -errno;
 	return 0;
+}
+
+int serial_list_ports(char ***out)
+{
+	static const char *patterns[] = {
+	    "/dev/ttyUSB*",
+	    "/dev/ttyACM*",
+	    "/dev/cu.*",
+	    NULL,
+	};
+
+	glob_t g;
+	int found = 0;
+
+	*out = NULL;
+	memset(&g, 0, sizeof g);
+
+	for (int i = 0; patterns[i]; i++) {
+		int flags = GLOB_NOSORT | (found ? GLOB_APPEND : 0);
+		int r = glob(patterns[i], flags, NULL, &g);
+
+		if (r == GLOB_NOMATCH)
+			continue;
+		if (r != 0) {
+			if (found)
+				globfree(&g);
+			return -EIO;
+		}
+		found = 1;
+	}
+
+	if (!found || g.gl_pathc == 0) {
+		if (found)
+			globfree(&g);
+		return 0;
+	}
+
+	char **ports = calloc(g.gl_pathc + 1, sizeof(char *));
+	if (!ports) {
+		globfree(&g);
+		return -ENOMEM;
+	}
+
+	int count = 0;
+	for (size_t i = 0; i < g.gl_pathc; i++) {
+		size_t len = strlen(g.gl_pathv[i]);
+
+		ports[i] = malloc(len + 1);
+		if (!ports[i]) {
+			serial_free_port_list(ports);
+			globfree(&g);
+			return -ENOMEM;
+		}
+		memcpy(ports[i], g.gl_pathv[i], len + 1);
+		count++;
+	}
+	ports[count] = NULL;
+
+	globfree(&g);
+	*out = ports;
+	return count;
+}
+
+void serial_free_port_list(char **ports)
+{
+	if (!ports)
+		return;
+	for (char **p = ports; *p; p++)
+		free(*p);
+	free(ports);
+}
+
+int serial_get_usb_id(const char *device, unsigned int *vid, unsigned int *pid)
+{
+#ifdef __linux__
+	const char *name = strrchr(device, '/');
+	name = name ? name + 1 : device;
+
+	char vid_path[256], pid_path[256];
+	snprintf(vid_path, sizeof(vid_path),
+		 "/sys/class/tty/%s/device/../idVendor", name);
+	snprintf(pid_path, sizeof(pid_path),
+		 "/sys/class/tty/%s/device/../idProduct", name);
+
+	FILE *f;
+
+	f = fopen(vid_path, "r");
+	if (!f)
+		return -1;
+	if (fscanf(f, "%x", vid) != 1) {
+		fclose(f);
+		return -1;
+	}
+	fclose(f);
+
+	f = fopen(pid_path, "r");
+	if (!f)
+		return -1;
+	if (fscanf(f, "%x", pid) != 1) {
+		fclose(f);
+		return -1;
+	}
+	fclose(f);
+
+	return 0;
+#else
+	(void)device;
+	(void)vid;
+	(void)pid;
+	return -1;
+#endif
 }

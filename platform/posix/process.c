@@ -227,3 +227,11 @@ unsigned long long mono_ms(void)
 	return (unsigned long long)ts.tv_sec * 1000ull +
 	       (unsigned long long)ts.tv_nsec / 1000000ull;
 }
+
+void delay_ms(uint32_t ms)
+{
+	struct timespec ts;
+	ts.tv_sec = (time_t)(ms / 1000u);
+	ts.tv_nsec = (long)((ms % 1000u) * 1000000u);
+	nanosleep(&ts, NULL);
+}

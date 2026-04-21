@@ -85,4 +85,43 @@ int serial_set_rts(struct serial *s, int on);
  */
 int serial_flush_input(struct serial *s);
 
+/**
+ * @brief Enumerate available serial ports on the host.
+ *
+ * Allocates and fills an array of NUL-terminated device-path strings
+ * (e.g. "/dev/ttyUSB0", "COM3") and stores it in @p *out.  The caller
+ * must release the list with @ref serial_free_port_list.
+ *
+ * On POSIX the function globs @c /dev/ttyUSB*, @c /dev/ttyACM*, and
+ * @c /dev/cu.* (macOS).  On Windows it reads the registry key
+ * @c HKLM\\HARDWARE\\DEVICEMAP\\SERIALCOMM.
+ *
+ * @param[out] out  Receives a newly-allocated array of heap strings.
+ *                  Set to @c NULL if the count is 0 or on failure.
+ * @return          Number of entries (>= 0), or -errno on failure.
+ */
+int serial_list_ports(char ***out);
+
+/**
+ * @brief Free a port list returned by @ref serial_list_ports.
+ *
+ * The array is NULL-terminated, so no separate count is needed.
+ *
+ * @param ports  Array pointer returned by serial_list_ports.
+ */
+void serial_free_port_list(char **ports);
+
+/**
+ * @brief Read the USB VID and PID for a serial device.
+ *
+ * On Linux this is read from sysfs.  On other platforms the function
+ * always returns -1.
+ *
+ * @param device  Device path, e.g. "/dev/ttyACM0".
+ * @param vid     Receives the USB Vendor ID.
+ * @param pid     Receives the USB Product ID.
+ * @return 0 on success, -1 if the information is unavailable.
+ */
+int serial_get_usb_id(const char *device, unsigned int *vid, unsigned int *pid);
+
 #endif /* SERIAL_H */

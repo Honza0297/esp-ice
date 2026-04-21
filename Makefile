@@ -133,7 +133,7 @@ LIB_SRCS := \
 	cmd/idf/ldgen/ldgen.c \
 	cmd/idf/ldgen/lf.c \
 	cmd/idf/partition-table/partition-table.c \
-	cmd/idf/size/chip.c \
+	cmd/idf/size/mem.c \
 	cmd/idf/size/size.c \
 	cmd/image/image.c \
 	cmd/image/create/create.c \
@@ -149,6 +149,8 @@ LIB_SRCS := \
 	cmd/repo/info/info.c \
 	cmd/status/status.c \
 	cmd/target/target.c \
+	cmd/monitor/monitor.c \
+	cmd/target/flash.c \
 	cmd/target/list/list.c \
 	cmd/target/monitor/monitor.c \
 	cmd/tools/tools.c \
@@ -181,7 +183,9 @@ LIB_SRCS := \
 	reader.c \
 	tar.c \
 	toolenv.c \
-	vendor/sha256/sha256.c
+	vendor/sha256/sha256.c \
+	chip.c \
+	esf_port.c
 
 # MAIN_SRCS provide the program entry point.  Excluded from libice.a
 # so that unit tests (and any future external libice consumer) can
@@ -391,7 +395,7 @@ clang-format:
 	pre-commit run clang-format --all-files
 
 # Lint checks and WarningsAsErrors: see .clang-tidy in this directory.
-clang-tidy:
+clang-tidy: | $(VENDOR_STAMP)
 	clang-tidy \
 		--extra-arg="--target=$(TRIPLE)" \
 		$(SRCS) \

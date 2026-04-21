@@ -14,9 +14,12 @@
  */
 #include <dirent.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <time.h>
+#include <unistd.h>
 
 /** Real C-library fputs, captured before platform.h overrides it. */
 static int (*real_fputs)(const char *, FILE *) = fputs;

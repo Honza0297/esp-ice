@@ -24,6 +24,7 @@
 
 #include "alloc.h"
 #include "ar.h"
+#include "chip.h"
 #include "cmake.h"
 #include "cmakecache.h"
 #include "config.h"
@@ -123,6 +124,7 @@ extern const struct cmd_desc cmd_idf_desc;
 extern const struct cmd_desc cmd_image_desc;
 extern const struct cmd_desc cmd_init_desc;
 extern const struct cmd_desc cmd_menuconfig_desc;
+extern const struct cmd_desc cmd_monitor_desc;
 extern const struct cmd_desc cmd_repo_desc;
 extern const struct cmd_desc cmd_status_desc;
 extern const struct cmd_desc cmd_target_desc;
@@ -138,13 +140,6 @@ extern int global_no_color;
 extern int global_no_pager;
 extern int global_version;
 extern int global_verbose;
-
-/* NULL-terminated chip target lists defined in cmd/set-target/set-target.c. */
-extern const char *const ice_supported_targets[];
-extern const char *const ice_preview_targets[];
-
-/** One-line summary for chip @p name, or NULL if the chip is unknown. */
-const char *ice_chip_summary(const char *name);
 
 /**
  * @brief Emit a completion candidate to stdout.
