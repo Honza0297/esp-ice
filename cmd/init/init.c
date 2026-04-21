@@ -355,7 +355,7 @@ static int cmake_configure(void)
 		svec_pushf(&args, "-D%s", defines.v[i]);
 
 	proc.argv = args.v;
-	rc = process_run_progress(&proc, "Configuring", "init-configure");
+	rc = process_run_progress(&proc, "Configuring", "init-configure", NULL);
 
 	if (rc) {
 		struct sbuf cache = SBUF_INIT;
@@ -797,7 +797,7 @@ int cmd_init(int argc, const char **argv)
 
 		proc.argv = cmd.v;
 		rc = process_run_progress(&proc, "Installing tools",
-					  "init-install");
+					  "init-install", NULL);
 		svec_clear(&cmd);
 	}
 	sbuf_release(&manifest);

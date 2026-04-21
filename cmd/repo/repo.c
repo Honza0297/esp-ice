@@ -532,7 +532,7 @@ static int cmd_repo_clone(int argc, const char **argv)
 	parse_options(argc, argv, &cmd_repo_clone_desc);
 
 	proc.argv = cmd.v;
-	rc = process_run_progress(&proc, "Cloning", "repo-clone");
+	rc = process_run_progress(&proc, "Cloning", "repo-clone", NULL);
 	svec_clear(&cmd);
 	return rc;
 }
@@ -665,7 +665,7 @@ static int cmd_repo_pull(int argc, const char **argv)
 	parse_options(argc, argv, &cmd_repo_pull_desc);
 
 	proc.argv = cmd.v;
-	rc = process_run_progress(&proc, "Pulling", "repo-pull");
+	rc = process_run_progress(&proc, "Pulling", "repo-pull", NULL);
 	svec_clear(&cmd);
 	return rc;
 }
@@ -915,7 +915,7 @@ static int cmd_repo_checkout(int argc, const char **argv)
 	}
 
 	proc.argv = cmd.v;
-	rc = process_run_progress(&proc, "Checking out", "repo-checkout");
+	rc = process_run_progress(&proc, "Checking out", "repo-checkout", NULL);
 	svec_clear(&cmd);
 	return rc;
 }

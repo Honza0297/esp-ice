@@ -54,6 +54,27 @@ static const char *const spinner_frames[] = {
 #define PROGRESS_SLOW_HINT_MS 5000
 #define PROGRESS_SLOW_HINT " @[2]{[this can take a while]}"
 
+/*
+ * Default keyword -> color rules for the failure dump.  Covers the
+ * output shapes produced by the tools ice spawns (cmake, ninja, gcc,
+ * git, ld) so a plain dump already looks useful.  Callers can still
+ * supply an on_fail filter to trim which lines reach colorization.
+ */
+static const struct color_rule default_color_rules[] = {
+    COLOR_RULE("fatal error:", "COLOR_BOLD_RED"),
+    COLOR_RULE("FAILED:", "COLOR_BOLD_RED"),
+    COLOR_RULE("CMake Error", "COLOR_RED"),
+    COLOR_RULE("CMake Warning", "COLOR_YELLOW"),
+    COLOR_RULE("undefined reference to", "COLOR_RED"),
+    COLOR_RULE("multiple definition of", "COLOR_RED"),
+    COLOR_RULE("warning:", "COLOR_BOLD_YELLOW"),
+    COLOR_RULE("error:", "COLOR_BOLD_RED"),
+    COLOR_RULE("note:", "COLOR_CYAN"),
+    COLOR_RULE("In file included from", "COLOR_CYAN"),
+    COLOR_RULE("In function", "COLOR_CYAN"),
+    {NULL, 0, NULL},
+};
+
 static int progress_interactive(void) { return isatty(STDOUT_FILENO); }
 
 static void format_elapsed(char *out, size_t cap, unsigned long long ms)
@@ -108,8 +129,44 @@ static void progress_clear(void)
 	fflush(stdout);
 }
 
+/*
+ * On failure (non-verbose): re-read the captured log, pass it through
+ * @p on_fail (or use the whole log if NULL), colorize the result with
+ * the default rule table, and write it to stderr.  Silently skip if
+ * the log can't be read or the filter leaves nothing to show.
+ */
+static void dump_failure_log(const char *log_path, progress_fail_cb on_fail)
+{
+	struct sbuf content = SBUF_INIT;
+	struct sbuf filtered = SBUF_INIT;
+	struct sbuf colored = SBUF_INIT;
+
+	if (sbuf_read_file(&content, log_path) < 0 || content.len == 0)
+		goto done;
+
+	if (on_fail)
+		on_fail(&filtered, content.buf, content.len);
+	else
+		sbuf_add(&filtered, content.buf, content.len);
+
+	if (filtered.len == 0)
+		goto done;
+
+	color_text(&colored, filtered.buf, filtered.len, default_color_rules);
+
+	fputs("\n", stderr);
+	fputs(colored.buf, stderr);
+	if (filtered.buf[filtered.len - 1] != '\n')
+		fputs("\n", stderr);
+
+done:
+	sbuf_release(&colored);
+	sbuf_release(&filtered);
+	sbuf_release(&content);
+}
+
 int process_run_progress(struct process *proc, const char *msg,
-			 const char *slug)
+			 const char *slug, progress_fail_cb on_fail)
 {
 	struct sbuf log_path = SBUF_INIT;
 	FILE *log;
@@ -182,9 +239,14 @@ int process_run_progress(struct process *proc, const char *msg,
 	} else {
 		printf("@r{" CROSS_MARK "} %s @r{failed}. (%s)\n", msg,
 		       elapsed);
-		/* hint() writes to (unbuffered) stderr; flush stdout
-		 * first so the "failed" headline appears above it. */
+		/* hint() and the dump write to (unbuffered) stderr; flush
+		 * stdout first so the "failed" headline appears above
+		 * them. */
 		fflush(stdout);
+		/* Verbose mode already streamed everything live, so skip
+		 * the dump to avoid printing the same output twice. */
+		if (!verbose)
+			dump_failure_log(log_path.buf, on_fail);
 		hint("see %s for details", log_path.buf);
 	}
 
