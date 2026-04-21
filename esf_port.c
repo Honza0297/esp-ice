@@ -236,30 +236,38 @@ static void ice_enter_bootloader(esp_loader_port_t *port)
 		esf_wait_port_reopen(p, 3000);
 	} else {
 		/*
-		 * UnixTightReset — matches esptool's sequence for CP2102/CH340/
-		 * FT232 boards with the standard inverting auto-reset circuit.
+		 * UnixTightReset — matches esp-serial-flasher's Linux port
+		 * (vendor/esp-serial-flasher/src/port/linux_port.c) for
+		 * CP2102/CH340/FT232 boards with the standard inverting
+		 * auto-reset circuit.  Convention: DTR asserted (1) drives
+		 * BOOT low; RTS asserted (1) drives RESET low.
 		 *
-		 * Step 1: DTR=0 RTS=0 — idle
+		 * Step 1: DTR=0 RTS=0 — idle (known state)
 		 * Step 2: DTR=1 RTS=1 — through (1,1) to avoid (0,0)→(0,1)
-		 * glitch Step 3: DTR=0 RTS=1 — RESET low, BOOT high → chip held
-		 * in reset Step 4: DTR=1 RTS=0 — RESET released while BOOT is
-		 * low → bootloader Step 5: DTR=1 RTS=1 — release BOOT, chip
-		 * running in bootloader
+		 *                       glitch
+		 * Step 3: DTR=0 RTS=1 — BOOT high, RESET low → chip held in
+		 *                       reset with BOOT deasserted
+		 * Step 4: DTR=1 RTS=0 — BOOT low, RESET high → RESET released
+		 *                       with BOOT asserted → bootloader
+		 * Step 5: DTR=0 RTS=0 — release BOOT and RESET, chip runs in
+		 *                       bootloader
 		 */
+		serial_set_dtr(p->_serial, 0);
+		serial_set_rts(p->_serial, 0); /* idle */
+
 		serial_set_dtr(p->_serial, 1);
-		serial_set_rts(p->_serial, 1); /* idle / through (1,1) */
+		serial_set_rts(p->_serial, 1); /* through (1,1) */
 
 		serial_set_dtr(p->_serial, 0);
-		serial_set_rts(p->_serial, 1); /* hold RESET, assert BOOT */
+		serial_set_rts(p->_serial, 1); /* BOOT high, RESET low */
 		delay_ms(SERIAL_FLASHER_RESET_HOLD_TIME_MS);
 
 		serial_set_dtr(p->_serial, 1);
-		serial_set_rts(p->_serial,
-			       0); /* release RESET, BOOT still asserted */
+		serial_set_rts(p->_serial, 0); /* BOOT low, RESET high */
 		delay_ms(SERIAL_FLASHER_BOOT_HOLD_TIME_MS);
 
-		serial_set_dtr(p->_serial, 1);
-		serial_set_rts(p->_serial, 1); /* release BOOT */
+		serial_set_dtr(p->_serial, 0);
+		serial_set_rts(p->_serial, 0); /* release BOOT and RESET */
 
 		serial_flush_input(p->_serial); /* discard ROM boot noise */
 	}
