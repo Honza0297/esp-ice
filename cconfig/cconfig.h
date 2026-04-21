@@ -8,8 +8,8 @@
  * @file cconfig.h
  * @brief Core data structures for the Kconfig processor.
  *
- * Defines symbols, expressions, properties, menu nodes, and the
- * symbol table used throughout the cconfig subsystem.
+ * Defines symbols, expressions, properties, menu nodes, the
+ * symbol table, and the lexer used throughout the cconfig subsystem.
  */
 #ifndef CCONFIG_H
 #define CCONFIG_H
@@ -179,5 +179,102 @@ const char *kc_sym_type_name(enum kc_sym_type type);
 
 extern struct kc_symbol *kc_sym_yes;
 extern struct kc_symbol *kc_sym_no;
+
+/* ------------------------------------------------------------------
+ *  Token types
+ * ------------------------------------------------------------------ */
+
+enum kc_token_type {
+	/* Structural */
+	KC_TOK_EOF,
+	KC_TOK_NEWLINE,
+
+	/* Literals */
+	KC_TOK_WORD,            /* identifier or unquoted word */
+	KC_TOK_QUOTED,          /* quoted string literal (unescaped content) */
+	KC_TOK_HELP_TEXT,       /* help text block */
+
+	/* Keywords */
+	KC_TOK_MAINMENU,
+	KC_TOK_MENU,
+	KC_TOK_ENDMENU,
+	KC_TOK_CONFIG,
+	KC_TOK_MENUCONFIG,
+	KC_TOK_CHOICE,
+	KC_TOK_ENDCHOICE,
+	KC_TOK_IF,
+	KC_TOK_ENDIF,
+	KC_TOK_COMMENT,
+	KC_TOK_SOURCE,
+	KC_TOK_RSOURCE,
+	KC_TOK_OSOURCE,
+	KC_TOK_ORSOURCE,
+	KC_TOK_DEPENDS,
+	KC_TOK_ON,
+	KC_TOK_DEFAULT,
+	KC_TOK_SELECT,
+	KC_TOK_IMPLY,
+	KC_TOK_RANGE,
+	KC_TOK_BOOL,
+	KC_TOK_INT,
+	KC_TOK_STRING,
+	KC_TOK_HEX,
+	KC_TOK_FLOAT,
+	KC_TOK_TRISTATE,
+	KC_TOK_PROMPT,
+	KC_TOK_HELP,
+	KC_TOK_VISIBLE,
+	KC_TOK_OPTIONAL,
+	KC_TOK_SET,
+	KC_TOK_WARNING,
+	KC_TOK_DEF_BOOL,
+	KC_TOK_DEF_INT,
+	KC_TOK_DEF_HEX,
+	KC_TOK_DEF_STRING,
+	KC_TOK_DEF_TRISTATE,
+	KC_TOK_DEF_FLOAT,
+
+	/* Operators */
+	KC_TOK_ASSIGN,          /* = */
+	KC_TOK_NOT_EQUAL,       /* != */
+	KC_TOK_LESS,            /* < */
+	KC_TOK_GREATER,         /* > */
+	KC_TOK_LESS_EQ,         /* <= */
+	KC_TOK_GREATER_EQ,      /* >= */
+	KC_TOK_AND,             /* && */
+	KC_TOK_OR,              /* || */
+	KC_TOK_NOT,             /* ! */
+	KC_TOK_LPAREN,          /* ( */
+	KC_TOK_RPAREN,          /* ) */
+
+	/* Error */
+	KC_TOK_ERROR            /* lexer error (unterminated string, bad char) */
+};
+
+/* ------------------------------------------------------------------
+ *  Lexer
+ * ------------------------------------------------------------------ */
+
+struct kc_lexer {
+	const char *input;      /* full input buffer (NUL-terminated) */
+	const char *pos;        /* current scan position */
+	const char *file;       /* filename for error reporting */
+	int line;               /* current line number (1-based) */
+	int col;                /* current column (1-based) */
+	int help_mode;          /* set after seeing 'help' keyword */
+};
+
+struct kc_token {
+	enum kc_token_type type;
+	const char *value;      /* token text (NUL-terminated, owned) */
+	const char *file;       /* source file (borrowed from lexer) */
+	int line;               /* line where token starts */
+	int col;                /* column where token starts */
+};
+
+void kc_lexer_init(struct kc_lexer *lex, const char *input, const char *file);
+void kc_lexer_next(struct kc_lexer *lex, struct kc_token *tok);
+void kc_token_release(struct kc_token *tok);
+const char *kc_token_type_name(enum kc_token_type type);
 
 #endif /* CCONFIG_H */
