@@ -51,6 +51,28 @@ struct kc_expr *kc_expr_alloc_comp(enum kc_expr_type type,
 	return kc_expr_alloc(type, left, right);
 }
 
+struct kc_expr *kc_expr_copy(const struct kc_expr *src)
+{
+	struct kc_expr *copy;
+
+	if (!src)
+		return NULL;
+
+	copy = xcalloc(1, sizeof(*copy));
+	copy->type = src->type;
+
+	if (src->type == KC_E_SYMBOL) {
+		copy->data.sym = src->data.sym;
+	} else {
+		copy->data.children.left =
+			kc_expr_copy(src->data.children.left);
+		copy->data.children.right =
+			kc_expr_copy(src->data.children.right);
+	}
+
+	return copy;
+}
+
 void kc_expr_free(struct kc_expr *expr)
 {
 	if (!expr)
