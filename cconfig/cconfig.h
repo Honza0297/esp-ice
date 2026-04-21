@@ -36,11 +36,11 @@ enum kc_sym_type {
  *  Symbol flags
  * ------------------------------------------------------------------ */
 
-#define KC_SYM_CHOICE    (1 << 0)   /* symbol is a choice group */
-#define KC_SYM_CHOICEVAL (1 << 1)   /* symbol is a member of a choice */
-#define KC_SYM_CONST     (1 << 2)   /* constant symbol (y/n) */
-#define KC_SYM_AUTO      (1 << 3)   /* automatically created by parser */
-#define KC_SYM_VALID     (1 << 4)   /* value has been computed */
+#define KC_SYM_CHOICE (1 << 0)	  /* symbol is a choice group */
+#define KC_SYM_CHOICEVAL (1 << 1) /* symbol is a member of a choice */
+#define KC_SYM_CONST (1 << 2)	  /* constant symbol (y/n) */
+#define KC_SYM_AUTO (1 << 3)	  /* automatically created by parser */
+#define KC_SYM_VALID (1 << 4)	  /* value has been computed */
 
 /* ------------------------------------------------------------------
  *  Expression AST
@@ -81,8 +81,7 @@ struct kc_expr {
 	} data;
 };
 
-struct kc_expr *kc_expr_alloc(enum kc_expr_type type,
-			      struct kc_expr *left,
+struct kc_expr *kc_expr_alloc(enum kc_expr_type type, struct kc_expr *left,
 			      struct kc_expr *right);
 struct kc_expr *kc_expr_alloc_sym(struct kc_symbol *sym);
 struct kc_expr *kc_expr_alloc_comp(enum kc_expr_type type,
@@ -148,7 +147,7 @@ struct kc_menu_node {
 	char *help;
 	const char *file;
 	int line;
-	int is_menuconfig;  /* boolean: 1 if menuconfig entry, 0 otherwise */
+	int is_menuconfig; /* boolean: 1 if menuconfig entry, 0 otherwise */
 };
 
 /* ------------------------------------------------------------------
@@ -169,14 +168,14 @@ struct kc_intern_str {
 struct kc_variable {
 	char *name;
 	char *value;
-	int is_immediate;               /* := (1) vs = (0) */
+	int is_immediate; /* := (1) vs = (0) */
 	struct kc_variable *next;
 };
 
 struct kc_symtab {
 	struct kc_symbol *buckets[KC_SYMTAB_BUCKETS];
 	struct kc_intern_str *interned_strings;
-	struct kc_variable *variables;   /* Kconfig macro variable list */
+	struct kc_variable *variables; /* Kconfig macro variable list */
 	unsigned int choice_counter;
 	int source_depth;
 };
@@ -213,9 +212,9 @@ enum kc_token_type {
 	KC_TOK_NEWLINE,
 
 	/* Literals */
-	KC_TOK_WORD,            /* identifier or unquoted word */
-	KC_TOK_QUOTED,          /* quoted string literal (unescaped content) */
-	KC_TOK_HELP_TEXT,       /* help text block */
+	KC_TOK_WORD,	  /* identifier or unquoted word */
+	KC_TOK_QUOTED,	  /* quoted string literal (unescaped content) */
+	KC_TOK_HELP_TEXT, /* help text block */
 
 	/* Keywords */
 	KC_TOK_MAINMENU,
@@ -258,21 +257,21 @@ enum kc_token_type {
 	KC_TOK_DEF_FLOAT,
 
 	/* Operators */
-	KC_TOK_ASSIGN,          /* = */
-	KC_TOK_COLON_ASSIGN,    /* := */
-	KC_TOK_NOT_EQUAL,       /* != */
-	KC_TOK_LESS,            /* < */
-	KC_TOK_GREATER,         /* > */
-	KC_TOK_LESS_EQ,         /* <= */
-	KC_TOK_GREATER_EQ,      /* >= */
-	KC_TOK_AND,             /* && */
-	KC_TOK_OR,              /* || */
-	KC_TOK_NOT,             /* ! */
-	KC_TOK_LPAREN,          /* ( */
-	KC_TOK_RPAREN,          /* ) */
+	KC_TOK_ASSIGN,	     /* = */
+	KC_TOK_COLON_ASSIGN, /* := */
+	KC_TOK_NOT_EQUAL,    /* != */
+	KC_TOK_LESS,	     /* < */
+	KC_TOK_GREATER,	     /* > */
+	KC_TOK_LESS_EQ,	     /* <= */
+	KC_TOK_GREATER_EQ,   /* >= */
+	KC_TOK_AND,	     /* && */
+	KC_TOK_OR,	     /* || */
+	KC_TOK_NOT,	     /* ! */
+	KC_TOK_LPAREN,	     /* ( */
+	KC_TOK_RPAREN,	     /* ) */
 
 	/* Error */
-	KC_TOK_ERROR            /* lexer error (unterminated string, bad char) */
+	KC_TOK_ERROR /* lexer error (unterminated string, bad char) */
 };
 
 /* ------------------------------------------------------------------
@@ -280,20 +279,20 @@ enum kc_token_type {
  * ------------------------------------------------------------------ */
 
 struct kc_lexer {
-	const char *input;      /* full input buffer (NUL-terminated) */
-	const char *pos;        /* current scan position */
-	const char *file;       /* filename for error reporting */
-	int line;               /* current line number (1-based) */
-	int col;                /* current column (1-based) */
-	int help_mode;          /* set after seeing 'help' keyword */
+	const char *input; /* full input buffer (NUL-terminated) */
+	const char *pos;   /* current scan position */
+	const char *file;  /* filename for error reporting */
+	int line;	   /* current line number (1-based) */
+	int col;	   /* current column (1-based) */
+	int help_mode;	   /* set after seeing 'help' keyword */
 };
 
 struct kc_token {
 	enum kc_token_type type;
-	const char *value;      /* token text (NUL-terminated, owned) */
-	const char *file;       /* source file (borrowed from lexer) */
-	int line;               /* line where token starts */
-	int col;                /* column where token starts */
+	const char *value; /* token text (NUL-terminated, owned) */
+	const char *file;  /* source file (borrowed from lexer) */
+	int line;	   /* line where token starts */
+	int col;	   /* column where token starts */
 };
 
 void kc_lexer_init(struct kc_lexer *lex, const char *input, const char *file);
@@ -330,8 +329,8 @@ void kc_menu_free(struct kc_menu_node *root);
  *  Undefined variables expand to the empty string.
  * ------------------------------------------------------------------ */
 
-void kc_preproc_set(struct kc_symtab *tab, const char *name,
-		    const char *value, int is_immediate);
+void kc_preproc_set(struct kc_symtab *tab, const char *name, const char *value,
+		    int is_immediate);
 char *kc_preproc_expand(const struct kc_symtab *tab, const char *raw);
 void kc_preproc_release(struct kc_symtab *tab);
 
@@ -350,5 +349,49 @@ const char *kc_sym_get_string(const struct kc_symbol *sym);
 void kc_sym_calc_value(struct kc_symbol *sym);
 void kc_finalize(struct kc_menu_node *root, struct kc_symtab *tab);
 int kc_menu_visible(const struct kc_menu_node *node);
+
+/* ------------------------------------------------------------------
+ *  Deferred diagnostic reporting
+ *
+ *  Non-fatal diagnostics (invalid defaults, multiple definitions,
+ *  deprecated options, range violations, etc.) are collected during
+ *  parsing and evaluation, then flushed to stderr at the end.  Fatal
+ *  errors (syntax errors, missing required source) still use die()
+ *  for immediate termination.
+ * ------------------------------------------------------------------ */
+
+enum kc_report_level { KC_REPORT_ERROR, KC_REPORT_WARNING, KC_REPORT_INFO };
+
+struct kc_report_msg {
+	enum kc_report_level level;
+	const char *file; /* borrowed — must outlive the report */
+	int line;
+	char *text;
+	size_t seq; /* insertion order for stable sort */
+};
+
+struct kc_report {
+	struct kc_report_msg *msgs;
+	size_t count;
+	size_t alloc;
+	int error_count;
+};
+
+void kc_report_init(struct kc_report *rpt);
+void kc_report_release(struct kc_report *rpt);
+
+/**
+ * kc_report_flush prints all collected messages to stderr sorted by
+ * file:line (stable — insertion order preserved for ties).  Returns
+ * the number of errors.  Not idempotent: calling twice prints twice.
+ */
+void kc_report_error(struct kc_report *rpt, const char *file, int line,
+		     const char *fmt, ...);
+void kc_report_warning(struct kc_report *rpt, const char *file, int line,
+		       const char *fmt, ...);
+void kc_report_info(struct kc_report *rpt, const char *file, int line,
+		    const char *fmt, ...);
+int kc_report_flush(struct kc_report *rpt);
+int kc_report_has_errors(const struct kc_report *rpt);
 
 #endif /* CCONFIG_H */
