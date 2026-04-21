@@ -5,7 +5,7 @@
  */
 
 /**
- * @file cmd/image/merge.c
+ * @file cmd/image/merge/merge.c
  * @brief "ice image merge" -- concatenate flash images at offsets.
  *
  * Drop-in replacement for `esptool merge-bin` / the older

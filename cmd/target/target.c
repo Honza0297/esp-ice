@@ -5,19 +5,21 @@
  */
 
 /**
- * @file target.c
+ * @file cmd/target/target.c
  * @brief `ice target` -- chip-bound operations (esptool replacement).
  *
- * Today only `list` lives here (static enumeration of supported
- * chips).  This namespace will grow esptool-replacement subcommands
- * (flash, erase, reset, info, ...) as the native rewrites land --
- * each operates on a connected chip via an explicit serial port and
- * does not consume project state.
+ * Operates on a connected chip via an explicit serial port and does
+ * not consume project state.  Today @b{list} and @b{monitor} live
+ * here; the esptool-replacement verbs (flash, erase, reset, info,
+ * ...) will land as the native rewrites do.
  *
  * Setting the project's chip is done by `ice init <chip> <idf>`,
  * not from this namespace.
  */
 #include "ice.h"
+
+extern const struct cmd_desc cmd_target_list_desc;
+extern const struct cmd_desc cmd_target_monitor_desc;
 
 /*
  * Mirrors esp-idf/tools/idf_py_actions/constants.py.  Preview targets
@@ -66,40 +68,6 @@ const char *ice_chip_summary(const char *name)
 }
 
 /* ------------------------------------------------------------------ */
-/* ice target list                                                     */
-/* ------------------------------------------------------------------ */
-
-static int cmd_target_list(int argc, const char **argv);
-
-static const struct cmd_manual target_list_manual = {
-    .name = "ice target list",
-};
-
-static const struct option cmd_target_list_opts[] = {OPT_END()};
-
-static const struct cmd_desc cmd_target_list_desc = {
-    .name = "list",
-    .fn = cmd_target_list,
-    .opts = cmd_target_list_opts,
-    .manual = &target_list_manual,
-};
-
-static int cmd_target_list(int argc, const char **argv)
-{
-	parse_options(argc, argv, &cmd_target_list_desc);
-
-	printf("Supported targets:\n");
-	for (const char *const *t = ice_supported_targets; *t; t++)
-		printf("  %s\n", *t);
-
-	printf("\nPreview targets (use 'ice init --preview' to enable):\n");
-	for (const char *const *t = ice_preview_targets; *t; t++)
-		printf("  %s\n", *t);
-
-	return 0;
-}
-
-/* ------------------------------------------------------------------ */
 /* ice target -- namespace dispatcher                                  */
 /* ------------------------------------------------------------------ */
 
@@ -112,19 +80,21 @@ static const struct cmd_manual target_manual = {
 
 	.description =
 	H_PARA("Operations on a connected chip via an explicit serial "
-	       "port -- the future home of esptool-replacement commands "
-	       "(flash, erase, reset, info, ...).  Today only @b{list} "
-	       "lives here; the rest land as the native rewrites do.")
+	       "port -- the home of @b{monitor} today and the future "
+	       "home of esptool-replacement commands (flash, erase, "
+	       "reset, info, ...).")
 	H_PARA("Setting the project's chip is done by "
 	       "@b{ice init <chip> <idf>}, not from this namespace."),
 
 	.examples =
-	H_EXAMPLE("ice target list"),
+	H_EXAMPLE("ice target list")
+	H_EXAMPLE("ice target monitor -p /dev/ttyUSB0"),
 };
 /* clang-format on */
 
 static const struct cmd_desc *const target_subs[] = {
     &cmd_target_list_desc,
+    &cmd_target_monitor_desc,
     NULL,
 };
 

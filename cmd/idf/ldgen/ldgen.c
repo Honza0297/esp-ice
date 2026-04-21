@@ -5,14 +5,14 @@
  */
 
 /**
- * @file ldgen.c
+ * @file cmd/idf/ldgen/ldgen.c
  * @brief Linker script generation from fragment files.
  */
 #include "ice.h"
 #include "lf.h"
 
 /* clang-format off */
-static const struct cmd_manual ldgen_manual = {
+static const struct cmd_manual idf_ldgen_manual = {
 	.name = "ice idf ldgen",
 	.summary = "analyse linker fragment (.lf) files",
 
@@ -44,21 +44,23 @@ static const struct cmd_manual ldgen_manual = {
 /* File-scope so the table can be const and reachable via cmd_struct.opts. */
 static int opt_dump;
 
-static const struct option cmd_ldgen_opts[] = {
+static const struct option cmd_idf_ldgen_opts[] = {
     OPT_BOOL('d', "dump", &opt_dump, "dump parsed AST"),
     OPT_END(),
 };
 
-const struct cmd_desc cmd_ldgen_desc = {
+int cmd_idf_ldgen(int argc, const char **argv);
+
+const struct cmd_desc cmd_idf_ldgen_desc = {
     .name = "ldgen",
-    .fn = cmd_ldgen,
-    .opts = cmd_ldgen_opts,
-    .manual = &ldgen_manual,
+    .fn = cmd_idf_ldgen,
+    .opts = cmd_idf_ldgen_opts,
+    .manual = &idf_ldgen_manual,
 };
 
-int cmd_ldgen(int argc, const char **argv)
+int cmd_idf_ldgen(int argc, const char **argv)
 {
-	argc = parse_options(argc, argv, &cmd_ldgen_desc);
+	argc = parse_options(argc, argv, &cmd_idf_ldgen_desc);
 	if (argc < 1)
 		die("no input files; see 'ice idf ldgen --help'");
 

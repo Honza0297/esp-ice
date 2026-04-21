@@ -7,12 +7,15 @@ STAGE ?= stage
 CFLAGS ?= -Wall -Werror -std=c99 -pedantic
 LDFLAGS ?=
 
-# Tests live per-command under cmd/<name>/t/, with shared TAP helpers
+# Tests live per-command under cmd/<path>/t/, with shared TAP helpers
 # (tap.sh, tap.h) and any cross-cutting tests in the top-level t/.
-# Override T on the command line to run a subset, e.g.
+# Covers both top-level commands (cmd/<name>/t/) and namespace
+# subcommands (cmd/<ns>/<name>/t/).  Override T on the command line
+# to run a subset, e.g.
 #   make test T=cmd/completion/t
+#   make test T=cmd/idf/size/t
 #   make test T=cmd/completion/t/0001-completion.t
-T ?= $(wildcard cmd/*/t) t
+T ?= $(wildcard cmd/*/t) $(wildcard cmd/*/*/t) t
 
 # Run prove with one worker per core by default; override PFLAGS to
 # re-serialize (PFLAGS=-j1) or to add verbosity (PFLAGS="-j4 -v").
@@ -48,7 +51,7 @@ BUILD_DEFINES = -DVERSION=\"$(VERSION)\" -DICE_PLATFORM_OS=\"$(S)\" -DICE_PLATFO
 # Project root on the include search path so sources under cmd/<name>/
 # and platform/<os>/ can #include "ice.h" directly instead of reaching
 # up with "../../ice.h".  Quoted-form includes still find sibling
-# headers (e.g. cmd/ldgen/lf.h) in the source file's own directory.
+# headers (e.g. cmd/idf/ldgen/lf.h) in the source file's own directory.
 BUILD_CFLAGS += -I$(CURDIR)
 
 # SANITIZE=1: enable AddressSanitizer for the whole build (libice,
@@ -118,30 +121,40 @@ LIB_SRCS := \
 	ar.c \
 	cmake.c \
 	cmakecache.c \
+	cmd/__complete/__complete.c \
 	cmd/build/build.c \
 	cmd/clean/clean.c \
 	cmd/completion/completion.c \
 	cmd/config/config.c \
-	cmd/configdep/configdep.c \
 	cmd/flash/flash.c \
 	cmd/help/help.c \
-	cmd/image/image.c \
-	cmd/image/create.c \
-	cmd/image/info.c \
-	cmd/image/merge.c \
 	cmd/idf/idf.c \
+	cmd/idf/configdep/configdep.c \
+	cmd/idf/ldgen/ldgen.c \
+	cmd/idf/ldgen/lf.c \
+	cmd/idf/partition-table/partition-table.c \
+	cmd/idf/size/chip.c \
+	cmd/idf/size/size.c \
+	cmd/image/image.c \
+	cmd/image/create/create.c \
+	cmd/image/info/info.c \
+	cmd/image/merge/merge.c \
 	cmd/init/init.c \
-	cmd/ldgen/ldgen.c \
-	cmd/ldgen/lf.c \
-	cmd/monitor/monitor.c \
 	cmd/menuconfig/menuconfig.c \
-	cmd/partition-table/partition-table.c \
 	cmd/repo/repo.c \
-	cmd/target/target.c \
-	cmd/tools/tools.c \
-	cmd/size/chip.c \
-	cmd/size/size.c \
+	cmd/repo/clone/clone.c \
+	cmd/repo/pull/pull.c \
+	cmd/repo/list/list.c \
+	cmd/repo/checkout/checkout.c \
+	cmd/repo/info/info.c \
 	cmd/status/status.c \
+	cmd/target/target.c \
+	cmd/target/list/list.c \
+	cmd/target/monitor/monitor.c \
+	cmd/tools/tools.c \
+	cmd/tools/install/install.c \
+	cmd/tools/list/list.c \
+	cmd/tools/info/info.c \
 	config.c \
 	csv.c \
 	fs.c \

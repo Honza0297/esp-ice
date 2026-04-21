@@ -21,51 +21,57 @@
 
 #include "json.h"
 
-struct find_version_ctx {
-	const char *parent;
-	struct sbuf *result;
-	int found;
-};
-
-static int find_version_cb(const char *name, void *ud)
-{
-	struct find_version_ctx *ctx = ud;
-	struct sbuf check = SBUF_INIT;
-
-	sbuf_addf(&check, "%s/%s", ctx->parent, name);
-	if (is_directory(check.buf) && !ctx->found) {
-		sbuf_addf(ctx->result, "%s/%s", ctx->parent, name);
-		ctx->found = 1;
-	}
-	sbuf_release(&check);
-	return ctx->found; /* stop after first */
-}
-
 /**
- * Find the installed version directory for a tool.
- * Returns a pointer into @p buf (caller owns), or NULL if not installed.
+ * Pick the best installed version of @p tool for this IDF.  Prefers
+ * the @c "recommended" version if its directory exists; otherwise
+ * falls back to the highest-named installed @c "supported" version;
+ * otherwise NULL.  Mirrors @c get_preferred_installed_version in
+ * @b{esp-idf/tools/idf_tools.py} so a minor drift in tools.json (e.g.
+ * the recommended version bumps between @b{ice init} runs) keeps an
+ * older-but-still-supported install usable.  @c "deprecated" entries
+ * are ignored.
+ *
+ * The candidate set comes from the IDF's own tools.json, not from
+ * @c readdir on the tools directory -- a sibling toolchain left over
+ * from a previous @b{ice init} against a different IDF won't appear
+ * here, even if it happens to be alphabetically first on disk.
+ *
+ * Returned pointer is owned by the JSON tree.
  */
-static const char *find_installed_version(const char *tools_dir,
-					  const char *tool_name,
-					  struct sbuf *buf)
+static const char *preferred_installed_version(const char *tools_dir,
+					       const char *tool_name,
+					       struct json_value *tool)
 {
-	struct sbuf dir = SBUF_INIT;
-	struct find_version_ctx ctx;
+	struct json_value *versions = json_get(tool, "versions");
+	int n = json_array_size(versions);
+	const char *best = NULL;
+	struct sbuf path = SBUF_INIT;
 
-	sbuf_addf(&dir, "%s/tools/%s", tools_dir, tool_name);
+	for (int i = 0; i < n; i++) {
+		struct json_value *v = json_array_at(versions, i);
+		const char *status = json_as_string(json_get(v, "status"));
+		const char *name = json_as_string(json_get(v, "name"));
 
-	if (!is_directory(dir.buf)) {
-		sbuf_release(&dir);
-		return NULL;
+		if (!name || !status)
+			continue;
+
+		sbuf_reset(&path);
+		sbuf_addf(&path, "%s/tools/%s/%s", tools_dir, tool_name, name);
+		if (!is_directory(path.buf))
+			continue;
+
+		if (!strcmp(status, "recommended")) {
+			best = name;
+			break;
+		}
+		if (!strcmp(status, "supported")) {
+			if (!best || strcmp(name, best) > 0)
+				best = name;
+		}
 	}
 
-	ctx.parent = dir.buf;
-	ctx.result = buf;
-	ctx.found = 0;
-	dir_foreach(dir.buf, find_version_cb, &ctx);
-
-	sbuf_release(&dir);
-	return ctx.found ? buf->buf : NULL;
+	sbuf_release(&path);
+	return best;
 }
 
 void setup_tool_env(const char *idf_path)
@@ -101,17 +107,22 @@ void setup_tool_env(const char *idf_path)
 		struct json_value *export_paths =
 		    json_get(tool, "export_paths");
 		struct json_value *export_vars = json_get(tool, "export_vars");
+		const char *ver_name;
 		struct sbuf ver_path = SBUF_INIT;
 		const char *installed;
 
 		if (!name)
 			continue;
 
-		installed = find_installed_version(tools_dir, name, &ver_path);
-		if (!installed) {
+		ver_name = preferred_installed_version(tools_dir, name, tool);
+		if (!ver_name) {
 			sbuf_release(&ver_path);
 			continue;
 		}
+
+		sbuf_addf(&ver_path, "%s/tools/%s/%s", tools_dir, name,
+			  ver_name);
+		installed = ver_path.buf;
 
 		/* Append export_paths entries to PATH prepend string. */
 		for (int j = 0; j < json_array_size(export_paths); j++) {

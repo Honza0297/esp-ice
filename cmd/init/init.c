@@ -236,16 +236,14 @@ static char *resolve_idf_arg(const char *arg)
 /**
  * Wipe the contents of @p build_dir.
  *
- * Safety checks (kept verbatim from the old `ice fullclean`): refuse
- * to clean a directory that does not have @b{CMakeCache.txt} or that
- * contains source-tree markers (@b{CMakeLists.txt}, @b{.git},
- * @b{.svn}) -- guards against a misconfigured build-dir.
+ * Refuse only if @p build_dir looks like a source tree
+ * (@b{CMakeLists.txt}, @b{.git}, @b{.svn}) -- guards against a
+ * misconfigured build-dir pointing at the project itself.
  */
 static int wipe_build_dir(const char *build_dir)
 {
 	DIR *dir;
 	struct dirent *de;
-	int has_cache = 0;
 	int n_entries = 0;
 
 	if (access(build_dir, F_OK) != 0)
@@ -259,8 +257,6 @@ static int wipe_build_dir(const char *build_dir)
 		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
 			continue;
 		n_entries++;
-		if (!strcmp(de->d_name, "CMakeCache.txt"))
-			has_cache = 1;
 		if (!strcmp(de->d_name, "CMakeLists.txt") ||
 		    !strcmp(de->d_name, ".git") ||
 		    !strcmp(de->d_name, ".svn")) {
@@ -273,10 +269,6 @@ static int wipe_build_dir(const char *build_dir)
 
 	if (n_entries == 0)
 		return 0;
-	if (!has_cache)
-		die("'%s' does not look like a cmake build directory "
-		    "(no CMakeCache.txt); delete it manually",
-		    build_dir);
 
 	return rmtree(build_dir, global_verbose) < 0 ? -1 : 0;
 }
@@ -352,11 +344,18 @@ static int cmake_configure(void)
 	svec_push(&args, generator);
 	svec_push(&args, "-B");
 	svec_push(&args, build_dir);
+	/*
+	 * Short-circuit IDF's `__build_check_python` -- ice runs the build
+	 * without a Python venv, so the dependency check would fail on the
+	 * very first import.  The property is consulted in project.cmake
+	 * before the check runs, so setting it via -D is enough.
+	 */
+	svec_push(&args, "-DPYTHON_DEPS_CHECKED=1");
 	for (size_t i = 0; i < defines.nr; i++)
 		svec_pushf(&args, "-D%s", defines.v[i]);
 
 	proc.argv = args.v;
-	rc = process_run_progress(&proc, "Configuring", "init-configure");
+	rc = process_run_progress(&proc, "Configuring", "init-configure", NULL);
 
 	if (rc) {
 		struct sbuf cache = SBUF_INIT;
@@ -506,14 +505,14 @@ static const char *back_n_tokens(const char *p, const char *line_start, int n)
 /*
  * Replace the esptool elf2image invocation on a COMMAND line with
  * the native `ice image create` equivalent.  IDF's COMMAND line has
- * the form:
+ * one of two shapes:
  *
- *   cd <dir> && <python> -m esptool --chip <chip> elf2image <args> \
- *       -o <out.bin> <in.elf> && cmake -E echo "..." && ...
+ *   cd <dir> && <python> -m esptool --chip <chip> elf2image ...   (module)
+ *   cd <dir> && <python> <esptool.py> --chip <chip> elf2image ... (script)
  *
- * We rewrite `<python> -m esptool` to `ice image create`, then
- * re-emit the captured `--chip <chip>` argument (which lives between
- * `esptool` and `elf2image`) plus everything after `elf2image`.
+ * v5.3 uses the script form; newer trees sometimes use -m.  Either
+ * way we need to land on the python invocation so the preceding
+ * `cd <dir> && ` chain is preserved when we splice in the ice call.
  */
 static void patch_elf2image_line(struct sbuf *out, const char *line, size_t len)
 {
@@ -537,7 +536,17 @@ static void patch_elf2image_line(struct sbuf *out, const char *line, size_t len)
 	const char *etool_start = etool;
 	while (etool_start > line && etool_start[-1] != ' ')
 		etool_start--;
-	const char *invoke_start = back_n_tokens(etool_start, line, 2);
+
+	/*
+	 * One token back from @esptool_start is either "-m" (module
+	 * form; python is one further back) or the python invocation
+	 * itself (script form).
+	 */
+	const char *prev = back_n_tokens(etool_start, line, 1);
+	int module_form = prev + 2 < etool_start && prev[0] == '-' &&
+			  prev[1] == 'm' && prev[2] == ' ';
+	const char *invoke_start =
+	    module_form ? back_n_tokens(etool_start, line, 2) : prev;
 
 	const char *chip_arg =
 	    mem_find(etool + elen, e2i, chip_needle, chip_nlen);
@@ -790,7 +799,7 @@ int cmd_init(int argc, const char **argv)
 
 		proc.argv = cmd.v;
 		rc = process_run_progress(&proc, "Installing tools",
-					  "init-install");
+					  "init-install", NULL);
 		svec_clear(&cmd);
 	}
 	sbuf_release(&manifest);

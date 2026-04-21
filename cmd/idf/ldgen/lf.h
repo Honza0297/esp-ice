@@ -22,7 +22,7 @@
  * both inside entry blocks and at the top level wrapping entire
  * fragments.  They are stored in the AST and evaluated in a later pass.
  *
- * See cmd/ldgen/README.md for the formal grammar.
+ * See cmd/idf/ldgen/README.md for the formal grammar.
  */
 #ifndef LF_H
 #define LF_H

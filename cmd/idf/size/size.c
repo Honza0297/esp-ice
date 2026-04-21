@@ -5,7 +5,7 @@
  */
 
 /**
- * @file size.c
+ * @file cmd/idf/size/size.c
  * @brief Memory usage analysis from linker map files.
  *
  * Parses a GCC/LD linker map file and builds a memory map that shows
@@ -28,7 +28,7 @@
 #include "ice.h"
 
 /* clang-format off */
-static const struct cmd_manual size_manual = {
+static const struct cmd_manual idf_size_manual = {
 	.name = "ice idf size",
 	.summary = "analyse firmware memory usage by region",
 
@@ -67,18 +67,20 @@ static const struct cmd_manual size_manual = {
 static const char *opt_target;
 static const char *opt_format = "table";
 
-static const struct option cmd_size_opts[] = {
+static const struct option cmd_idf_size_opts[] = {
     OPT_STRING('t', "target", &opt_target, "chip", "target chip (e.g. esp32s3)",
 	       NULL),
     OPT_STRING(0, "format", &opt_format, "fmt", "output format (table)", NULL),
     OPT_END(),
 };
 
-const struct cmd_desc cmd_size_desc = {
+int cmd_idf_size(int argc, const char **argv);
+
+const struct cmd_desc cmd_idf_size_desc = {
     .name = "size",
-    .fn = cmd_size,
-    .opts = cmd_size_opts,
-    .manual = &size_manual,
+    .fn = cmd_idf_size,
+    .opts = cmd_idf_size_opts,
+    .manual = &idf_size_manual,
 };
 
 /* ---- helpers -------------------------------------------------------- */
@@ -581,9 +583,9 @@ static void output_table(struct memmap *mm)
 
 /* ---- command -------------------------------------------------------- */
 
-int cmd_size(int argc, const char **argv)
+int cmd_idf_size(int argc, const char **argv)
 {
-	argc = parse_options(argc, argv, &cmd_size_desc);
+	argc = parse_options(argc, argv, &cmd_idf_size_desc);
 	if (argc < 1)
 		die("no map file; see 'ice idf size --help'");
 

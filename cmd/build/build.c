@@ -65,6 +65,42 @@ const struct cmd_desc cmd_build_desc = {
     .manual = &build_manual,
 };
 
+/*
+ * Failure filter for "ice build": drop everything before the first
+ * ninja "FAILED:" line (partition-table echoes, Python warnings,
+ * "[N/M]" progress, cmake "-- " status) and then emit the rest
+ * unchanged -- that range contains the offending command line,
+ * compiler/linker diagnostics, any follow-up "FAILED:" blocks, and
+ * ninja's final "build stopped" summary, which is almost always the
+ * signal the user needs.  Falls back to the whole log if no
+ * "FAILED:" is found (e.g. a hard cmake re-configure error).
+ */
+static void build_fail_filter(struct sbuf *out, const char *log, size_t len)
+{
+	static const char marker[] = "FAILED:";
+	static const size_t mlen = sizeof(marker) - 1;
+	const char *p = log;
+	const char *end = log + len;
+	const char *failed = NULL;
+
+	/* Scan linewise so "FAILED:" only matches at the start of a line. */
+	while (p < end) {
+		const char *nl = memchr(p, '\n', end - p);
+		size_t line_len = (nl ? (size_t)(nl - p) : (size_t)(end - p));
+
+		if (line_len >= mlen && !memcmp(p, marker, mlen)) {
+			failed = p;
+			break;
+		}
+		p = nl ? nl + 1 : end;
+	}
+
+	if (failed)
+		sbuf_add(out, failed, (size_t)(end - failed));
+	else
+		sbuf_add(out, log, len);
+}
+
 int cmd_build(int argc, const char **argv)
 {
 	const char *name;
@@ -89,5 +125,6 @@ int cmd_build(int argc, const char **argv)
 	cmake_argv[5] = NULL;
 
 	proc.argv = cmake_argv;
-	return process_run_progress(&proc, "Building", "build");
+	return process_run_progress(&proc, "Building", "build",
+				    build_fail_filter);
 }

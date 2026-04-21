@@ -5,8 +5,8 @@
  */
 
 /**
- * @file cmd/monitor/monitor.c
- * @brief The "ice idf monitor" subcommand -- serial port monitor.
+ * @file cmd/target/monitor/monitor.c
+ * @brief The "ice target monitor" subcommand -- serial port monitor.
  *
  * Connects to a serial port, displays device output in real time,
  * and forwards keyboard input to the device.  Press Ctrl-] to exit.
@@ -18,7 +18,7 @@ static const char *opt_port;
 static int opt_baud = 115200;
 
 /* clang-format off */
-static const struct option cmd_monitor_opts[] = {
+static const struct option cmd_target_monitor_opts[] = {
 	OPT_STRING_CFG('p', "port", &opt_port, "path",
 		       "serial.port", "ESPPORT",
 		       "serial port device path",
@@ -31,8 +31,10 @@ static const struct option cmd_monitor_opts[] = {
 	OPT_END(),
 };
 
-static const struct cmd_manual monitor_manual = {
-	.name = "ice idf monitor",
+int cmd_target_monitor(int argc, const char **argv);
+
+static const struct cmd_manual target_monitor_manual = {
+	.name = "ice target monitor",
 	.summary = "display serial output from the device",
 
 	.description =
@@ -41,9 +43,9 @@ static const struct cmd_manual monitor_manual = {
 	       "device.  Press @b{Ctrl-]} to exit."),
 
 	.examples =
-	H_EXAMPLE("ice idf monitor")
-	H_EXAMPLE("ice idf monitor -p /dev/ttyUSB0")
-	H_EXAMPLE("ice idf monitor -p /dev/ttyUSB0 -b 460800"),
+	H_EXAMPLE("ice target monitor")
+	H_EXAMPLE("ice target monitor -p /dev/ttyUSB0")
+	H_EXAMPLE("ice target monitor -p /dev/ttyUSB0 -b 460800"),
 
 	.extras =
 	H_SECTION("KEY BINDINGS")
@@ -51,20 +53,20 @@ static const struct cmd_manual monitor_manual = {
 };
 /* clang-format on */
 
-const struct cmd_desc cmd_monitor_desc = {
+const struct cmd_desc cmd_target_monitor_desc = {
     .name = "monitor",
-    .fn = cmd_monitor,
-    .opts = cmd_monitor_opts,
-    .manual = &monitor_manual,
+    .fn = cmd_target_monitor,
+    .opts = cmd_target_monitor_opts,
+    .manual = &target_monitor_manual,
 };
 
-int cmd_monitor(int argc, const char **argv)
+int cmd_target_monitor(int argc, const char **argv)
 {
 	struct serial *s;
 	unsigned char buf[1024];
 	int rc;
 
-	parse_options(argc, argv, &cmd_monitor_desc);
+	parse_options(argc, argv, &cmd_target_monitor_desc);
 
 	if (!opt_port)
 		die("serial.port is not set; use -p or "
@@ -81,7 +83,7 @@ int cmd_monitor(int argc, const char **argv)
 		    strerror(-rc));
 	}
 
-	fprintf(stderr, "--- ice idf monitor on %s at %d baud ---" EOL,
+	fprintf(stderr, "--- ice target monitor on %s at %d baud ---" EOL,
 		opt_port, opt_baud);
 	fprintf(stderr, "--- Quit: Ctrl-] ---" EOL);
 

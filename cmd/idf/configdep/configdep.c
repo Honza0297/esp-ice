@@ -5,7 +5,7 @@
  */
 
 /**
- * @file configdep.c
+ * @file cmd/idf/configdep/configdep.c
  * @brief Sdkconfig.h dependency optimizer (compiler wrapper).
  *
  * This command wraps a compiler invocation to optimise incremental
@@ -21,7 +21,7 @@
 #include "ice.h"
 
 /* clang-format off */
-static const struct cmd_manual configdep_manual = {
+static const struct cmd_manual idf_configdep_manual = {
 	.name = "ice idf configdep",
 	.summary = "sdkconfig-aware compiler wrapper",
 
@@ -57,13 +57,15 @@ static const struct cmd_manual configdep_manual = {
 };
 /* clang-format on */
 
-static const struct option cmd_configdep_opts[] = {OPT_END()};
+static const struct option cmd_idf_configdep_opts[] = {OPT_END()};
 
-const struct cmd_desc cmd_configdep_desc = {
+int cmd_idf_configdep(int argc, const char **argv);
+
+const struct cmd_desc cmd_idf_configdep_desc = {
     .name = "configdep",
-    .fn = cmd_configdep,
-    .opts = cmd_configdep_opts,
-    .manual = &configdep_manual,
+    .fn = cmd_idf_configdep,
+    .opts = cmd_idf_configdep_opts,
+    .manual = &idf_configdep_manual,
 };
 
 /* ------------------------------------------------------------------ */
@@ -371,7 +373,7 @@ static const char *find_mf(int argc, const char **argv)
 	return NULL;
 }
 
-int cmd_configdep(int argc, const char **argv)
+int cmd_idf_configdep(int argc, const char **argv)
 {
 	struct depfile d = {0};
 	struct sdk_opts cfg = {0};
@@ -386,7 +388,8 @@ int cmd_configdep(int argc, const char **argv)
 	 */
 	if (argc >= 2 &&
 	    (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"))) {
-		print_manual(configdep_manual.name, &cmd_configdep_desc);
+		print_manual(idf_configdep_manual.name,
+			     &cmd_idf_configdep_desc);
 		return EXIT_SUCCESS;
 	}
 

@@ -100,6 +100,18 @@ void load_profile(const char *name)
 		sbuf_addf(&env, "IDF_PATH=%s", idf_path);
 		putenv(sbuf_detach(&env));
 	}
+
+	/*
+	 * Disable IDF's Python-based component manager globally.  Setting
+	 * it only during `ice init` is not enough: ninja later spawns
+	 * sub-cmakes (bootloader, ULP, ...) that re-read project.cmake
+	 * and will bring the manager back in if the env var is missing.
+	 * Putting it in load_profile() ensures every ice command that
+	 * touches cmake -- build, flash, menuconfig, init -- exports it
+	 * before any child inherits the environment.  A native
+	 * replacement is out of scope for the PoC.
+	 */
+	putenv((char *)"IDF_COMPONENT_MANAGER=0");
 }
 
 void require_project_initialized(void)
