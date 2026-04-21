@@ -49,6 +49,9 @@ enum kc_sym_type {
 /*
  * KC_E_NOT is a unary operator: it uses data.children.left for the
  * operand and data.children.right is always NULL.
+ *
+ * KC_E_RANGE stores (lo, hi) as left/right children (both KC_E_SYMBOL).
+ * It is only used in KC_PROP_RANGE properties, not in logical expressions.
  */
 enum kc_expr_type {
 	KC_E_NONE,
@@ -61,7 +64,8 @@ enum kc_expr_type {
 	KC_E_GT,
 	KC_E_LTE,
 	KC_E_GTE,
-	KC_E_SYMBOL
+	KC_E_SYMBOL,
+	KC_E_RANGE
 };
 
 struct kc_symbol;
@@ -276,5 +280,25 @@ void kc_lexer_init(struct kc_lexer *lex, const char *input, const char *file);
 void kc_lexer_next(struct kc_lexer *lex, struct kc_token *tok);
 void kc_token_release(struct kc_token *tok);
 const char *kc_token_type_name(enum kc_token_type type);
+
+/* ------------------------------------------------------------------
+ *  Parser
+ *
+ *  Ownership: the parser borrows @c filename (and the input buffer for
+ *  kc_parse_buffer) only during parsing.  After return, file/line
+ *  pointers inside menu nodes and properties alias the interned symbol
+ *  names in @c tab or the filename string.  Callers must keep @c tab
+ *  and the filename string alive while the menu tree is in use.
+ *  kc_parse_file strdup's the path internally, so it is self-contained.
+ *
+ *  Menu-level depends-on is stored in the menu node's visibility only.
+ *  Propagation to child entries happens at evaluation time via the
+ *  visibility tree walk, not during parsing.
+ * ------------------------------------------------------------------ */
+
+struct kc_menu_node *kc_parse_buffer(const char *buf, const char *filename,
+				     struct kc_symtab *tab);
+struct kc_menu_node *kc_parse_file(const char *path, struct kc_symtab *tab);
+void kc_menu_free(struct kc_menu_node *root);
 
 #endif /* CCONFIG_H */
