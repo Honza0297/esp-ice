@@ -158,9 +158,18 @@ struct kc_menu_node {
  * ------------------------------------------------------------------ */
 
 #define KC_SYMTAB_BUCKETS 256
+#define KC_SOURCE_DEPTH_MAX 64
+
+struct kc_intern_str {
+	char *str;
+	struct kc_intern_str *next;
+};
 
 struct kc_symtab {
 	struct kc_symbol *buckets[KC_SYMTAB_BUCKETS];
+	struct kc_intern_str *interned_strings;
+	unsigned int choice_counter;
+	int source_depth;
 };
 
 void kc_symtab_init(struct kc_symtab *tab);
@@ -176,6 +185,7 @@ struct kc_symbol *kc_symtab_intern(struct kc_symtab *tab, const char *name);
 struct kc_property *kc_sym_add_prop(struct kc_symbol *sym,
 				    enum kc_prop_kind kind);
 const char *kc_sym_type_name(enum kc_sym_type type);
+const char *kc_symtab_intern_string(struct kc_symtab *tab, const char *str);
 
 /* ------------------------------------------------------------------
  *  Constant symbols (pre-interned on symtab init)
