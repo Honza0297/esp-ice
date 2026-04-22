@@ -204,6 +204,26 @@ struct kc_ctx {
 	 * python does when the var is unset.
 	 */
 	char *idf_version;
+
+	/*
+	 * Source-tree root used to relativize file paths in the menu id
+	 * slugs of kconfig_menus.json.  Matches python kconfiglib's
+	 * `srctree` semantics: path names of @c source-d Kconfig files
+	 * that live inside this prefix are shortened to their path
+	 * relative to it, so ids stay portable across machines.  Owned
+	 * string, ends with a '/' (or empty if unset).  kc_parse_file
+	 * seeds it from @c $srctree env var, falling back to the current
+	 * working directory at parse time.
+	 *
+	 * @p root_file records the raw @c --kconfig path for the top
+	 * Kconfig file.  python kconfiglib special-cases this: the root
+	 * file's @c MenuNode.filename is the user-supplied string as-is,
+	 * while sourced files go through the srctree-relativization
+	 * step.  Ice mirrors that so the root Kconfig's slug keeps the
+	 * absolute path even when srctree would otherwise cover it.
+	 */
+	char *srctree;
+	char *root_file;
 };
 
 /** Initialize an empty context (equivalent to zero-init + root creation). */

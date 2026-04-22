@@ -1187,34 +1187,40 @@ static const char *json_menu_title(const struct kmenu *m)
 
 static int json_menu_includes(const struct kmenu *m);
 
-static void json_menu_write_node(struct sbuf *out, const struct kmenu *m,
-				 int level);
+static void json_menu_write_node(struct sbuf *out, const struct kc_ctx *ctx,
+				 const struct kmenu *m, int level);
 
 /*
  * True when @p m (or any descendant) produces a JSON entry.  Menus
- * with no emittable content are skipped entirely so the output stays
- * dense.  Unlike @c should_emit, this filter keeps @c option env=...
- * symbols -- python's kconfig_menus.json includes them (menuconfig
- * still displays them) even though they never reach sdkconfig.h.
+ * and comments with a prompt always go in the tree -- python
+ * kconfig_menus.json includes even empty menus like
+ * `menu "Configuration for components not included in the build"`
+ * whose body only contains an @c osource that currently resolves to
+ * nothing.  @c option env=... symbols are also kept (menuconfig
+ * displays them) even though they're skipped by sdkconfig.h output.
+ *
+ * Walks children for every container-like node, including KM_SYM --
+ * the parser's implicit-menuconfig finalize step hoists dependent
+ * siblings into their parent sym's children list.
  */
 static int json_menu_includes(const struct kmenu *m)
 {
 	if ((m->kind == KM_SYM || m->kind == KM_CHOICE) && m->sym &&
 	    !is_pseudo_sym(m->sym))
 		return 1;
-	if (m->kind == KM_MENU || m->kind == KM_COMMENT ||
-	    m->kind == KM_CHOICE || m->kind == KM_IF || m->kind == KM_ROOT) {
-		for (const struct kmenu *c = m->children; c; c = c->next)
-			if (json_menu_includes(c))
-				return 1;
-	}
+	if ((m->kind == KM_MENU || m->kind == KM_COMMENT) && m->prompt &&
+	    *m->prompt)
+		return 1;
+	for (const struct kmenu *c = m->children; c; c = c->next)
+		if (json_menu_includes(c))
+			return 1;
 	return 0;
 }
 
 /* Emit the children array contents (between '[' and ']'), recursing
  * into nested menus and transparent if-blocks. */
-static void json_menu_write_children(struct sbuf *out, const struct kmenu *m,
-				     int level)
+static void json_menu_write_children(struct sbuf *out, const struct kc_ctx *ctx,
+				     const struct kmenu *m, int level)
 {
 	int first = 1;
 	for (const struct kmenu *c = m->children; c; c = c->next) {
@@ -1231,14 +1237,14 @@ static void json_menu_write_children(struct sbuf *out, const struct kmenu *m,
 				if (!first)
 					sbuf_addstr(out, ",\n");
 				first = 0;
-				json_menu_write_node(out, gc, level);
+				json_menu_write_node(out, ctx, gc, level);
 			}
 			continue;
 		}
 		if (!first)
 			sbuf_addstr(out, ",\n");
 		first = 0;
-		json_menu_write_node(out, c, level);
+		json_menu_write_node(out, ctx, c, level);
 	}
 }
 
@@ -1340,8 +1346,8 @@ static char *help_rtrimmed(const char *s)
 	return sbuf_strndup(s, n);
 }
 
-static void json_menu_write_node(struct sbuf *out, const struct kmenu *m,
-				 int level)
+static void json_menu_write_node(struct sbuf *out, const struct kc_ctx *ctx,
+				 const struct kmenu *m, int level)
 {
 	/*
 	 * Python emits plain @c config entries with a "sym-like" shape
@@ -1357,11 +1363,16 @@ static void json_menu_write_node(struct sbuf *out, const struct kmenu *m,
 	/* children: */
 	json_indent(out, level + 1);
 	sbuf_addstr(out, "\"children\": [");
-	int has_children = (m->kind == KM_MENU || m->kind == KM_COMMENT ||
-			    m->kind == KM_CHOICE);
+	/*
+	 * KM_SYM entries get a @c children array too, because the
+	 * implicit-menuconfig hoisting in kc_parse.c moves dependent
+	 * siblings into the parent sym's children list.  Leaf syms
+	 * with no hoisted children simply render as `[]`.
+	 */
+	int has_children = m->children != NULL;
 	struct sbuf children = SBUF_INIT;
 	if (has_children)
-		json_menu_write_children(&children, m, level + 2);
+		json_menu_write_children(&children, ctx, m, level + 2);
 	if (children.len) {
 		sbuf_addstr(out, "\n");
 		sbuf_add(out, children.buf, children.len);
@@ -1565,7 +1576,15 @@ static void json_menu_write_node(struct sbuf *out, const struct kmenu *m,
 		}
 		for (int i = nchain - 1; i >= 0; i--) {
 			const char *t = json_menu_title(chain[i]);
-			int in_dash = 1; /* collapse leading non-word */
+			/*
+			 * Python builds each slug as
+			 * `re.sub(r"\W+", "-", prompt).lower()` and then
+			 * joins with `-`.  No trailing-dash trim, so a
+			 * prompt like "High resolution timer " (with a
+			 * trailing space) becomes `high-resolution-timer-`
+			 * and produces a visible `--` in the joined id.
+			 */
+			int in_dash = 1;
 			if (id.len) {
 				sbuf_addch(&id, '-');
 				in_dash = 1;
@@ -1585,22 +1604,28 @@ static void json_menu_write_node(struct sbuf *out, const struct kmenu *m,
 					in_dash = 1;
 				}
 			}
-			/*
-			 * Trim a trailing dash from this slug before the next
-			 * separator appends its own; python's `\W+ -> -` then
-			 * join-with-`-` leaves at most one dash between
-			 * segments.
-			 */
-			while (id.len && id.buf[id.len - 1] == '-')
-				id.len--;
 		}
 		const char *file = m->src_file ? m->src_file : "";
 		/*
-		 * Trim a single leading '/' from the path, then replace
-		 * remaining '/' with '-'.  python inserts exactly one '-'
-		 * between the slug chain and the path when the path
-		 * doesn't already start with a dash.
+		 * Relativize the source-file path against @c ctx->srctree
+		 * first (python stores sourced-file paths relative to
+		 * `$srctree` in @c MenuNode.filename), then strip a single
+		 * leading '/' and replace remaining '/' with '-'.  python
+		 * inserts exactly one '-' between the slug chain and the
+		 * path when the path doesn't already start with a dash.
+		 *
+		 * The top-level --kconfig file itself is NOT relativized --
+		 * python stores its filename verbatim from the Kconfig()
+		 * constructor argument, skipping the srctree strip that
+		 * @c _enter_file runs for @c source'd paths.  Compare
+		 * against @c ctx->root_file to identify and leave as-is.
 		 */
+		if (ctx && ctx->srctree && ctx->srctree[0] &&
+		    (!ctx->root_file || strcmp(file, ctx->root_file) != 0)) {
+			size_t sn = strlen(ctx->srctree);
+			if (!strncmp(file, ctx->srctree, sn))
+				file += sn;
+		}
 		if (*file == '/')
 			file++;
 		if (id.len)
@@ -1662,7 +1687,7 @@ void kc_write_json_menus(const struct kc_ctx *ctx, const char *path)
 	sbuf_addstr(&out, "[");
 
 	struct sbuf body = SBUF_INIT;
-	json_menu_write_children(&body, ctx->root, 1);
+	json_menu_write_children(&body, ctx, ctx->root, 1);
 	if (body.len) {
 		sbuf_addstr(&out, "\n");
 		sbuf_add(&out, body.buf, body.len);

@@ -119,6 +119,7 @@ void kc_ctx_init(struct kc_ctx *ctx)
 	ctx->alloc_renames = 0;
 	ctx->no_deprecated = 0;
 	ctx->idf_version = NULL;
+	ctx->srctree = NULL;
 }
 
 const char *kc_ctx_intern_file(struct kc_ctx *ctx, const char *path)
@@ -200,6 +201,12 @@ void kc_ctx_release(struct kc_ctx *ctx)
 
 	free(ctx->idf_version);
 	ctx->idf_version = NULL;
+
+	free(ctx->srctree);
+	ctx->srctree = NULL;
+
+	free(ctx->root_file);
+	ctx->root_file = NULL;
 }
 
 /* ================================================================== */
@@ -1072,6 +1079,140 @@ static void parse_block_body(struct kc_parser *p, struct kmenu *menu,
 /*  Entry point                                                       */
 /* ================================================================== */
 
+/* ================================================================== */
+/*  Implicit-menuconfig hoisting                                      */
+/* ================================================================== */
+
+/*
+ * True when expression @p e's truth value requires @p sym to be y
+ * (or non-zero).  Reimplements esp_kconfiglib's @c _expr_depends_on
+ * so we can build the same menu tree shape the Python loader does.
+ * Matches on:
+ *   - bare symref to @p sym
+ *   - @c sym = y, @c y = sym, @c sym != n, @c n != sym
+ *   - AND where either side depends on @p sym
+ */
+static int finalize_expr_depends_on(const struct kexpr *e,
+				    const struct ksym *sym)
+{
+	if (!e || !sym)
+		return 0;
+	if (e->op == KE_SYMREF)
+		return e->sym == sym;
+	if (e->op == KE_EQ || e->op == KE_NE) {
+		/* Normalise so @p sym is on the left side. */
+		const struct kexpr *a = e->l, *b = e->r;
+		if (b && b->op == KE_SYMREF && b->sym == sym) {
+			a = e->r;
+			b = e->l;
+		} else if (!(a && a->op == KE_SYMREF && a->sym == sym)) {
+			return 0;
+		}
+		/* a is @p sym; b must be the constant y (for EQ) / n (for NE).
+		 */
+		if (!b)
+			return 0;
+		const char *name = NULL;
+		if (b->op == KE_SYMREF && b->sym)
+			name = b->sym->name;
+		else if (b->op == KE_LITERAL)
+			name = b->str;
+		if (!name)
+			return 0;
+		if (e->op == KE_EQ)
+			return !strcmp(name, "y") || !strcmp(name, "yes");
+		return !strcmp(name, "n") || !strcmp(name, "no");
+	}
+	if (e->op == KE_AND)
+		return finalize_expr_depends_on(e->l, sym) ||
+		       finalize_expr_depends_on(e->r, sym);
+	return 0;
+}
+
+/*
+ * Return 1 iff @p next has an automatic-menu dependency on
+ * @p prev's symbol.  Python's @c _auto_menu_dep checks
+ * `node2.prompt[1] if node2.prompt else node2.dep`, but kconfiglib
+ * stores the fully-propagated dependency chain on prompt.cond (the
+ * original `if COND` guard AND'd with the symbol's own @c depends on
+ * chain).  Ice keeps those two separate (KP_PROMPT.cond vs
+ * KP_DEPENDS.expr), so mirror python's effective check by scanning
+ * both: hoist if the target appears in @em any of the per-prop
+ * conds or in the KP_DEPENDS chain -- the conjunction / disjunction
+ * distinction doesn't change the set of symbols required to be y.
+ */
+static int auto_menu_dep(const struct kmenu *prev, const struct kmenu *next)
+{
+	if (!prev || prev->kind != KM_SYM || !prev->sym)
+		return 0;
+
+	/*
+	 * Symbols and choices keep their @c depends on chain as
+	 * KP_DEPENDS properties on the symbol (choice's sym is the
+	 * interned `__choice:NAME` placeholder).  Menus / comments put
+	 * @c depends on into @p m->dep directly.  Check both shapes.
+	 */
+	if ((next->kind == KM_SYM || next->kind == KM_CHOICE) && next->sym) {
+		for (const struct kprop *p = next->sym->props; p; p = p->next) {
+			if (p->kind == KP_PROMPT && p->cond &&
+			    finalize_expr_depends_on(p->cond, prev->sym))
+				return 1;
+			if (p->kind == KP_DEPENDS && p->expr &&
+			    finalize_expr_depends_on(p->expr, prev->sym))
+				return 1;
+		}
+		return 0;
+	}
+
+	if ((next->kind == KM_MENU || next->kind == KM_COMMENT) && next->dep)
+		return finalize_expr_depends_on(next->dep, prev->sym);
+
+	return 0;
+}
+
+/*
+ * Transplant the trailing sibling chain of @p node -- while each
+ * subsequent sibling has an "automatic menu dependency" on @p node's
+ * symbol, splice it under @p node as a child instead.  Matches
+ * esp_kconfiglib's _finalize_node() hoisting step so ice's
+ * kconfig_menus.json mirrors python's tree shape for the common
+ * pattern of `config X` followed by `config Y depends on X`.
+ *
+ * Because the hoisted siblings still carry their @c depends on X
+ * property, evaluation semantics are unaffected -- only the walked
+ * menu tree changes shape.
+ */
+static void finalize_node(struct kmenu *node)
+{
+	if (!node)
+		return;
+
+	if (node->kind == KM_SYM) {
+		/* Collect consecutive dependent siblings and re-parent them
+		 * as children.  Recurse into each before hoisting so nested
+		 * hoists work. */
+		struct kmenu *cur = node;
+		while (cur->next && auto_menu_dep(node, cur->next)) {
+			finalize_node(cur->next);
+			cur = cur->next;
+			cur->parent = node;
+		}
+		if (cur != node) {
+			/*
+			 * `node->next` .. `cur` become node's children.
+			 * The original sibling link continues past `cur`.
+			 */
+			node->children = node->next;
+			node->tail = cur;
+			node->next = cur->next;
+			cur->next = NULL;
+		}
+	} else if (node->children) {
+		for (struct kmenu *c = node->children; c; c = c->next)
+			finalize_node(c);
+	}
+}
+
 /**
  * @brief Parse a Kconfig file into @p ctx.
  *
@@ -1087,6 +1228,8 @@ void kc_parse_file(struct kc_ctx *ctx, const char *path, const char *const *env)
 		die_errno("cannot read '%s'", path);
 
 	const char *interned = kc_ctx_intern_file(ctx, path);
+	if (!ctx->root_file)
+		ctx->root_file = sbuf_strdup(path);
 	struct kc_parser p = {.ctx = ctx};
 	kc_lex_open(&p.lex, sb.buf, interned, env);
 	p_advance(&p); /* prime first token */
@@ -1098,6 +1241,39 @@ void kc_parse_file(struct kc_ctx *ctx, const char *path, const char *const *env)
 
 	kc_lex_close(&p.lex);
 	sbuf_release(&sb);
+
+	/*
+	 * Record the source-tree root used for file-path relativization
+	 * in kconfig_menus.json id slugs.  Matches python kconfiglib's
+	 * @c $srctree env var, with @c getcwd() as the fallback.  The
+	 * stored value always ends with a trailing slash so later prefix
+	 * checks are a plain @c strncmp.
+	 */
+	if (!ctx->srctree) {
+		const char *s = getenv("srctree");
+		char cwd[4096];
+		if (!s || !*s) {
+			if (getcwd(cwd, sizeof(cwd)))
+				s = cwd;
+		}
+		if (s && *s) {
+			size_t n = strlen(s);
+			int has_slash = (n && s[n - 1] == '/');
+			ctx->srctree = calloc(1, n + (has_slash ? 1 : 2));
+			if (!ctx->srctree)
+				die_errno("calloc");
+			memcpy(ctx->srctree, s, n);
+			if (!has_slash)
+				ctx->srctree[n] = '/';
+		}
+	}
+
+	/*
+	 * Post-parse: apply python kconfiglib's implicit-menuconfig
+	 * hoisting.  Done here so subsequent evaluation / output all
+	 * see the final tree shape.
+	 */
+	finalize_node(ctx->root);
 }
 
 /* ================================================================== */
