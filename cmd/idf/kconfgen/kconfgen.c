@@ -52,6 +52,9 @@ static const char *opt_config;
 static struct svec opt_defaults = SVEC_INIT;
 static struct svec opt_output = SVEC_INIT;
 static struct svec opt_renames = SVEC_INIT;
+static struct svec opt_env = SVEC_INIT;
+static const char *opt_env_file;
+static const char *opt_list_separator_unused;
 static int opt_dump_ast;
 static int opt_dump_symbols;
 static int opt_no_deprecated;
@@ -69,6 +72,13 @@ static const struct option cmd_idf_kconfgen_opts[] = {
     OPT_STRING_LIST(0, "sdkconfig-rename", &opt_renames, "path",
 		    "deprecated->current symbol name mappings (repeatable)",
 		    NULL),
+    OPT_STRING_LIST('E', "env", &opt_env, "NAME=VAL",
+		    "set an env variable for $(VAR) expansion (repeatable)",
+		    NULL),
+    OPT_STRING(0, "env-file", &opt_env_file, "path",
+	       "NAME=VAL lines loaded before Kconfig parse", NULL),
+    OPT_STRING(0, "list-separator", &opt_list_separator_unused, "sep",
+	       "[compatibility] list-separator hint; ice hardcodes ';'", NULL),
     OPT_BOOL(0, "dont-write-deprecated", &opt_no_deprecated,
 	     "skip the deprecated-aliases block in config / header outputs"),
     OPT_BOOL(0, "dump-ast", &opt_dump_ast, "parse and dump the AST to stdout"),
@@ -110,6 +120,28 @@ static void split_output_spec(const char *spec, const char **fmt_out,
 	*path_out = colon + 1;
 }
 
+/*
+ * Load NAME=VAL lines from an env-file into @p env.  Blank / comment
+ * lines are skipped.  Whatever the caller already has in @p env from
+ * --env flags is preserved; the file is additive.
+ */
+static void load_env_file(struct svec *env, const char *path)
+{
+	struct sbuf sb = SBUF_INIT;
+	if (sbuf_read_file(&sb, path) < 0)
+		die_errno("cannot read env-file '%s'", path);
+	size_t pos = 0;
+	char *line;
+	while ((line = sbuf_getline(sb.buf, sb.len, &pos)) != NULL) {
+		while (*line == ' ' || *line == '\t')
+			line++;
+		if (!*line || *line == '#')
+			continue;
+		svec_push(env, line);
+	}
+	sbuf_release(&sb);
+}
+
 int cmd_idf_kconfgen(int argc, const char **argv)
 {
 	argc = parse_options(argc, argv, &cmd_idf_kconfgen_desc);
@@ -119,9 +151,13 @@ int cmd_idf_kconfgen(int argc, const char **argv)
 		die("missing required --kconfig; see 'ice idf kconfgen "
 		    "--help'");
 
+	if (opt_env_file)
+		load_env_file(&opt_env, opt_env_file);
+
 	struct kc_ctx ctx;
 	kc_ctx_init(&ctx);
-	kc_parse_file(&ctx, opt_kconfig, NULL);
+	kc_parse_file(&ctx, opt_kconfig,
+		      opt_env.nr ? (const char *const *)opt_env.v : NULL);
 
 	if (opt_dump_ast)
 		kc_ast_dump(&ctx);
@@ -165,5 +201,6 @@ int cmd_idf_kconfgen(int argc, const char **argv)
 	svec_clear(&opt_defaults);
 	svec_clear(&opt_output);
 	svec_clear(&opt_renames);
+	svec_clear(&opt_env);
 	return 0;
 }
