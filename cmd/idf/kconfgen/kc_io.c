@@ -287,27 +287,32 @@ static int has_prompt(const struct ksym *s)
 	return 0;
 }
 
-/* True when a symbol's current value is "non-trivial" -- i.e. the
- * evaluator resolved it to something other than the type's zero
- * value.  Used as a secondary emit-filter for hidden symbols:
- * python kconfgen emits a no-prompt bool when its computed value is
- * "y" (but not "n"), and a no-prompt int/hex/string only when its
- * value is non-empty and non-zero.  Matching this keeps derived
- * flags like CONFIG_ESP_CONSOLE_UART in the output while filtering
- * out a forest of hidden zero-value defaults. */
-static int has_nontrivial_value(const struct ksym *s)
+/*
+ * Pick-filter for prompt-less symbols: emit when python would.
+ *
+ *   - Bool: only if the current value is "y".  A no-prompt bool that
+ *     resolves to "n" is never emitted (it would just be a CONFIG_X
+ *     is not set line with no way for the user to have influenced it).
+ *   - int / hex / string / float: emit when the symbol has at least
+ *     one @c default prop.  The presence of an explicit default marks
+ *     the symbol as "derived" -- something the kconfig author wants
+ *     downstream code to see.  This covers int parents of a choice
+ *     whose value is 0 (e.g. CONFIG_ESP32_REV_MIN for ESP32_REV_MIN_0)
+ *     and string aliases that happen to evaluate to the empty string.
+ */
+static int has_defaults(const struct ksym *s)
 {
-	const char *v = s->cur_val ? s->cur_val : "";
-	if (!*v)
-		return 0;
+	for (const struct kprop *p = s->props; p; p = p->next)
+		if (p->kind == KP_DEFAULT)
+			return 1;
+	return 0;
+}
+
+static int emit_worthy_no_prompt(const struct ksym *s)
+{
 	if (s->type == KS_BOOL)
-		return !strcmp(v, "y");
-	if (s->type == KS_INT || s->type == KS_HEX) {
-		char *e;
-		long long n = strtoll(v, &e, 0);
-		return e != v && *e == '\0' ? n != 0 : 1;
-	}
-	return 1;
+		return s->cur_val && !strcmp(s->cur_val, "y");
+	return has_defaults(s);
 }
 
 /*
@@ -344,7 +349,7 @@ static int should_emit(const struct ksym *s)
 	int has_p = has_prompt(s);
 	if (has_p && s->visible)
 		return 1;
-	if (!has_p && has_nontrivial_value(s))
+	if (!has_p && emit_worthy_no_prompt(s))
 		return 1;
 	return 0;
 }

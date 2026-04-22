@@ -833,7 +833,21 @@ static void parse_choice_stmt(struct kc_parser *p, struct kmenu *parent)
 
 	struct ksym *choice_sym;
 	if (p->lex.tok == KT_NAME) {
-		choice_sym = kc_sym_intern(p->ctx, p->lex.val);
+		/*
+		 * ESP-IDF's Kconfig uses `choice NAME` + `config NAME` to
+		 * declare two distinct symbols that happen to share a
+		 * source-level name -- the choice groups bool members
+		 * under NAME, a separate `config NAME` (int) derives its
+		 * value from which member is selected.  Our symbol table
+		 * is name-keyed, so store the choice under a reserved
+		 * "__choice:NAME" namespace; `config NAME` then interns
+		 * a fresh NAME.  The @c choice_parent linkage on members
+		 * points at the interned choice-sym, not its source-level
+		 * name, so this rename is transparent to evaluation.
+		 */
+		char key[256];
+		snprintf(key, sizeof(key), "__choice:%s", p->lex.val);
+		choice_sym = kc_sym_intern(p->ctx, key);
 		p_advance(p);
 	} else {
 		/* Anonymous choice: mint a unique name. */
