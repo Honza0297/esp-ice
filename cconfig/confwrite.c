@@ -15,14 +15,17 @@
 #include "cconfig/cconfig.h"
 #include "ice.h"
 
-/*
- * Temporary per-write visited flag.  Bits 0–5 are taken by the
- * KC_SYM_* flags defined in cconfig.h; bit 6 is free.
- */
-#define CONFWRITE_VISITED (1u << 6)
+static int sym_has_visible_prompt(const struct kc_symbol *sym)
+{
+	const struct kc_property *prop;
 
-typedef char
-    _confwrite_visited_guard[CONFWRITE_VISITED > KC_SYM_CHANGED ? 1 : -1];
+	for (prop = sym->props; prop; prop = prop->next) {
+		if (prop->kind == KC_PROP_PROMPT &&
+		    (!prop->cond || kc_expr_eval(prop->cond) == KC_VAL_Y))
+			return 1;
+	}
+	return 0;
+}
 
 /*
  * Approximation of kconfgen's has_active_default_value().
@@ -151,9 +154,9 @@ void kc_config_contents(struct sbuf *out, const struct kc_menu_node *root,
 
 				sym->flags |= CONFWRITE_VISITED;
 				should_write =
-				    kc_menu_visible(node) ||
-				    (sym->rev_deps &&
-				     kc_expr_eval(sym->rev_deps) == KC_VAL_Y);
+				    sym_has_visible_prompt(sym) ||
+				    sym->type != KC_TYPE_BOOL ||
+				    strcmp(kc_sym_get_string(sym), "y") == 0;
 
 				if (should_write) {
 					if (after_end_comment) {
