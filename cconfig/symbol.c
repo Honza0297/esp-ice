@@ -8,8 +8,8 @@
  * @file symbol.c
  * @brief Symbol table implementation for the Kconfig processor.
  */
-#include "ice.h"
 #include "cconfig/cconfig.h"
+#include "ice.h"
 
 struct kc_symbol *kc_sym_yes;
 struct kc_symbol *kc_sym_no;
@@ -82,6 +82,17 @@ void kc_symtab_release(struct kc_symtab *tab)
 			sym = next;
 		}
 		tab->buckets[idx] = NULL;
+	}
+
+	{
+		struct kc_symbol *orphan = tab->orphan_syms;
+		while (orphan) {
+			struct kc_symbol *next = orphan->hash_next;
+			free(orphan->curr_value);
+			free(orphan);
+			orphan = next;
+		}
+		tab->orphan_syms = NULL;
 	}
 
 	{
@@ -159,12 +170,18 @@ struct kc_property *kc_sym_add_prop(struct kc_symbol *sym,
 const char *kc_sym_type_name(enum kc_sym_type type)
 {
 	switch (type) {
-	case KC_TYPE_UNKNOWN:  return "unknown";
-	case KC_TYPE_BOOL:     return "bool";
-	case KC_TYPE_INT:      return "int";
-	case KC_TYPE_HEX:      return "hex";
-	case KC_TYPE_STRING:   return "string";
-	case KC_TYPE_FLOAT:    return "float";
+	case KC_TYPE_UNKNOWN:
+		return "unknown";
+	case KC_TYPE_BOOL:
+		return "bool";
+	case KC_TYPE_INT:
+		return "int";
+	case KC_TYPE_HEX:
+		return "hex";
+	case KC_TYPE_STRING:
+		return "string";
+	case KC_TYPE_FLOAT:
+		return "float";
 	}
 	return "unknown";
 }

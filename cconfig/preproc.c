@@ -18,8 +18,23 @@
  * text within the name lookup, which will fail gracefully (expand to
  * empty or match a literally-named variable).
  */
-#include "ice.h"
 #include "cconfig/cconfig.h"
+#include "ice.h"
+
+/* ------------------------------------------------------------------ */
+/*  Character classification helpers                                   */
+/* ------------------------------------------------------------------ */
+
+static int is_ident_start(int ch)
+{
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+	       ch == '_';
+}
+
+static int is_ident_char(int ch)
+{
+	return is_ident_start(ch) || (ch >= '0' && ch <= '9');
+}
 
 /* ------------------------------------------------------------------ */
 /*  Variable lookup                                                    */
@@ -59,9 +74,9 @@ static char *expand_with_depth(const struct kc_symtab *tab, const char *raw,
 
 			if (closing) {
 				size_t name_len =
-					(size_t)(closing - name_start);
+				    (size_t)(closing - name_start);
 				char *var_name =
-					sbuf_strndup(name_start, name_len);
+				    sbuf_strndup(name_start, name_len);
 				const char *val;
 
 				val = var_lookup(tab, var_name);
@@ -69,9 +84,8 @@ static char *expand_with_depth(const struct kc_symtab *tab, const char *raw,
 					val = getenv(var_name);
 
 				if (val) {
-					char *expanded =
-						expand_with_depth(tab, val,
-								  depth + 1);
+					char *expanded = expand_with_depth(
+					    tab, val, depth + 1);
 					sbuf_addstr(&sb, expanded);
 					free(expanded);
 				}
@@ -80,6 +94,64 @@ static char *expand_with_depth(const struct kc_symtab *tab, const char *raw,
 				ptr = closing + 1;
 				continue;
 			}
+		}
+		/*
+		 * ${NAME} forces environment variable lookup only,
+		 * bypassing Kconfig variables.  This matches the
+		 * esp-idf-kconfig semantics where ${} always reads
+		 * from the process environment.
+		 */
+		if (ptr[0] == '$' && ptr[1] == '{') {
+			const char *name_start = ptr + 2;
+			const char *closing = strchr(name_start, '}');
+
+			if (closing) {
+				size_t name_len =
+				    (size_t)(closing - name_start);
+				char *var_name =
+				    sbuf_strndup(name_start, name_len);
+				const char *val;
+
+				val = getenv(var_name);
+
+				if (val) {
+					char *expanded = expand_with_depth(
+					    tab, val, depth + 1);
+					sbuf_addstr(&sb, expanded);
+					free(expanded);
+				}
+
+				free(var_name);
+				ptr = closing + 1;
+				continue;
+			}
+		}
+		/* Bare $NAME: same lookup as $(NAME). */
+		if (ptr[0] == '$' && is_ident_start(ptr[1])) {
+			const char *name_start = ptr + 1;
+			const char *name_end = name_start;
+			char *var_name;
+			const char *val;
+
+			while (is_ident_char(*name_end))
+				name_end++;
+
+			var_name = sbuf_strndup(
+			    name_start, (size_t)(name_end - name_start));
+			val = var_lookup(tab, var_name);
+			if (!val)
+				val = getenv(var_name);
+
+			if (val) {
+				char *expanded =
+				    expand_with_depth(tab, val, depth + 1);
+				sbuf_addstr(&sb, expanded);
+				free(expanded);
+			}
+
+			free(var_name);
+			ptr = name_end;
+			continue;
 		}
 		sbuf_addch(&sb, *ptr);
 		ptr++;
@@ -92,8 +164,8 @@ static char *expand_with_depth(const struct kc_symtab *tab, const char *raw,
 /*  Public API                                                         */
 /* ------------------------------------------------------------------ */
 
-void kc_preproc_set(struct kc_symtab *tab, const char *name,
-		    const char *value, int is_immediate)
+void kc_preproc_set(struct kc_symtab *tab, const char *name, const char *value,
+		    int is_immediate)
 {
 	struct kc_variable *var;
 
