@@ -90,6 +90,7 @@ struct kc_expr *kc_expr_alloc_comp(enum kc_expr_type type,
 				   struct kc_symbol *sym_right);
 void kc_expr_free(struct kc_expr *expr);
 void kc_expr_print(const struct kc_expr *expr, struct sbuf *sb);
+struct kc_expr *kc_expr_copy(const struct kc_expr *src);
 
 /* ------------------------------------------------------------------
  *  Property (attached to a symbol)
@@ -333,5 +334,21 @@ void kc_preproc_set(struct kc_symtab *tab, const char *name,
 		    const char *value, int is_immediate);
 char *kc_preproc_expand(const struct kc_symtab *tab, const char *raw);
 void kc_preproc_release(struct kc_symtab *tab);
+
+/* ------------------------------------------------------------------
+ *  Evaluation
+ *
+ *  kc_finalize must be called exactly once after parsing is complete.
+ *  It is not idempotent — calling it twice will produce incorrect
+ *  results (doubled visibility chains and reverse dependencies).
+ * ------------------------------------------------------------------ */
+
+enum kc_val { KC_VAL_N = 0, KC_VAL_Y = 1 };
+
+enum kc_val kc_expr_eval(const struct kc_expr *expr);
+const char *kc_sym_get_string(const struct kc_symbol *sym);
+void kc_sym_calc_value(struct kc_symbol *sym);
+void kc_finalize(struct kc_menu_node *root, struct kc_symtab *tab);
+int kc_menu_visible(const struct kc_menu_node *node);
 
 #endif /* CCONFIG_H */
