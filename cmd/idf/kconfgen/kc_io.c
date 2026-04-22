@@ -91,11 +91,36 @@ void kc_load_rename(struct kc_ctx *ctx, const char *path)
 		    strncmp(new_start, CONFIG_PREFIX, CONFIG_PREFIX_LEN))
 			continue; /* not a CONFIG_* rename; skip silently */
 
+		const char *old_short = old_start + CONFIG_PREFIX_LEN;
+		const char *new_short = new_start + CONFIG_PREFIX_LEN;
+
+		/*
+		 * Skip duplicates.  ESP-IDF's build passes rename files both
+		 * via --sdkconfig-rename and via the
+		 * COMPONENT_SDKCONFIG_RENAMES env var, and several components
+		 * intentionally re-list the same line in per-target rename
+		 * files -- loading each entry blindly would produce duplicate
+		 * deprecated-alias #define lines in sdkconfig.h.  Python
+		 * kconfgen dedupes on load.
+		 */
+		int dup = 0;
+		for (size_t i = 0; i < ctx->n_renames; i++) {
+			const struct kc_rename *r0 = &ctx->renames[i];
+			if (r0->invert == invert &&
+			    !strcmp(r0->old_name, old_short) &&
+			    !strcmp(r0->new_name, new_short)) {
+				dup = 1;
+				break;
+			}
+		}
+		if (dup)
+			continue;
+
 		ALLOC_GROW(ctx->renames, ctx->n_renames + 1,
 			   ctx->alloc_renames);
 		struct kc_rename *r = &ctx->renames[ctx->n_renames++];
-		r->old_name = sbuf_strdup(old_start + CONFIG_PREFIX_LEN);
-		r->new_name = sbuf_strdup(new_start + CONFIG_PREFIX_LEN);
+		r->old_name = sbuf_strdup(old_short);
+		r->new_name = sbuf_strdup(new_short);
 		r->invert = invert;
 	}
 	sbuf_release(&sb);
@@ -151,7 +176,28 @@ static char *unquote_value(const char *s)
 	return sbuf_detach(&sb);
 }
 
-static void process_config_line(struct kc_ctx *ctx, char *line)
+/*
+ * Set @p name's value but keep @c user_set clear -- treat the line as
+ * a built-in default rather than user input.  This is the sink for
+ * sdkconfig lines that follow a `# default:` pragma (python kconfgen's
+ * ESP extension): the value itself comes from a previous auto-generation
+ * so re-seeding it into cur_val keeps round-trips stable, but marking
+ * it user_set would make the symbol survive evaluation even when its
+ * `depends on` chain later goes false.
+ */
+static void set_default_seeded(struct kc_ctx *ctx, const char *name,
+			       const char *val)
+{
+	struct ksym *s = smap_get(&ctx->symtab, name);
+	if (!s)
+		return;
+	free(s->cur_val);
+	s->cur_val = sbuf_strdup(val);
+	/* s->user_set stays 0 */
+}
+
+static void process_config_line(struct kc_ctx *ctx, char *line,
+				int *default_pending)
 {
 	/* Skip leading whitespace. */
 	while (*line == ' ' || *line == '\t')
@@ -159,13 +205,27 @@ static void process_config_line(struct kc_ctx *ctx, char *line)
 	if (!*line)
 		return;
 
-	/* `# CONFIG_X is not set` -> X = n */
+	/* `# default:` pragma marks the next CONFIG_* line as
+	 * default-seeded rather than user-set. */
 	if (*line == '#') {
 		const char *p = line + 1;
 		while (*p == ' ' || *p == '\t')
 			p++;
-		if (strncmp(p, CONFIG_PREFIX, CONFIG_PREFIX_LEN) != 0)
+		if (!strncmp(p, "default:", 8)) {
+			const char *q = p + 8;
+			while (*q == ' ' || *q == '\t')
+				q++;
+			if (!*q) {
+				*default_pending = 1;
+				return;
+			}
+		}
+
+		/* `# CONFIG_X is not set` -> X = n */
+		if (strncmp(p, CONFIG_PREFIX, CONFIG_PREFIX_LEN) != 0) {
+			*default_pending = 0;
 			return;
+		}
 		const char *name = p + CONFIG_PREFIX_LEN;
 		const char *end = name;
 		while (*end && *end != ' ' && *end != '\t')
@@ -173,23 +233,33 @@ static void process_config_line(struct kc_ctx *ctx, char *line)
 		const char *tail = end;
 		while (*tail == ' ' || *tail == '\t')
 			tail++;
-		if (strcmp(tail, "is not set") != 0)
+		if (strcmp(tail, "is not set") != 0) {
+			*default_pending = 0;
 			return;
+		}
 		char *name_copy = sbuf_strndup(name, (size_t)(end - name));
 		char *val = sbuf_strdup("n");
 		rename_translate(ctx, &name_copy, &val);
-		kc_sym_set_user(ctx, name_copy, val);
+		if (*default_pending)
+			set_default_seeded(ctx, name_copy, val);
+		else
+			kc_sym_set_user(ctx, name_copy, val);
+		*default_pending = 0;
 		free(name_copy);
 		free(val);
 		return;
 	}
 
 	/* `CONFIG_NAME=value` */
-	if (strncmp(line, CONFIG_PREFIX, CONFIG_PREFIX_LEN) != 0)
+	if (strncmp(line, CONFIG_PREFIX, CONFIG_PREFIX_LEN) != 0) {
+		*default_pending = 0;
 		return;
+	}
 	char *eq = strchr(line, '=');
-	if (!eq)
+	if (!eq) {
+		*default_pending = 0;
 		return;
+	}
 
 	size_t name_len = (size_t)(eq - (line + CONFIG_PREFIX_LEN));
 	char *name = sbuf_strndup(line + CONFIG_PREFIX_LEN, name_len);
@@ -205,7 +275,11 @@ static void process_config_line(struct kc_ctx *ctx, char *line)
 		val = sbuf_strdup(rhs);
 
 	rename_translate(ctx, &name, &val);
-	kc_sym_set_user(ctx, name, val);
+	if (*default_pending)
+		set_default_seeded(ctx, name, val);
+	else
+		kc_sym_set_user(ctx, name, val);
+	*default_pending = 0;
 	free(name);
 	free(val);
 }
@@ -218,8 +292,9 @@ void kc_load_config(struct kc_ctx *ctx, const char *path)
 
 	size_t pos = 0;
 	char *line;
+	int default_pending = 0;
 	while ((line = sbuf_getline(sb.buf, sb.len, &pos)) != NULL)
-		process_config_line(ctx, line);
+		process_config_line(ctx, line, &default_pending);
 
 	sbuf_release(&sb);
 }
@@ -274,16 +349,54 @@ static int is_pseudo_sym(const struct ksym *s)
 }
 
 /*
- * True when @p s has at least one KP_PROMPT property.  Python kconfgen
- * emits only user-facing symbols (those with a prompt) -- "hidden"
- * internal bool/int flags that track derived state but have no prompt
- * are not written to any of the generated artefacts.
+ * Render a hex symbol's stored string value with a leading 0x.
+ *
+ * Python kconfgen normalises hex values for C-header and cmake output,
+ * so a sdkconfig line like `CONFIG_BOOTLOADER_RESERVE_RTC_SIZE=0`
+ * (default 0 in the Kconfig) becomes `0x0` in sdkconfig.h and
+ * sdkconfig.cmake.  Ice stores cur_val verbatim, so we normalise here.
+ *
+ * Empty string -> empty (caller decides how to format).  Already has
+ * the 0x / 0X prefix -> passed through unchanged.  Otherwise prepend
+ * 0x to the existing digits (these always survived lexer validation as
+ * a hex or unprefixed-decimal literal, so no numeric reparse needed).
+ */
+static void emit_hex_for_header(struct sbuf *out, const char *val)
+{
+	if (!val || !*val) {
+		sbuf_addstr(out, "");
+		return;
+	}
+	if (val[0] == '0' && (val[1] == 'x' || val[1] == 'X')) {
+		sbuf_addstr(out, val);
+		return;
+	}
+	sbuf_addstr(out, "0x");
+	sbuf_addstr(out, val);
+}
+
+/*
+ * True when @p s has at least one KP_PROMPT property whose @c if guard
+ * currently evaluates true.  Python kconfgen emits only user-facing
+ * symbols (those with a visible prompt) -- "hidden" internal bool/int
+ * flags that track derived state but have no prompt are not written to
+ * any of the generated artefacts.
+ *
+ * Respecting the per-prompt @c cond is load-bearing for the idiom
+ * `bool "Label" if FEATURE_FLAG` that ESP-IDF uses in a few places
+ * (e.g. BOOTLOADER_LOG_VERSION_2's `bool "V2" if LOG_VERSION_2`).
+ * When FEATURE_FLAG is false the prompt is effectively absent, so the
+ * symbol behaves like a promptless bool and we should apply the
+ * no-prompt emit rules (bool: emit only when "y").
  */
 static int has_prompt(const struct ksym *s)
 {
-	for (const struct kprop *p = s->props; p; p = p->next)
-		if (p->kind == KP_PROMPT)
+	for (const struct kprop *p = s->props; p; p = p->next) {
+		if (p->kind != KP_PROMPT)
+			continue;
+		if (!p->cond || kc_expr_bool(p->cond))
 			return 1;
+	}
 	return 0;
 }
 
@@ -293,32 +406,27 @@ static int has_prompt(const struct ksym *s)
  *   - Bool: only if the current value is "y".  A no-prompt bool that
  *     resolves to "n" is never emitted (it would just be a CONFIG_X
  *     is not set line with no way for the user to have influenced it).
- *   - int / hex / string / float: emit when the symbol has at least
- *     one @c default prop.  The presence of an explicit default marks
- *     the symbol as "derived" -- something the kconfig author wants
- *     downstream code to see.  This covers int parents of a choice
- *     whose value is 0 (e.g. CONFIG_ESP32_REV_MIN for ESP32_REV_MIN_0)
- *     and string aliases that happen to evaluate to the empty string.
+ *   - int / hex / string / float: emit only when a @c default actually
+ *     fired on the visible symbol.  Having @c default lines declared
+ *     isn't enough -- see emit_worthy_no_prompt for the reasoning.
  */
-static int has_defaults(const struct ksym *s)
-{
-	for (const struct kprop *p = s->props; p; p = p->next)
-		if (p->kind == KP_DEFAULT)
-			return 1;
-	return 0;
-}
-
 static int emit_worthy_no_prompt(const struct ksym *s)
 {
 	if (s->type == KS_BOOL)
 		return s->cur_val && !strcmp(s->cur_val, "y");
 	/*
 	 * int / hex / string / float without a prompt: emit only when
-	 * the symbol is visible AND declares at least one @c default.
-	 * A hidden no-prompt int falls back to the zero default and
-	 * python drops it from every output, so mirror that.
+	 * the symbol is visible AND has a meaningful value -- either
+	 * the user set it via --config / --defaults, or at least one
+	 * of its @c default properties actually fired (@c
+	 * default_applied tracked during fixpoint).  Merely having a
+	 * @c default line declared isn't enough: HAL_LOG_LEVEL declares
+	 * a full `default N if FLAG_N` table but none match when the
+	 * enclosing choice is hidden, leaving the value at the type's
+	 * zero.  Python kconfgen drops those; mirror that so we don't
+	 * emit spurious `=0` lines for promptless derived ints.
 	 */
-	return s->visible && has_defaults(s);
+	return s->visible && (s->default_applied || s->user_set);
 }
 
 /*
@@ -426,12 +534,60 @@ static void emit_symbol(struct sbuf *out, const struct ksym *s)
 	sbuf_addf(out, "%s%s=%s\n", CONFIG_PREFIX, s->name, val);
 }
 
-static void cb_config(struct sbuf *out, const struct ksym *s, void *ud)
+/*
+ * True when walking @p m (pre-order) will produce at least one emitted
+ * line -- any KM_SYM/KM_CHOICE whose symbol passes should_emit(), or
+ * any descendant KM_MENU/KM_COMMENT.  Used to skip emitting empty
+ * `# MenuTitle` / `# end of MenuTitle` pairs around menus whose entire
+ * subtree is hidden; python kconfgen does this trimming too.
+ */
+static int subtree_has_emit(const struct kmenu *m)
 {
-	(void)ud;
-	if (!should_emit(s))
+	if (!m)
+		return 0;
+	if ((m->kind == KM_SYM || m->kind == KM_CHOICE) && m->sym &&
+	    should_emit(m->sym))
+		return 1;
+	if (m->kind == KM_MENU || m->kind == KM_COMMENT)
+		if (m->prompt && *m->prompt)
+			return 1;
+	for (const struct kmenu *c = m->children; c; c = c->next)
+		if (subtree_has_emit(c))
+			return 1;
+	return 0;
+}
+
+/*
+ * Config-format menu walker: emits python's `#\n# Title\n#\n ... # end
+ * of Title\n` markers around each visible menu and `#\n# Comment\n#\n`
+ * comment-node blocks, plus the actual symbol lines inside.  KM_CHOICE,
+ * KM_IF, KM_ROOT are transparent -- they group symbols but contribute
+ * no label to sdkconfig.
+ */
+static void walk_config(const struct kmenu *m, struct sbuf *out)
+{
+	if (!m)
 		return;
-	emit_symbol(out, s);
+
+	if (m->kind == KM_MENU && m->prompt && subtree_has_emit(m)) {
+		sbuf_addf(out, "\n#\n# %s\n#\n", m->prompt);
+		for (const struct kmenu *c = m->children; c; c = c->next)
+			walk_config(c, out);
+		sbuf_addf(out, "# end of %s\n", m->prompt);
+		return;
+	}
+
+	if (m->kind == KM_COMMENT && m->prompt) {
+		sbuf_addf(out, "\n#\n# %s\n#\n", m->prompt);
+		return;
+	}
+
+	if ((m->kind == KM_SYM || m->kind == KM_CHOICE) && m->sym &&
+	    should_emit(m->sym))
+		emit_symbol(out, m->sym);
+
+	for (const struct kmenu *c = m->children; c; c = c->next)
+		walk_config(c, out);
 }
 
 /*
@@ -513,12 +669,29 @@ static int header_defines_sym(const struct ksym *s)
 	return 1; /* int / hex / float / string / unknown */
 }
 
+static int rename_old_cmp(const void *a, const void *b)
+{
+	const struct kc_rename *ra = *(const struct kc_rename *const *)a;
+	const struct kc_rename *rb = *(const struct kc_rename *const *)b;
+	return strcmp(ra->old_name, rb->old_name);
+}
+
 static void emit_deprecated_header(struct sbuf *out, const struct kc_ctx *ctx)
 {
 	if (ctx->no_deprecated || !ctx->n_renames)
 		return;
 
-	sbuf_addstr(out, "\n/* List of deprecated options */\n");
+	/*
+	 * Python kconfgen sorts the header deprecated-alias block
+	 * alphabetically by old name (unlike the sdkconfig and cmake
+	 * blocks, which keep declaration order).  Mirror that here so
+	 * build-system diff tools don't trip over a reordered header.
+	 */
+	const struct kc_rename **sorted =
+	    calloc(ctx->n_renames, sizeof(*sorted));
+	if (!sorted)
+		die_errno("calloc");
+	size_t n = 0;
 	for (size_t i = 0; i < ctx->n_renames; i++) {
 		const struct kc_rename *r = &ctx->renames[i];
 		if (r->invert)
@@ -528,27 +701,40 @@ static void emit_deprecated_header(struct sbuf *out, const struct kc_ctx *ctx)
 			continue;
 		if (!header_defines_sym(new_sym))
 			continue;
+		sorted[n++] = r;
+	}
+	qsort(sorted, n, sizeof(*sorted), rename_old_cmp);
+
+	sbuf_addstr(out, "\n/* List of deprecated options */\n");
+	for (size_t i = 0; i < n; i++) {
+		const struct kc_rename *r = sorted[i];
 		sbuf_addf(out, "#define %s%s %s%s\n", CONFIG_PREFIX,
 			  r->old_name, CONFIG_PREFIX, r->new_name);
 	}
+	free(sorted);
 }
 
 void kc_write_config(const struct kc_ctx *ctx, const char *path)
 {
 	struct sbuf out = SBUF_INIT;
 
-	/* Matches python kconfgen's header verbatim so diff-based
-	 * build-system tooling that compares old/new sdkconfig doesn't
-	 * flag a spurious header change.  The double space before
-	 * "Project Configuration" mirrors python's output when no
-	 * IDF version string is substituted. */
+	/*
+	 * Python kconfgen stamps the ESP-IDF release (`$IDF_VERSION`
+	 * from the env) into the preamble.  When unset it leaves the
+	 * double-space gap where the version would go, so we replicate
+	 * that exact behaviour.
+	 */
+	const char *ver =
+	    (ctx->idf_version && *ctx->idf_version) ? ctx->idf_version : "";
 	sbuf_addstr(&out, "#\n"
-			  "# Automatically generated file. DO NOT EDIT.\n"
-			  "# Espressif IoT Development Framework (ESP-IDF)  "
-			  "Project Configuration\n"
-			  "#\n");
+			  "# Automatically generated file. DO NOT EDIT.\n");
+	sbuf_addf(&out,
+		  "# Espressif IoT Development Framework (ESP-IDF) %s "
+		  "Project Configuration\n",
+		  ver);
+	sbuf_addstr(&out, "#\n");
 
-	walk_syms(ctx->root, &out, cb_config, NULL);
+	walk_config(ctx->root, &out);
 	emit_deprecated_config(&out, ctx);
 
 	if (write_file_atomic(path, out.buf, out.len) < 0)
@@ -581,7 +767,13 @@ static void emit_header_symbol(struct sbuf *out, const struct ksym *s)
 		sbuf_addch(out, '\n');
 		return;
 	}
-	/* int / hex / float / unknown: emit raw. */
+	if (s->type == KS_HEX) {
+		sbuf_addf(out, "#define %s%s ", CONFIG_PREFIX, s->name);
+		emit_hex_for_header(out, val);
+		sbuf_addch(out, '\n');
+		return;
+	}
+	/* int / float / unknown: emit raw. */
 	sbuf_addf(out, "#define %s%s %s\n", CONFIG_PREFIX, s->name, val);
 }
 
@@ -597,11 +789,15 @@ void kc_write_header(const struct kc_ctx *ctx, const char *path)
 {
 	struct sbuf out = SBUF_INIT;
 
+	const char *ver =
+	    (ctx->idf_version && *ctx->idf_version) ? ctx->idf_version : "";
 	sbuf_addstr(&out, "/*\n"
-			  " * Automatically generated file. DO NOT EDIT.\n"
-			  " * Espressif IoT Development Framework (ESP-IDF)  "
-			  "Configuration Header\n"
-			  " */\n"
+			  " * Automatically generated file. DO NOT EDIT.\n");
+	sbuf_addf(&out,
+		  " * Espressif IoT Development Framework (ESP-IDF) %s "
+		  "Configuration Header\n",
+		  ver);
+	sbuf_addstr(&out, " */\n"
 			  "#pragma once\n");
 
 	walk_syms(ctx->root, &out, cb_header, NULL);
@@ -629,7 +825,19 @@ static void emit_cmake_symbol(struct sbuf *out, const struct ksym *s)
 		effective = ""; /* bool-n renders as empty string */
 
 	sbuf_addf(out, "set(%s%s ", CONFIG_PREFIX, s->name);
-	emit_quoted(out, effective);
+	if (s->type == KS_HEX) {
+		/*
+		 * Hex values get the same 0x-prefix normalisation as in
+		 * sdkconfig.h -- python kconfgen emits `set(CONFIG_X "0x0")`
+		 * for a hex symbol whose Kconfig `default 0` provides just
+		 * a decimal-looking "0".
+		 */
+		sbuf_addch(out, '"');
+		emit_hex_for_header(out, effective);
+		sbuf_addch(out, '"');
+	} else {
+		emit_quoted(out, effective);
+	}
 	sbuf_addstr(out, ")\n");
 }
 

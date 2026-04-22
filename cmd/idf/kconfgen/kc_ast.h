@@ -116,6 +116,13 @@ struct ksym {
 	int user_set;		     /**< Value came from --config or
 				      *   --defaults (not a built-in
 				      *   default). */
+	int default_applied;	     /**< Current cur_val came from a
+				      *   matched @c default property (used
+				      *   by emit filters to distinguish an
+				      *   applied-default 0 from the
+				      *   type's zero fallback -- python
+				      *   kconfgen only emits no-prompt
+				      *   ints when a default fired). */
 };
 
 /* ------------------------------------------------------------------ */
@@ -187,6 +194,16 @@ struct kc_ctx {
 	size_t n_renames;
 	size_t alloc_renames;
 	int no_deprecated; /**< Set by --dont-write-deprecated. */
+
+	/*
+	 * ESP-IDF-specific banner substitution.  Python kconfgen reads
+	 * @c IDF_VERSION from the env and interpolates it into the
+	 * preamble of sdkconfig / sdkconfig.h so downstream diffs can
+	 * tell which IDF release generated the file.  Owned string;
+	 * empty / NULL leaves the preamble with a double-space gap like
+	 * python does when the var is unset.
+	 */
+	char *idf_version;
 };
 
 /** Initialize an empty context (equivalent to zero-init + root creation). */

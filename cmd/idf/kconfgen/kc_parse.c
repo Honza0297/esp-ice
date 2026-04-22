@@ -118,6 +118,7 @@ void kc_ctx_init(struct kc_ctx *ctx)
 	ctx->n_renames = 0;
 	ctx->alloc_renames = 0;
 	ctx->no_deprecated = 0;
+	ctx->idf_version = NULL;
 }
 
 const char *kc_ctx_intern_file(struct kc_ctx *ctx, const char *path)
@@ -196,6 +197,9 @@ void kc_ctx_release(struct kc_ctx *ctx)
 	ctx->renames = NULL;
 	ctx->n_renames = 0;
 	ctx->alloc_renames = 0;
+
+	free(ctx->idf_version);
+	ctx->idf_version = NULL;
 }
 
 /* ================================================================== */
@@ -950,6 +954,17 @@ static void parse_source_stmt(struct kc_parser *p)
 
 	int optional = (variant == KT_OSOURCE || variant == KT_ORSOURCE);
 	int relative = (variant == KT_RSOURCE || variant == KT_ORSOURCE);
+
+	/*
+	 * Expand bare @c $VAR references in the source path.  The lexer
+	 * keeps them literal inside quoted string values (to match python
+	 * kconfgen on string defaults like `default "$IDF_INIT_VERSION"`),
+	 * but source paths routinely interpolate env vars via `$IDF_TARGET`
+	 * / `$COMPONENT_KCONFIGS_SOURCE_FILE` -- handle those here.
+	 */
+	char *expanded = kc_lex_expand_bare_vars(&p->lex, raw);
+	free(raw);
+	raw = expanded;
 
 	char *resolved = relative ? resolve_rsource_path(p->lex.path, raw)
 				  : sbuf_strdup(raw);

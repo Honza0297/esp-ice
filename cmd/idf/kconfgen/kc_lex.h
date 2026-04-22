@@ -228,4 +228,19 @@ void kc_lex_die_unexpected(struct kc_lexer *l, int want);
  */
 int kc_lex_push_file(struct kc_lexer *l, const char *path, int optional);
 
+/**
+ * @brief Expand bare @c $VAR references in a source path.
+ *
+ * ESP-IDF writes `source "$COMPONENT_KCONFIGS_SOURCE_FILE"` and
+ * `orsource "./components/soc/$IDF_TARGET/include/..."` -- bare
+ * @c $VAR that has to resolve via the current --env / --env-file /
+ * real-environment tables.  String defaults don't get this expansion
+ * (the lexer keeps `$FOO` literal inside quoted values), so we do it
+ * explicitly for source paths only.  Returns a newly-allocated string;
+ * caller frees.  Unknown vars expand to empty, matching the silent-
+ * fallback semantics python kconfgen uses when a source path env var
+ * happens to be unset.
+ */
+char *kc_lex_expand_bare_vars(struct kc_lexer *l, const char *raw);
+
 #endif /* KC_LEX_H */

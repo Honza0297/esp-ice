@@ -244,6 +244,26 @@ int cmd_idf_kconfgen(int argc, const char **argv)
 	kc_parse_file(&ctx, opt_kconfig,
 		      opt_env.nr ? (const char *const *)opt_env.v : NULL);
 
+	/*
+	 * Stamp @c IDF_VERSION into the output preambles if the env
+	 * supplies one.  Python kconfgen interpolates the same value
+	 * into sdkconfig / sdkconfig.h so diff-based build tooling can
+	 * spot IDF release changes at a glance.
+	 */
+	for (size_t i = 0; i < opt_env.nr; i++) {
+		const char prefix[] = "IDF_VERSION=";
+		if (!strncmp(opt_env.v[i], prefix, sizeof(prefix) - 1)) {
+			ctx.idf_version =
+			    sbuf_strdup(opt_env.v[i] + sizeof(prefix) - 1);
+			break;
+		}
+	}
+	if (!ctx.idf_version) {
+		const char *v = getenv("IDF_VERSION");
+		if (v)
+			ctx.idf_version = sbuf_strdup(v);
+	}
+
 	if (opt_dump_ast)
 		kc_ast_dump(&ctx);
 

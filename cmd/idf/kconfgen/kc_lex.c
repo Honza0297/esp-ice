@@ -205,6 +205,29 @@ static void env_warn_once(struct kc_lexer *l, const char *name, size_t n)
 	     l->path, l->line, (int)n, name);
 }
 
+char *kc_lex_expand_bare_vars(struct kc_lexer *l, const char *raw)
+{
+	if (!raw)
+		return sbuf_strdup("");
+	struct sbuf sb = SBUF_INIT;
+	for (const char *p = raw; *p;) {
+		if (*p == '$' && is_name_start((unsigned char)p[1])) {
+			const char *name = p + 1;
+			const char *end = name;
+			while (is_name_cont((unsigned char)*end))
+				end++;
+			size_t n = (size_t)(end - name);
+			const char *val = env_lookup(l, name, n);
+			if (val)
+				sbuf_addstr(&sb, val);
+			p = end;
+			continue;
+		}
+		sbuf_addch(&sb, *p++);
+	}
+	return sbuf_detach(&sb);
+}
+
 /* ================================================================== */
 /*  Quoted string lexing                                              */
 /* ================================================================== */
@@ -259,6 +282,7 @@ static void lex_quoted(struct kc_lexer *l)
 		if (*l->pos == '$') {
 			const char *name;
 			size_t n;
+			int bare = 0;
 			if (l->pos[1] == '(') {
 				name = l->pos + 2;
 				const char *end = strchr(name, ')');
@@ -288,6 +312,7 @@ static void lex_quoted(struct kc_lexer *l)
 					end++;
 				n = (size_t)(end - name);
 				l->pos = end;
+				bare = 1;
 			} else {
 				/* Bare '$' with nothing recognisable --
 				 * keep literal. */
@@ -295,10 +320,25 @@ static void lex_quoted(struct kc_lexer *l)
 				continue;
 			}
 			const char *val = env_lookup(l, name, n);
-			if (val)
+			if (val) {
 				sbuf_addstr(&sb, val);
-			else
+			} else if (bare) {
+				/*
+				 * Bare `$VAR` with no matching env binding is
+				 * passed through verbatim so sdkconfig output
+				 * stays identical to python kconfgen (e.g.
+				 * `default "$IDF_INIT_VERSION"` stays as
+				 * `"$IDF_INIT_VERSION"` rather than becoming
+				 * an empty string when IDF_INIT_VERSION isn't
+				 * exported).  `$(VAR)` / `${VAR}` still warn
+				 * on undefined -- those forms are explicit
+				 * expansion requests.
+				 */
+				sbuf_addch(&sb, '$');
+				sbuf_add(&sb, name, n);
+			} else {
 				env_warn_once(l, name, n);
+			}
 			continue;
 		}
 		sbuf_addch(&sb, *l->pos++);

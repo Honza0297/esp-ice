@@ -27,6 +27,19 @@
 #define KC_EVAL_H
 
 struct kc_ctx;
+struct kexpr;
+
+/**
+ * @brief Evaluate an expression to a boolean using current symbol
+ *        values.
+ *
+ * Intended for post-@c kc_eval() callers (e.g. output writers) that need
+ * to re-evaluate a property's @c if guard -- a @c prompt whose cond is
+ * false should be treated as having no prompt, so the symbol drops out
+ * of sdkconfig output.  Returns 1 for a NULL expression, matching the
+ * internal "no guard means always true" convention.
+ */
+int kc_expr_bool(const struct kexpr *e);
 
 /**
  * @brief Run the full evaluation pipeline on @p ctx.

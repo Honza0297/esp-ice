@@ -219,20 +219,29 @@ static int eval_bool(const struct kexpr *e)
 	return 0;
 }
 
+int kc_expr_bool(const struct kexpr *e) { return eval_bool(e); }
+
 /* ================================================================== */
 /*  Pass 1: menu context deps                                         */
 /* ================================================================== */
 
 static void pass_ctx_dep(struct kmenu *m, const struct kexpr *parent_ctx)
 {
-	/* Own ctx_dep = parent ctx AND menu's own dep AND visible_if. */
+	/*
+	 * Own ctx_dep = parent ctx AND menu's own @c depends-on.
+	 *
+	 * @c visible_if is NOT folded in: it only hides a menu from the
+	 * UI (so its child prompts stop being interactively set-able),
+	 * but child symbols still compute their values normally.  Python
+	 * kconfgen preserves this distinction -- e.g. the MMU_PAGE_SIZE_*
+	 * family in components/soc/Kconfig lives under `visible if 0`
+	 * yet is still emitted with its matched-default value.
+	 */
 	struct kexpr *own = NULL;
 	if (parent_ctx)
 		own = expr_clone(parent_ctx);
 	if (m->dep)
 		own = expr_and_take(own, expr_clone(m->dep));
-	if (m->visible_if)
-		own = expr_and_take(own, expr_clone(m->visible_if));
 	m->ctx_dep = own;
 
 	for (struct kmenu *c = m->children; c; c = c->next)
@@ -590,6 +599,7 @@ static int fixpoint_step(struct kc_ctx *ctx)
 		int new_visible = eval_bool(s->effective_dep);
 
 		char *new_val = NULL;
+		int default_hit = 0;
 		if (s->user_set && new_visible) {
 			new_val = sbuf_strdup(s->cur_val ? s->cur_val : "");
 		} else if (new_visible) {
@@ -609,8 +619,13 @@ static int fixpoint_step(struct kc_ctx *ctx)
 				if (!eval_bool(p->cond))
 					continue;
 				new_val = default_value(p->expr, s->type);
+				default_hit = 1;
 				break;
 			}
+		}
+		if (s->default_applied != default_hit) {
+			s->default_applied = default_hit;
+			changed = 1;
 		}
 		if (!new_val) {
 			const char *zero;
