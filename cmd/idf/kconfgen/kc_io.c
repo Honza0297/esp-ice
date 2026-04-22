@@ -379,30 +379,52 @@ static int is_pseudo_sym(const struct ksym *s)
 }
 
 /*
- * Render a hex symbol's stored string value with a leading 0x.
+ * Render a hex symbol's stored string value with a `0x` prefix,
+ * preserving the case of the source-level default.  Python's header
+ * writer keeps the stored case (uppercase hex stays uppercase; a
+ * bare `0` gets a `0x` added but stays `0x0`), while its cmake
+ * writer parses the value and re-emits it in lowercase -- see
+ * emit_hex_for_cmake.
  *
- * Python kconfgen normalises hex values for C-header and cmake output,
- * so a sdkconfig line like `CONFIG_BOOTLOADER_RESERVE_RTC_SIZE=0`
- * (default 0 in the Kconfig) becomes `0x0` in sdkconfig.h and
- * sdkconfig.cmake.  Ice stores cur_val verbatim, so we normalise here.
- *
- * Empty string -> empty (caller decides how to format).  Already has
- * the 0x / 0X prefix -> passed through unchanged.  Otherwise prepend
- * 0x to the existing digits (these always survived lexer validation as
- * a hex or unprefixed-decimal literal, so no numeric reparse needed).
+ * Empty input produces no output.  The caller handles the enclosing
+ * quoting or `#define` syntax.
  */
 static void emit_hex_for_header(struct sbuf *out, const char *val)
 {
-	if (!val || !*val) {
-		sbuf_addstr(out, "");
+	if (!val || !*val)
 		return;
-	}
 	if (val[0] == '0' && (val[1] == 'x' || val[1] == 'X')) {
 		sbuf_addstr(out, val);
 		return;
 	}
 	sbuf_addstr(out, "0x");
 	sbuf_addstr(out, val);
+}
+
+/*
+ * Render a hex value for sdkconfig.cmake: python parses the number
+ * and formats with `%x`, so the digits come out lowercase and
+ * without leading zeros (`0x0` instead of `0x0000`).  Non-numeric
+ * inputs fall through to emit_hex_for_header's preserve-case path.
+ */
+static void emit_hex_for_cmake(struct sbuf *out, const char *val)
+{
+	if (!val || !*val)
+		return;
+
+	const char *p = val;
+	int base = 10;
+	if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+		base = 16;
+		p += 2;
+	}
+	char *end = NULL;
+	unsigned long long v = strtoull(p, &end, base);
+	if (!end || end == p || *end) {
+		emit_hex_for_header(out, val);
+		return;
+	}
+	sbuf_addf(out, "0x%llx", v);
 }
 
 /*
@@ -908,13 +930,12 @@ static void emit_cmake_symbol(struct sbuf *out, const struct ksym *s)
 	sbuf_addf(out, "set(%s%s ", CONFIG_PREFIX, s->name);
 	if (s->type == KS_HEX) {
 		/*
-		 * Hex values get the same 0x-prefix normalisation as in
-		 * sdkconfig.h -- python kconfgen emits `set(CONFIG_X "0x0")`
-		 * for a hex symbol whose Kconfig `default 0` provides just
-		 * a decimal-looking "0".
+		 * Hex values go through emit_hex_for_cmake here to match
+		 * python's `%x` (lowercase, leading zeros stripped) -- the
+		 * sdkconfig.h writer uses the case-preserving variant.
 		 */
 		sbuf_addch(out, '"');
-		emit_hex_for_header(out, effective);
+		emit_hex_for_cmake(out, effective);
 		sbuf_addch(out, '"');
 	} else {
 		emit_quoted(out, effective);
