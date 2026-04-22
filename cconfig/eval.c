@@ -15,6 +15,7 @@
  */
 #include "cconfig/cconfig.h"
 #include "ice.h"
+#include <locale.h>
 
 /* ------------------------------------------------------------------ */
 /*  Symbol string value                                                */
@@ -52,6 +53,38 @@ const char *kc_sym_get_string(const struct kc_symbol *sym)
 	if (!sym->menu_node)
 		return sym->name;
 	return sym_type_default(sym->type);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Locale-independent strtod                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * setlocale() is process-global and not thread-safe: concurrent
+ * calls from different threads produce undefined behavior.  The
+ * thread-safe alternative is uselocale() + newlocale() (POSIX
+ * 2008), but those are not available on all targets this project
+ * supports.  Since cconfig is single-threaded today, the
+ * save/restore approach is sufficient.
+ */
+static double strtod_c(const char *nptr, char **endptr)
+{
+	char *prev = setlocale(LC_NUMERIC, NULL);
+	char saved[64];
+	double val;
+
+	if (prev)
+		snprintf(saved, sizeof(saved), "%s", prev);
+	else
+		saved[0] = '\0';
+
+	setlocale(LC_NUMERIC, "C");
+	val = strtod(nptr, endptr);
+
+	if (saved[0])
+		setlocale(LC_NUMERIC, saved);
+
+	return val;
 }
 
 /* ------------------------------------------------------------------ */
@@ -111,36 +144,64 @@ enum kc_val kc_expr_eval(const struct kc_expr *expr)
 	case KC_E_LTE:
 	case KC_E_GTE: {
 		struct kc_symbol *lsym, *rsym;
+		const char *lval, *rval;
+		char *lend, *rend;
+		double ld, rd;
+		int result;
 
 		if (expr->data.children.left->type != KC_E_SYMBOL ||
 		    expr->data.children.right->type != KC_E_SYMBOL)
 			die("BUG: relational operands must be KC_E_SYMBOL");
 		lsym = expr->data.children.left->data.sym;
 		rsym = expr->data.children.right->data.sym;
-		long lnum, rnum;
-		int result;
 
 		kc_sym_calc_value(lsym);
 		kc_sym_calc_value(rsym);
-		lnum = strtol(kc_sym_get_string(lsym), NULL, 0);
-		rnum = strtol(kc_sym_get_string(rsym), NULL, 0);
+		lval = kc_sym_get_string(lsym);
+		rval = kc_sym_get_string(rsym);
 
-		switch (expr->type) {
-		case KC_E_LT:
-			result = (lnum < rnum);
-			break;
-		case KC_E_GT:
-			result = (lnum > rnum);
-			break;
-		case KC_E_LTE:
-			result = (lnum <= rnum);
-			break;
-		case KC_E_GTE:
-			result = (lnum >= rnum);
-			break;
-		default:
-			result = 0;
-			break;
+		ld = strtod_c(lval, &lend);
+		rd = strtod_c(rval, &rend);
+
+		if (*lend == '\0' && *rend == '\0') {
+			switch (expr->type) {
+			case KC_E_LT:
+				result = (ld < rd);
+				break;
+			case KC_E_GT:
+				result = (ld > rd);
+				break;
+			case KC_E_LTE:
+				result = (ld <= rd);
+				break;
+			case KC_E_GTE:
+				result = (ld >= rd);
+				break;
+			default:
+				result = 0;
+				break;
+			}
+		} else {
+			long lnum = strtol(lval, NULL, 0);
+			long rnum = strtol(rval, NULL, 0);
+
+			switch (expr->type) {
+			case KC_E_LT:
+				result = (lnum < rnum);
+				break;
+			case KC_E_GT:
+				result = (lnum > rnum);
+				break;
+			case KC_E_LTE:
+				result = (lnum <= rnum);
+				break;
+			case KC_E_GTE:
+				result = (lnum >= rnum);
+				break;
+			default:
+				result = 0;
+				break;
+			}
 		}
 		return result ? KC_VAL_Y : KC_VAL_N;
 	}
@@ -239,7 +300,7 @@ void kc_sym_calc_value(struct kc_symbol *sym)
 			free(sym->curr_value);
 			sym->curr_value = sbuf_strdup("y");
 		}
-		if (sym->weak_rev_deps &&
+		if (sym->weak_rev_deps && kc_menu_visible(sym->menu_node) &&
 		    kc_expr_eval(sym->weak_rev_deps) == KC_VAL_Y &&
 		    strcmp(sym->curr_value, "n") == 0) {
 			free(sym->curr_value);
@@ -356,6 +417,182 @@ static void propagate_deps(struct kc_menu_node *node)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Choice resolution                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Find the selected choice member: use the explicit default if active,
+ * otherwise pick the first visible bool member.
+ */
+static struct kc_symbol *choice_find_default(struct kc_menu_node *choice_node)
+{
+	struct kc_symbol *choice_sym = choice_node->sym;
+	struct kc_property *prop;
+	struct kc_menu_node *child;
+
+	for (prop = choice_sym->props; prop; prop = prop->next) {
+		if (prop->kind != KC_PROP_DEFAULT)
+			continue;
+		if (prop->cond && kc_expr_eval(prop->cond) != KC_VAL_Y)
+			continue;
+		if (prop->value && prop->value->type == KC_E_SYMBOL)
+			return prop->value->data.sym;
+	}
+
+	for (child = choice_node->child; child; child = child->next) {
+		if (child->sym && (child->sym->flags & KC_SYM_CHOICEVAL) &&
+		    child->sym->type == KC_TYPE_BOOL)
+			return child->sym;
+		if (!child->sym && child->child) {
+			struct kc_menu_node *inner;
+
+			for (inner = child->child; inner; inner = inner->next) {
+				if (inner->sym &&
+				    (inner->sym->flags & KC_SYM_CHOICEVAL) &&
+				    inner->sym->type == KC_TYPE_BOOL)
+					return inner->sym;
+			}
+		}
+	}
+
+	return NULL;
+}
+
+/**
+ * Set the selected choice member to "y" and all other bool members
+ * to "n".  Only applies when the choice group itself is visible and
+ * no user value has been loaded for any member.
+ *
+ * Non-bool choice members (int, string, etc.) are ignored — only
+ * bool members participate in the mutual-exclusion default logic.
+ */
+static void resolve_choice(struct kc_menu_node *choice_node)
+{
+	struct kc_symbol *selected;
+	struct kc_menu_node *child;
+
+	if (!kc_menu_visible(choice_node))
+		return;
+
+	selected = choice_find_default(choice_node);
+
+	for (child = choice_node->child; child; child = child->next) {
+		if (child->sym && (child->sym->flags & KC_SYM_CHOICEVAL) &&
+		    child->sym->type == KC_TYPE_BOOL &&
+		    !child->sym->curr_value) {
+			child->sym->curr_value =
+			    sbuf_strdup(child->sym == selected ? "y" : "n");
+		}
+		if (!child->sym && child->child) {
+			struct kc_menu_node *inner;
+
+			for (inner = child->child; inner; inner = inner->next) {
+				if (inner->sym &&
+				    (inner->sym->flags & KC_SYM_CHOICEVAL) &&
+				    inner->sym->type == KC_TYPE_BOOL &&
+				    !inner->sym->curr_value) {
+					inner->sym->curr_value = sbuf_strdup(
+					    inner->sym == selected ? "y" : "n");
+				}
+			}
+		}
+	}
+}
+
+static void resolve_choices(struct kc_menu_node *node)
+{
+	struct kc_menu_node *child;
+
+	if (node->sym && (node->sym->flags & KC_SYM_CHOICE))
+		resolve_choice(node);
+
+	for (child = node->child; child; child = child->next)
+		resolve_choices(child);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Indirect set / set default processing                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Walk the menu tree and process indirect set properties.
+ * @p is_strong selects KC_PROP_SET (1) or KC_PROP_SET_DEFAULT (0).
+ * First active set per target wins (tracked via temporary flags).
+ *
+ * Strong set unconditionally overrides, including user-loaded values
+ * (matches kconfiglib semantics where `set TARGET=value` is an
+ * unconditional override regardless of sdkconfig contents).
+ *
+ * NOTE: this mutates sym->curr_value while walking the tree.  The
+ * per-target done-flags (KC_SET_DONE / KC_SET_WEAK_DONE) ensure each
+ * target is written at most once per pass, making walk order safe.
+ */
+static void process_sets_walk(struct kc_menu_node *node, int is_strong)
+{
+	struct kc_menu_node *child;
+
+	if (node->sym) {
+		struct kc_property *prop;
+		const char *src_val;
+
+		kc_sym_calc_value(node->sym);
+		src_val = kc_sym_get_string(node->sym);
+
+		for (prop = node->sym->props; prop; prop = prop->next) {
+			struct kc_symbol *target;
+			const char *set_val;
+
+			if (is_strong && prop->kind != KC_PROP_SET)
+				continue;
+			if (!is_strong && prop->kind != KC_PROP_SET_DEFAULT)
+				continue;
+
+			if (strcmp(src_val, "y") != 0)
+				continue;
+			if (prop->cond && kc_expr_eval(prop->cond) != KC_VAL_Y)
+				continue;
+
+			target = prop->set_target;
+			if (!target)
+				continue;
+
+			if (is_strong && (target->flags & KC_SET_DONE))
+				continue;
+			if (!is_strong && ((target->flags & KC_SET_DONE) ||
+					   (target->flags & KC_SET_WEAK_DONE) ||
+					   (target->flags & KC_SYM_CHANGED)))
+				continue;
+
+			kc_sym_calc_value(prop->value->data.sym);
+			set_val = kc_sym_get_string(prop->value->data.sym);
+
+			free(target->curr_value);
+			target->curr_value = sbuf_strdup(set_val);
+
+			if (is_strong)
+				target->flags |= KC_SET_DONE;
+			else
+				target->flags |= KC_SET_WEAK_DONE;
+		}
+	}
+
+	for (child = node->child; child; child = child->next)
+		process_sets_walk(child, is_strong);
+}
+
+static void clear_set_flags(struct kc_symtab *tab)
+{
+	int idx;
+
+	for (idx = 0; idx < KC_SYMTAB_BUCKETS; idx++) {
+		struct kc_symbol *sym;
+
+		for (sym = tab->buckets[idx]; sym; sym = sym->hash_next)
+			sym->flags &= ~(KC_SET_DONE | KC_SET_WEAK_DONE);
+	}
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public finalization entry point                                    */
 /* ------------------------------------------------------------------ */
 
@@ -365,6 +602,7 @@ void kc_finalize(struct kc_menu_node *root, struct kc_symtab *tab)
 
 	propagate_visibility(root, NULL);
 	propagate_deps(root);
+	resolve_choices(root);
 
 	for (idx = 0; idx < KC_SYMTAB_BUCKETS; idx++) {
 		struct kc_symbol *sym;
@@ -372,6 +610,25 @@ void kc_finalize(struct kc_menu_node *root, struct kc_symtab *tab)
 		for (sym = tab->buckets[idx]; sym; sym = sym->hash_next)
 			kc_sym_calc_value(sym);
 	}
+
+	/* Indirect sets: strong sets override defaults; weak sets only
+	 * apply when the target has no user value or strong set. */
+	process_sets_walk(root, 1);
+	process_sets_walk(root, 0);
+
+	/* Re-apply range constraints on symbols modified by set. */
+	for (idx = 0; idx < KC_SYMTAB_BUCKETS; idx++) {
+		struct kc_symbol *sym;
+
+		for (sym = tab->buckets[idx]; sym; sym = sym->hash_next) {
+			if (sym->flags & (KC_SET_DONE | KC_SET_WEAK_DONE)) {
+				sym->flags &= ~KC_SYM_VALID;
+				kc_sym_calc_value(sym);
+			}
+		}
+	}
+
+	clear_set_flags(tab);
 }
 
 /* ------------------------------------------------------------------ */

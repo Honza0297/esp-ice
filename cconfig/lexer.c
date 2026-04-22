@@ -16,8 +16,8 @@
  * token whose value is the full help paragraph (terminated by
  * dedentation).
  */
-#include "ice.h"
 #include "cconfig/cconfig.h"
+#include "ice.h"
 
 /* ------------------------------------------------------------------ */
 /*  Keyword table                                                      */
@@ -30,44 +30,45 @@ struct kw_entry {
 
 /* Must stay sorted alphabetically for binary search in lookup_keyword(). */
 static const struct kw_entry kw_table[] = {
-	{"bool",         KC_TOK_BOOL},
-	{"choice",       KC_TOK_CHOICE},
-	{"comment",      KC_TOK_COMMENT},
-	{"config",       KC_TOK_CONFIG},
-	{"def_bool",     KC_TOK_DEF_BOOL},
-	{"def_float",    KC_TOK_DEF_FLOAT},
-	{"def_hex",      KC_TOK_DEF_HEX},
-	{"def_int",      KC_TOK_DEF_INT},
-	{"def_string",   KC_TOK_DEF_STRING},
-	{"def_tristate", KC_TOK_DEF_TRISTATE},
-	{"default",      KC_TOK_DEFAULT},
-	{"depends",      KC_TOK_DEPENDS},
-	{"endchoice",    KC_TOK_ENDCHOICE},
-	{"endif",        KC_TOK_ENDIF},
-	{"endmenu",      KC_TOK_ENDMENU},
-	{"float",        KC_TOK_FLOAT},
-	{"help",         KC_TOK_HELP},
-	{"hex",          KC_TOK_HEX},
-	{"if",           KC_TOK_IF},
-	{"imply",        KC_TOK_IMPLY},
-	{"int",          KC_TOK_INT},
-	{"mainmenu",     KC_TOK_MAINMENU},
-	{"menu",         KC_TOK_MENU},
-	{"menuconfig",   KC_TOK_MENUCONFIG},
-	{"on",           KC_TOK_ON},
-	{"optional",     KC_TOK_OPTIONAL},
-	{"orsource",     KC_TOK_ORSOURCE},
-	{"osource",      KC_TOK_OSOURCE},
-	{"prompt",       KC_TOK_PROMPT},
-	{"range",        KC_TOK_RANGE},
-	{"rsource",      KC_TOK_RSOURCE},
-	{"select",       KC_TOK_SELECT},
-	{"set",          KC_TOK_SET},
-	{"source",       KC_TOK_SOURCE},
-	{"string",       KC_TOK_STRING},
-	{"tristate",     KC_TOK_TRISTATE},
-	{"visible",      KC_TOK_VISIBLE},
-	{"warning",      KC_TOK_WARNING},
+    {"bool", KC_TOK_BOOL},
+    {"choice", KC_TOK_CHOICE},
+    {"comment", KC_TOK_COMMENT},
+    {"config", KC_TOK_CONFIG},
+    {"def_bool", KC_TOK_DEF_BOOL},
+    {"def_float", KC_TOK_DEF_FLOAT},
+    {"def_hex", KC_TOK_DEF_HEX},
+    {"def_int", KC_TOK_DEF_INT},
+    {"def_string", KC_TOK_DEF_STRING},
+    {"def_tristate", KC_TOK_DEF_TRISTATE},
+    {"default", KC_TOK_DEFAULT},
+    {"depends", KC_TOK_DEPENDS},
+    {"endchoice", KC_TOK_ENDCHOICE},
+    {"endif", KC_TOK_ENDIF},
+    {"endmenu", KC_TOK_ENDMENU},
+    {"float", KC_TOK_FLOAT},
+    {"help", KC_TOK_HELP},
+    {"hex", KC_TOK_HEX},
+    {"if", KC_TOK_IF},
+    {"imply", KC_TOK_IMPLY},
+    {"int", KC_TOK_INT},
+    {"mainmenu", KC_TOK_MAINMENU},
+    {"menu", KC_TOK_MENU},
+    {"menuconfig", KC_TOK_MENUCONFIG},
+    {"on", KC_TOK_ON},
+    {"option", KC_TOK_OPTION},
+    {"optional", KC_TOK_OPTIONAL},
+    {"orsource", KC_TOK_ORSOURCE},
+    {"osource", KC_TOK_OSOURCE},
+    {"prompt", KC_TOK_PROMPT},
+    {"range", KC_TOK_RANGE},
+    {"rsource", KC_TOK_RSOURCE},
+    {"select", KC_TOK_SELECT},
+    {"set", KC_TOK_SET},
+    {"source", KC_TOK_SOURCE},
+    {"string", KC_TOK_STRING},
+    {"tristate", KC_TOK_TRISTATE},
+    {"visible", KC_TOK_VISIBLE},
+    {"warning", KC_TOK_WARNING},
 };
 
 #define KW_COUNT (sizeof(kw_table) / sizeof(kw_table[0]))
@@ -104,7 +105,6 @@ static int is_ident_char(int ch)
 {
 	return is_ident_start(ch) || (ch >= '0' && ch <= '9');
 }
-
 
 /* ------------------------------------------------------------------ */
 /*  Public API                                                         */
@@ -384,8 +384,8 @@ void kc_lexer_next(struct kc_lexer *lex, struct kc_token *tok)
 
 	/* Two-character operators */
 	if (ptr[0] == ':' && ptr[1] == '=') {
-		emit(tok, KC_TOK_COLON_ASSIGN, lex->file, lex->line,
-		     lex->col, ":=");
+		emit(tok, KC_TOK_COLON_ASSIGN, lex->file, lex->line, lex->col,
+		     ":=");
 		lex->pos = ptr + 2;
 		lex->col += 2;
 		return;
@@ -398,8 +398,7 @@ void kc_lexer_next(struct kc_lexer *lex, struct kc_token *tok)
 		return;
 	}
 	if (ptr[0] == '<' && ptr[1] == '=') {
-		emit(tok, KC_TOK_LESS_EQ, lex->file, lex->line, lex->col,
-		     "<=");
+		emit(tok, KC_TOK_LESS_EQ, lex->file, lex->line, lex->col, "<=");
 		lex->pos = ptr + 2;
 		lex->col += 2;
 		return;
@@ -451,22 +450,70 @@ void kc_lexer_next(struct kc_lexer *lex, struct kc_token *tok)
 		}
 		if (op_type != KC_TOK_EOF) {
 			char val[2] = {*ptr, '\0'};
-			emit(tok, op_type, lex->file, lex->line, lex->col,
-			     val);
+			emit(tok, op_type, lex->file, lex->line, lex->col, val);
 			lex->pos = ptr + 1;
 			lex->col++;
 			return;
 		}
 	}
 
-	/* Identifier / keyword */
-	if (is_ident_start(*ptr) || (*ptr >= '0' && *ptr <= '9')) {
+	/* Dollar-sign variable reference: $(NAME), ${NAME}, or $NAME */
+	if (*ptr == '$') {
 		const char *start = ptr;
 		int start_col = lex->col;
-		enum kc_token_type kw_type;
 		char *word;
 
-		while (is_ident_char(*ptr)) {
+		ptr++;
+		lex->col++;
+		if (*ptr == '(') {
+			ptr++;
+			lex->col++;
+			while (*ptr && *ptr != ')' && *ptr != '\n') {
+				ptr++;
+				lex->col++;
+			}
+			if (*ptr == ')') {
+				ptr++;
+				lex->col++;
+			}
+		} else if (*ptr == '{') {
+			ptr++;
+			lex->col++;
+			while (*ptr && *ptr != '}' && *ptr != '\n') {
+				ptr++;
+				lex->col++;
+			}
+			if (*ptr == '}') {
+				ptr++;
+				lex->col++;
+			}
+		} else if (is_ident_start(*ptr)) {
+			while (is_ident_char(*ptr)) {
+				ptr++;
+				lex->col++;
+			}
+		}
+
+		word = sbuf_strndup(start, (size_t)(ptr - start));
+		lex->pos = ptr;
+
+		tok->type = KC_TOK_WORD;
+		tok->file = lex->file;
+		tok->line = lex->line;
+		tok->col = start_col;
+		tok->value = word;
+		return;
+	}
+
+	/* Negative number: -<digit>... (including floats like -1.5) */
+	if (*ptr == '-' && ptr[1] >= '0' && ptr[1] <= '9') {
+		const char *start = ptr;
+		int start_col = lex->col;
+		char *word;
+
+		ptr++;
+		lex->col++;
+		while (is_ident_char(*ptr) || *ptr == '.') {
 			ptr++;
 			lex->col++;
 		}
@@ -474,7 +521,31 @@ void kc_lexer_next(struct kc_lexer *lex, struct kc_token *tok)
 		word = sbuf_strndup(start, (size_t)(ptr - start));
 		lex->pos = ptr;
 
-		kw_type = lookup_keyword(word);
+		tok->type = KC_TOK_WORD;
+		tok->file = lex->file;
+		tok->line = lex->line;
+		tok->col = start_col;
+		tok->value = word;
+		return;
+	}
+
+	/* Identifier / keyword / numeric literal (floats like 5.3) */
+	if (is_ident_start(*ptr) || (*ptr >= '0' && *ptr <= '9')) {
+		const char *start = ptr;
+		int start_col = lex->col;
+		int is_numeric = (*ptr >= '0' && *ptr <= '9');
+		enum kc_token_type kw_type;
+		char *word;
+
+		while (is_ident_char(*ptr) || (is_numeric && *ptr == '.')) {
+			ptr++;
+			lex->col++;
+		}
+
+		word = sbuf_strndup(start, (size_t)(ptr - start));
+		lex->pos = ptr;
+
+		kw_type = is_numeric ? KC_TOK_WORD : lookup_keyword(word);
 		tok->type = kw_type;
 		tok->file = lex->file;
 		tok->line = lex->line;
@@ -504,62 +575,63 @@ void kc_token_release(struct kc_token *tok)
 
 /* Indexed by enum kc_token_type; must stay in sync with the enum. */
 static const char *const tok_names[] = {
-	[KC_TOK_EOF]          = "EOF",
-	[KC_TOK_NEWLINE]      = "NEWLINE",
-	[KC_TOK_WORD]         = "WORD",
-	[KC_TOK_QUOTED]       = "QUOTED",
-	[KC_TOK_HELP_TEXT]    = "HELP_TEXT",
-	[KC_TOK_MAINMENU]    = "MAINMENU",
-	[KC_TOK_MENU]         = "MENU",
-	[KC_TOK_ENDMENU]     = "ENDMENU",
-	[KC_TOK_CONFIG]       = "CONFIG",
-	[KC_TOK_MENUCONFIG]  = "MENUCONFIG",
-	[KC_TOK_CHOICE]       = "CHOICE",
-	[KC_TOK_ENDCHOICE]   = "ENDCHOICE",
-	[KC_TOK_IF]           = "IF",
-	[KC_TOK_ENDIF]        = "ENDIF",
-	[KC_TOK_COMMENT]      = "COMMENT",
-	[KC_TOK_SOURCE]       = "SOURCE",
-	[KC_TOK_RSOURCE]      = "RSOURCE",
-	[KC_TOK_OSOURCE]      = "OSOURCE",
-	[KC_TOK_ORSOURCE]     = "ORSOURCE",
-	[KC_TOK_DEPENDS]      = "DEPENDS",
-	[KC_TOK_ON]           = "ON",
-	[KC_TOK_DEFAULT]      = "DEFAULT",
-	[KC_TOK_SELECT]       = "SELECT",
-	[KC_TOK_IMPLY]        = "IMPLY",
-	[KC_TOK_RANGE]        = "RANGE",
-	[KC_TOK_BOOL]         = "BOOL",
-	[KC_TOK_INT]          = "INT",
-	[KC_TOK_STRING]       = "STRING",
-	[KC_TOK_HEX]          = "HEX",
-	[KC_TOK_FLOAT]        = "FLOAT",
-	[KC_TOK_TRISTATE]     = "TRISTATE",
-	[KC_TOK_PROMPT]       = "PROMPT",
-	[KC_TOK_HELP]         = "HELP",
-	[KC_TOK_VISIBLE]      = "VISIBLE",
-	[KC_TOK_OPTIONAL]     = "OPTIONAL",
-	[KC_TOK_SET]          = "SET",
-	[KC_TOK_WARNING]      = "WARNING",
-	[KC_TOK_DEF_BOOL]    = "DEF_BOOL",
-	[KC_TOK_DEF_INT]     = "DEF_INT",
-	[KC_TOK_DEF_HEX]    = "DEF_HEX",
-	[KC_TOK_DEF_STRING]  = "DEF_STRING",
-	[KC_TOK_DEF_TRISTATE] = "DEF_TRISTATE",
-	[KC_TOK_DEF_FLOAT]   = "DEF_FLOAT",
-	[KC_TOK_ASSIGN]       = "ASSIGN",
-	[KC_TOK_COLON_ASSIGN] = "COLON_ASSIGN",
-	[KC_TOK_NOT_EQUAL]   = "NOT_EQUAL",
-	[KC_TOK_LESS]         = "LESS",
-	[KC_TOK_GREATER]      = "GREATER",
-	[KC_TOK_LESS_EQ]     = "LESS_EQ",
-	[KC_TOK_GREATER_EQ]  = "GREATER_EQ",
-	[KC_TOK_AND]          = "AND",
-	[KC_TOK_OR]           = "OR",
-	[KC_TOK_NOT]          = "NOT",
-	[KC_TOK_LPAREN]       = "LPAREN",
-	[KC_TOK_RPAREN]       = "RPAREN",
-	[KC_TOK_ERROR]        = "ERROR",
+    [KC_TOK_EOF] = "EOF",
+    [KC_TOK_NEWLINE] = "NEWLINE",
+    [KC_TOK_WORD] = "WORD",
+    [KC_TOK_QUOTED] = "QUOTED",
+    [KC_TOK_HELP_TEXT] = "HELP_TEXT",
+    [KC_TOK_MAINMENU] = "MAINMENU",
+    [KC_TOK_MENU] = "MENU",
+    [KC_TOK_ENDMENU] = "ENDMENU",
+    [KC_TOK_CONFIG] = "CONFIG",
+    [KC_TOK_MENUCONFIG] = "MENUCONFIG",
+    [KC_TOK_CHOICE] = "CHOICE",
+    [KC_TOK_ENDCHOICE] = "ENDCHOICE",
+    [KC_TOK_IF] = "IF",
+    [KC_TOK_ENDIF] = "ENDIF",
+    [KC_TOK_COMMENT] = "COMMENT",
+    [KC_TOK_SOURCE] = "SOURCE",
+    [KC_TOK_RSOURCE] = "RSOURCE",
+    [KC_TOK_OSOURCE] = "OSOURCE",
+    [KC_TOK_ORSOURCE] = "ORSOURCE",
+    [KC_TOK_DEPENDS] = "DEPENDS",
+    [KC_TOK_ON] = "ON",
+    [KC_TOK_DEFAULT] = "DEFAULT",
+    [KC_TOK_SELECT] = "SELECT",
+    [KC_TOK_IMPLY] = "IMPLY",
+    [KC_TOK_RANGE] = "RANGE",
+    [KC_TOK_BOOL] = "BOOL",
+    [KC_TOK_INT] = "INT",
+    [KC_TOK_STRING] = "STRING",
+    [KC_TOK_HEX] = "HEX",
+    [KC_TOK_FLOAT] = "FLOAT",
+    [KC_TOK_TRISTATE] = "TRISTATE",
+    [KC_TOK_PROMPT] = "PROMPT",
+    [KC_TOK_HELP] = "HELP",
+    [KC_TOK_VISIBLE] = "VISIBLE",
+    [KC_TOK_OPTIONAL] = "OPTIONAL",
+    [KC_TOK_SET] = "SET",
+    [KC_TOK_WARNING] = "WARNING",
+    [KC_TOK_OPTION] = "OPTION",
+    [KC_TOK_DEF_BOOL] = "DEF_BOOL",
+    [KC_TOK_DEF_INT] = "DEF_INT",
+    [KC_TOK_DEF_HEX] = "DEF_HEX",
+    [KC_TOK_DEF_STRING] = "DEF_STRING",
+    [KC_TOK_DEF_TRISTATE] = "DEF_TRISTATE",
+    [KC_TOK_DEF_FLOAT] = "DEF_FLOAT",
+    [KC_TOK_ASSIGN] = "ASSIGN",
+    [KC_TOK_COLON_ASSIGN] = "COLON_ASSIGN",
+    [KC_TOK_NOT_EQUAL] = "NOT_EQUAL",
+    [KC_TOK_LESS] = "LESS",
+    [KC_TOK_GREATER] = "GREATER",
+    [KC_TOK_LESS_EQ] = "LESS_EQ",
+    [KC_TOK_GREATER_EQ] = "GREATER_EQ",
+    [KC_TOK_AND] = "AND",
+    [KC_TOK_OR] = "OR",
+    [KC_TOK_NOT] = "NOT",
+    [KC_TOK_LPAREN] = "LPAREN",
+    [KC_TOK_RPAREN] = "RPAREN",
+    [KC_TOK_ERROR] = "ERROR",
 };
 
 const char *kc_token_type_name(enum kc_token_type type)

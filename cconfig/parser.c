@@ -15,8 +15,8 @@
  * precedence:
  *   || (lowest) > && > ! (prefix) > atoms/comparisons (highest).
  */
-#include "ice.h"
 #include "cconfig/cconfig.h"
+#include "ice.h"
 
 /* ------------------------------------------------------------------ */
 /*  Parser context                                                     */
@@ -42,8 +42,8 @@ static void advance(struct parser *p)
 	kc_token_release(&p->cur);
 	kc_lexer_next(&p->lex, &p->cur);
 
-	/* Expand $(NAME) references in quoted string tokens. */
-	if (p->cur.type == KC_TOK_QUOTED &&
+	/* Expand $() / ${} / $NAME references in value tokens. */
+	if ((p->cur.type == KC_TOK_QUOTED || p->cur.type == KC_TOK_WORD) &&
 	    p->cur.value && strchr(p->cur.value, '$')) {
 		char *expanded = kc_preproc_expand(p->tab, p->cur.value);
 		free((void *)p->cur.value);
@@ -60,9 +60,8 @@ static void skip_newlines(struct parser *p)
 static void expect_newline(struct parser *p)
 {
 	if (p->cur.type != KC_TOK_NEWLINE && p->cur.type != KC_TOK_EOF)
-		die("error: %s:%d: expected newline, got %s",
-		    p->filename, p->cur.line,
-		    kc_token_type_name(p->cur.type));
+		die("error: %s:%d: expected newline, got %s", p->filename,
+		    p->cur.line, kc_token_type_name(p->cur.type));
 	if (p->cur.type == KC_TOK_NEWLINE)
 		advance(p);
 }
@@ -135,14 +134,13 @@ static struct kc_expr *expr_and(struct kc_expr *existing, struct kc_expr *dep)
 /* ------------------------------------------------------------------ */
 
 /**
- * Consume a WORD or QUOTED token, intern its text, and advance.
+ * Consume a WORD or QUOTED token and advance.
  *
- * Both bare identifiers and quoted strings are interned as symbols.
- * This means `default "hello"` creates a symbol named "hello" rather
- * than a distinct string literal.  For Kconfig semantics this is
- * sufficient because string values are resolved by name at evaluation
- * time, and the evaluator treats symbols without a config entry as
- * string constants.
+ * Bare identifiers (WORD) are interned into the hash table.
+ * Quoted strings are always allocated as orphan KC_SYM_CONST
+ * symbols (never interned) so that a literal like "E" is never
+ * confused with a config symbol named E, and arbitrary string
+ * values never pollute the hash table with UNKNOWN-type entries.
  */
 static struct kc_symbol *parse_symbol(struct parser *p)
 {
@@ -150,10 +148,18 @@ static struct kc_symbol *parse_symbol(struct parser *p)
 
 	if (p->cur.type != KC_TOK_WORD && p->cur.type != KC_TOK_QUOTED)
 		die("error: %s:%d: expected symbol or string, got %s",
-		    p->filename, p->cur.line,
-		    kc_token_type_name(p->cur.type));
+		    p->filename, p->cur.line, kc_token_type_name(p->cur.type));
 
-	sym = kc_symtab_intern(p->tab, p->cur.value);
+	if (p->cur.type == KC_TOK_QUOTED) {
+		sym = xcalloc(1, sizeof(*sym));
+		sym->name = kc_symtab_intern_string(p->tab, p->cur.value);
+		sym->flags = KC_SYM_CONST;
+		sym->hash_next = p->tab->orphan_syms;
+		p->tab->orphan_syms = sym;
+	} else {
+		sym = kc_symtab_intern(p->tab, p->cur.value);
+	}
+
 	advance(p);
 	return sym;
 }
@@ -171,9 +177,8 @@ static struct kc_expr *parse_atom(struct parser *p)
 		advance(p);
 		expr = parse_expr(p);
 		if (p->cur.type != KC_TOK_RPAREN)
-			die("error: %s:%d: expected ')', got %s",
-			    p->filename, p->cur.line,
-			    kc_token_type_name(p->cur.type));
+			die("error: %s:%d: expected ')', got %s", p->filename,
+			    p->cur.line, kc_token_type_name(p->cur.type));
 		advance(p);
 		return expr;
 	}
@@ -185,13 +190,26 @@ static struct kc_expr *parse_atom(struct parser *p)
 		enum kc_expr_type cmp = KC_E_NONE;
 
 		switch (p->cur.type) {
-		case KC_TOK_ASSIGN:     cmp = KC_E_EQUAL; break;
-		case KC_TOK_NOT_EQUAL:  cmp = KC_E_NOT_EQUAL; break;
-		case KC_TOK_LESS:       cmp = KC_E_LT; break;
-		case KC_TOK_GREATER:    cmp = KC_E_GT; break;
-		case KC_TOK_LESS_EQ:    cmp = KC_E_LTE; break;
-		case KC_TOK_GREATER_EQ: cmp = KC_E_GTE; break;
-		default: break;
+		case KC_TOK_ASSIGN:
+			cmp = KC_E_EQUAL;
+			break;
+		case KC_TOK_NOT_EQUAL:
+			cmp = KC_E_NOT_EQUAL;
+			break;
+		case KC_TOK_LESS:
+			cmp = KC_E_LT;
+			break;
+		case KC_TOK_GREATER:
+			cmp = KC_E_GT;
+			break;
+		case KC_TOK_LESS_EQ:
+			cmp = KC_E_LTE;
+			break;
+		case KC_TOK_GREATER_EQ:
+			cmp = KC_E_GTE;
+			break;
+		default:
+			break;
 		}
 
 		if (cmp != KC_E_NONE) {
@@ -249,10 +267,7 @@ static struct kc_expr *parse_or_expr(struct parser *p)
 	return left;
 }
 
-static struct kc_expr *parse_expr(struct parser *p)
-{
-	return parse_or_expr(p);
-}
+static struct kc_expr *parse_expr(struct parser *p) { return parse_or_expr(p); }
 
 static struct kc_expr *parse_if_cond(struct parser *p)
 {
@@ -280,26 +295,51 @@ static void set_prop_loc(struct kc_property *prop, const struct parser *p,
 static enum kc_sym_type tok_to_type(enum kc_token_type tok)
 {
 	switch (tok) {
-	case KC_TOK_BOOL:     case KC_TOK_DEF_BOOL:    return KC_TYPE_BOOL;
-	case KC_TOK_INT:      case KC_TOK_DEF_INT:     return KC_TYPE_INT;
-	case KC_TOK_HEX:      case KC_TOK_DEF_HEX:     return KC_TYPE_HEX;
-	case KC_TOK_STRING:   case KC_TOK_DEF_STRING:   return KC_TYPE_STRING;
-	case KC_TOK_FLOAT:    case KC_TOK_DEF_FLOAT:    return KC_TYPE_FLOAT;
-	default:                                        return KC_TYPE_UNKNOWN;
+	case KC_TOK_BOOL:
+	case KC_TOK_DEF_BOOL:
+		return KC_TYPE_BOOL;
+	case KC_TOK_INT:
+	case KC_TOK_DEF_INT:
+		return KC_TYPE_INT;
+	case KC_TOK_HEX:
+	case KC_TOK_DEF_HEX:
+		return KC_TYPE_HEX;
+	case KC_TOK_STRING:
+	case KC_TOK_DEF_STRING:
+		return KC_TYPE_STRING;
+	case KC_TOK_FLOAT:
+	case KC_TOK_DEF_FLOAT:
+		return KC_TYPE_FLOAT;
+	default:
+		return KC_TYPE_UNKNOWN;
 	}
 }
 
 static int is_config_property(enum kc_token_type tok)
 {
 	switch (tok) {
-	case KC_TOK_BOOL:  case KC_TOK_INT:   case KC_TOK_HEX:
-	case KC_TOK_STRING: case KC_TOK_FLOAT:
-	case KC_TOK_DEF_BOOL: case KC_TOK_DEF_INT: case KC_TOK_DEF_HEX:
-	case KC_TOK_DEF_STRING: case KC_TOK_DEF_FLOAT:
-	case KC_TOK_TRISTATE: case KC_TOK_DEF_TRISTATE:
-	case KC_TOK_PROMPT: case KC_TOK_DEFAULT:
-	case KC_TOK_DEPENDS: case KC_TOK_SELECT: case KC_TOK_IMPLY:
-	case KC_TOK_RANGE: case KC_TOK_HELP: case KC_TOK_WARNING:
+	case KC_TOK_BOOL:
+	case KC_TOK_INT:
+	case KC_TOK_HEX:
+	case KC_TOK_STRING:
+	case KC_TOK_FLOAT:
+	case KC_TOK_DEF_BOOL:
+	case KC_TOK_DEF_INT:
+	case KC_TOK_DEF_HEX:
+	case KC_TOK_DEF_STRING:
+	case KC_TOK_DEF_FLOAT:
+	case KC_TOK_TRISTATE:
+	case KC_TOK_DEF_TRISTATE:
+	case KC_TOK_PROMPT:
+	case KC_TOK_DEFAULT:
+	case KC_TOK_DEPENDS:
+	case KC_TOK_SELECT:
+	case KC_TOK_IMPLY:
+	case KC_TOK_RANGE:
+	case KC_TOK_HELP:
+	case KC_TOK_WARNING:
+	case KC_TOK_SET:
+	case KC_TOK_OPTION:
 		return 1;
 	default:
 		return 0;
@@ -309,11 +349,17 @@ static int is_config_property(enum kc_token_type tok)
 static int is_choice_property(enum kc_token_type tok)
 {
 	switch (tok) {
-	case KC_TOK_BOOL:  case KC_TOK_INT:   case KC_TOK_HEX:
-	case KC_TOK_STRING: case KC_TOK_FLOAT:
-	case KC_TOK_TRISTATE: case KC_TOK_DEF_TRISTATE:
-	case KC_TOK_PROMPT: case KC_TOK_DEFAULT:
-	case KC_TOK_DEPENDS: case KC_TOK_OPTIONAL:
+	case KC_TOK_BOOL:
+	case KC_TOK_INT:
+	case KC_TOK_HEX:
+	case KC_TOK_STRING:
+	case KC_TOK_FLOAT:
+	case KC_TOK_TRISTATE:
+	case KC_TOK_DEF_TRISTATE:
+	case KC_TOK_PROMPT:
+	case KC_TOK_DEFAULT:
+	case KC_TOK_DEPENDS:
+	case KC_TOK_OPTIONAL:
 	case KC_TOK_HELP:
 		return 1;
 	default:
@@ -343,8 +389,8 @@ static void apply_deps(struct kc_menu_node *node, struct kc_symbol *sym,
 		for (prop = sym->props; prop; prop = prop->next) {
 			if (prop->kind == KC_PROP_PROMPT ||
 			    prop->kind == KC_PROP_DEFAULT)
-				prop->cond = expr_and(prop->cond,
-						      expr_copy(deps));
+				prop->cond =
+				    expr_and(prop->cond, expr_copy(deps));
 		}
 	}
 
@@ -355,8 +401,7 @@ static void apply_deps(struct kc_menu_node *node, struct kc_symbol *sym,
 /*  Config / menuconfig entry                                          */
 /* ------------------------------------------------------------------ */
 
-static void parse_config_inner(struct parser *p,
-			       struct kc_menu_node *parent,
+static void parse_config_inner(struct parser *p, struct kc_menu_node *parent,
 			       int is_menuconfig)
 {
 	struct kc_menu_node *node;
@@ -395,8 +440,7 @@ static void parse_config_inner(struct parser *p,
 		case KC_TOK_INT:
 		case KC_TOK_HEX:
 		case KC_TOK_STRING:
-		case KC_TOK_FLOAT:
-		{
+		case KC_TOK_FLOAT: {
 			sym->type = tok_to_type(p->cur.type);
 			advance(p);
 
@@ -404,8 +448,7 @@ static void parse_config_inner(struct parser *p,
 				struct kc_property *prop;
 				struct kc_symbol *text;
 
-				text = kc_symtab_intern(p->tab,
-							p->cur.value);
+				text = kc_symtab_intern(p->tab, p->cur.value);
 				advance(p);
 
 				prop = kc_sym_add_prop(sym, KC_PROP_PROMPT);
@@ -425,8 +468,7 @@ static void parse_config_inner(struct parser *p,
 		case KC_TOK_DEF_INT:
 		case KC_TOK_DEF_HEX:
 		case KC_TOK_DEF_STRING:
-		case KC_TOK_DEF_FLOAT:
-		{
+		case KC_TOK_DEF_FLOAT: {
 			struct kc_property *prop;
 
 			sym->type = tok_to_type(p->cur.type);
@@ -440,8 +482,7 @@ static void parse_config_inner(struct parser *p,
 			break;
 		}
 
-		case KC_TOK_PROMPT:
-		{
+		case KC_TOK_PROMPT: {
 			struct kc_property *prop;
 			struct kc_symbol *text;
 
@@ -467,8 +508,7 @@ static void parse_config_inner(struct parser *p,
 			break;
 		}
 
-		case KC_TOK_DEFAULT:
-		{
+		case KC_TOK_DEFAULT: {
 			struct kc_property *prop;
 
 			advance(p);
@@ -481,8 +521,7 @@ static void parse_config_inner(struct parser *p,
 			break;
 		}
 
-		case KC_TOK_DEPENDS:
-		{
+		case KC_TOK_DEPENDS: {
 			struct kc_expr *dep;
 
 			advance(p);
@@ -498,8 +537,7 @@ static void parse_config_inner(struct parser *p,
 			break;
 		}
 
-		case KC_TOK_SELECT:
-		{
+		case KC_TOK_SELECT: {
 			struct kc_property *prop;
 
 			advance(p);
@@ -512,8 +550,7 @@ static void parse_config_inner(struct parser *p,
 			break;
 		}
 
-		case KC_TOK_IMPLY:
-		{
+		case KC_TOK_IMPLY: {
 			struct kc_property *prop;
 
 			advance(p);
@@ -526,8 +563,7 @@ static void parse_config_inner(struct parser *p,
 			break;
 		}
 
-		case KC_TOK_RANGE:
-		{
+		case KC_TOK_RANGE: {
 			struct kc_property *prop;
 			struct kc_symbol *lo_sym, *hi_sym;
 
@@ -537,9 +573,9 @@ static void parse_config_inner(struct parser *p,
 			hi_sym = parse_symbol(p);
 
 			prop = kc_sym_add_prop(sym, KC_PROP_RANGE);
-			prop->value = kc_expr_alloc(KC_E_RANGE,
-					kc_expr_alloc_sym(lo_sym),
-					kc_expr_alloc_sym(hi_sym));
+			prop->value =
+			    kc_expr_alloc(KC_E_RANGE, kc_expr_alloc_sym(lo_sym),
+					  kc_expr_alloc_sym(hi_sym));
 			set_prop_loc(prop, p, prop_line);
 			prop->cond = parse_if_cond(p);
 			expect_newline(p);
@@ -554,16 +590,89 @@ static void parse_config_inner(struct parser *p,
 			}
 			break;
 
-		case KC_TOK_WARNING:
-		{
-			/* TODO: wire KC_PROP_WARNING once the report subsystem lands (T09) */
+		case KC_TOK_WARNING: {
 			struct kc_expr *warn_cond;
 
+			/* TODO: warning property is parsed but not yet
+			 * wired to the report subsystem. */
 			advance(p);
 			if (p->cur.type == KC_TOK_QUOTED)
 				advance(p);
 			warn_cond = parse_if_cond(p);
 			kc_expr_free(warn_cond);
+			expect_newline(p);
+			break;
+		}
+
+		case KC_TOK_SET: {
+			struct kc_property *prop;
+			int is_set_default = 0;
+			struct kc_symbol *target_sym, *value_sym;
+
+			advance(p);
+
+			if (p->cur.type == KC_TOK_DEFAULT) {
+				is_set_default = 1;
+				advance(p);
+			}
+
+			target_sym = parse_symbol(p);
+
+			if (p->cur.type != KC_TOK_ASSIGN)
+				die("error: %s:%d: expected '=' in "
+				    "set directive",
+				    p->filename, p->cur.line);
+			advance(p);
+
+			value_sym = parse_symbol(p);
+			prop = kc_sym_add_prop(sym, is_set_default
+							? KC_PROP_SET_DEFAULT
+							: KC_PROP_SET);
+			prop->value = kc_expr_alloc_sym(value_sym);
+			prop->set_target = target_sym;
+			set_prop_loc(prop, p, prop_line);
+			prop->cond = parse_if_cond(p);
+			expect_newline(p);
+			break;
+		}
+
+		case KC_TOK_OPTION: {
+			advance(p);
+
+			if (p->cur.type == KC_TOK_WORD &&
+			    strcmp(p->cur.value, "env") == 0) {
+				advance(p);
+				if (p->cur.type != KC_TOK_ASSIGN)
+					die("error: %s:%d: expected '=' "
+					    "after 'option env'",
+					    p->filename, p->cur.line);
+				advance(p);
+				if (p->cur.type != KC_TOK_QUOTED)
+					die("error: %s:%d: expected "
+					    "quoted string after "
+					    "'option env='",
+					    p->filename, p->cur.line);
+				{
+					const char *env_val =
+					    getenv(p->cur.value);
+					if (env_val) {
+						free(sym->curr_value);
+						sym->curr_value =
+						    sbuf_strdup(env_val);
+						sym->flags |= KC_SYM_CHANGED;
+					}
+				}
+				advance(p);
+			} else if (p->cur.type == KC_TOK_WORD) {
+				warn("%s:%d: unknown option '%s'", p->filename,
+				     p->cur.line, p->cur.value);
+				advance(p);
+				/* consume rest of line */
+				while (p->cur.type != KC_TOK_NEWLINE &&
+				       p->cur.type != KC_TOK_EOF)
+					advance(p);
+			}
+
 			expect_newline(p);
 			break;
 		}
@@ -619,11 +728,20 @@ static void parse_choice(struct parser *p, struct kc_menu_node *parent)
 	char name_buf[64];
 
 	advance(p);
-	expect_newline(p);
 
-	snprintf(name_buf, sizeof(name_buf), "<choice_%u>",
-		 p->tab->choice_counter++);
-	choice_sym = kc_symtab_intern(p->tab, name_buf);
+	if (p->cur.type == KC_TOK_WORD) {
+		choice_sym = kc_symtab_intern(p->tab, p->cur.value);
+		if (choice_sym->menu_node)
+			die("error: %s:%d: named choice '%s' collides "
+			    "with existing config symbol",
+			    p->filename, p->cur.line, p->cur.value);
+		advance(p);
+	} else {
+		snprintf(name_buf, sizeof(name_buf), "<choice_%u>",
+			 p->tab->choice_counter++);
+		choice_sym = kc_symtab_intern(p->tab, name_buf);
+	}
+	expect_newline(p);
 	choice_sym->flags |= KC_SYM_CHOICE;
 
 	node = alloc_node(parent, p->filename, entry_line);
@@ -645,8 +763,7 @@ static void parse_choice(struct parser *p, struct kc_menu_node *parent)
 		case KC_TOK_INT:
 		case KC_TOK_HEX:
 		case KC_TOK_STRING:
-		case KC_TOK_FLOAT:
-		{
+		case KC_TOK_FLOAT: {
 			choice_sym->type = tok_to_type(p->cur.type);
 			advance(p);
 
@@ -654,12 +771,11 @@ static void parse_choice(struct parser *p, struct kc_menu_node *parent)
 				struct kc_property *prop;
 				struct kc_symbol *text;
 
-				text = kc_symtab_intern(p->tab,
-							p->cur.value);
+				text = kc_symtab_intern(p->tab, p->cur.value);
 				advance(p);
 
-				prop = kc_sym_add_prop(choice_sym,
-						       KC_PROP_PROMPT);
+				prop =
+				    kc_sym_add_prop(choice_sym, KC_PROP_PROMPT);
 				prop->value = kc_expr_alloc_sym(text);
 				set_prop_loc(prop, p, prop_line);
 				prop->cond = parse_if_cond(p);
@@ -672,8 +788,7 @@ static void parse_choice(struct parser *p, struct kc_menu_node *parent)
 			break;
 		}
 
-		case KC_TOK_PROMPT:
-		{
+		case KC_TOK_PROMPT: {
 			struct kc_property *prop;
 			struct kc_symbol *text;
 
@@ -699,8 +814,7 @@ static void parse_choice(struct parser *p, struct kc_menu_node *parent)
 			break;
 		}
 
-		case KC_TOK_DEFAULT:
-		{
+		case KC_TOK_DEFAULT: {
 			struct kc_property *prop;
 
 			advance(p);
@@ -713,8 +827,7 @@ static void parse_choice(struct parser *p, struct kc_menu_node *parent)
 			break;
 		}
 
-		case KC_TOK_DEPENDS:
-		{
+		case KC_TOK_DEPENDS: {
 			struct kc_expr *dep;
 
 			advance(p);
@@ -731,7 +844,9 @@ static void parse_choice(struct parser *p, struct kc_menu_node *parent)
 		}
 
 		case KC_TOK_OPTIONAL:
-			/* TODO: store optional flag on choice symbol once evaluator needs it */
+			/* Silently accepted for compatibility; the
+			 * optional flag is not stored because the
+			 * evaluator does not use it yet. */
 			advance(p);
 			expect_newline(p);
 			break;
@@ -760,8 +875,8 @@ static void parse_choice(struct parser *p, struct kc_menu_node *parent)
 	mark_choice_members(node);
 
 	if (p->cur.type != KC_TOK_ENDCHOICE)
-		die("error: %s:%d: expected 'endchoice'",
-		    p->filename, p->cur.line);
+		die("error: %s:%d: expected 'endchoice'", p->filename,
+		    p->cur.line);
 	advance(p);
 	expect_newline(p);
 }
@@ -792,8 +907,7 @@ static void parse_if_block(struct parser *p, struct kc_menu_node *parent)
 	parse_block(p, node);
 
 	if (p->cur.type != KC_TOK_ENDIF)
-		die("error: %s:%d: expected 'endif'",
-		    p->filename, p->cur.line);
+		die("error: %s:%d: expected 'endif'", p->filename, p->cur.line);
 	advance(p);
 	expect_newline(p);
 }
@@ -833,7 +947,7 @@ static void parse_variable_assignment(struct parser *p, const char *name,
 }
 
 static void parse_source(struct parser *p, struct kc_menu_node *parent,
-			  int is_relative, int is_optional)
+			 int is_relative, int is_optional)
 {
 	struct kc_menu_node *included;
 	char *expanded;
@@ -957,8 +1071,7 @@ static void parse_menu(struct parser *p, struct kc_menu_node *parent)
 	node->prompt = title_sym->name;
 
 	skip_newlines(p);
-	while (p->cur.type == KC_TOK_DEPENDS ||
-	       p->cur.type == KC_TOK_VISIBLE) {
+	while (p->cur.type == KC_TOK_DEPENDS || p->cur.type == KC_TOK_VISIBLE) {
 		if (p->cur.type == KC_TOK_DEPENDS) {
 			struct kc_expr *dep;
 
@@ -978,8 +1091,8 @@ static void parse_menu(struct parser *p, struct kc_menu_node *parent)
 				    "'visible'",
 				    p->filename, p->cur.line);
 			advance(p);
-			node->visibility = expr_and(node->visibility,
-						    parse_expr(p));
+			node->visibility =
+			    expr_and(node->visibility, parse_expr(p));
 			expect_newline(p);
 		}
 		skip_newlines(p);
@@ -991,8 +1104,8 @@ static void parse_menu(struct parser *p, struct kc_menu_node *parent)
 	parse_block(p, node);
 
 	if (p->cur.type != KC_TOK_ENDMENU)
-		die("error: %s:%d: expected 'endmenu'",
-		    p->filename, p->cur.line);
+		die("error: %s:%d: expected 'endmenu'", p->filename,
+		    p->cur.line);
 	advance(p);
 	expect_newline(p);
 }
@@ -1001,8 +1114,7 @@ static void parse_menu(struct parser *p, struct kc_menu_node *parent)
 /*  Comment entry                                                      */
 /* ------------------------------------------------------------------ */
 
-static void parse_comment_entry(struct parser *p,
-				struct kc_menu_node *parent)
+static void parse_comment_entry(struct parser *p, struct kc_menu_node *parent)
 {
 	struct kc_menu_node *node;
 	struct kc_symbol *text_sym;
@@ -1075,10 +1187,8 @@ static void parse_block(struct parser *p, struct kc_menu_node *parent)
 {
 	skip_newlines(p);
 
-	while (p->cur.type != KC_TOK_EOF &&
-	       p->cur.type != KC_TOK_ENDMENU &&
-	       p->cur.type != KC_TOK_ENDCHOICE &&
-	       p->cur.type != KC_TOK_ENDIF) {
+	while (p->cur.type != KC_TOK_EOF && p->cur.type != KC_TOK_ENDMENU &&
+	       p->cur.type != KC_TOK_ENDCHOICE && p->cur.type != KC_TOK_ENDIF) {
 		switch (p->cur.type) {
 		case KC_TOK_MAINMENU:
 			parse_mainmenu(p);
@@ -1113,8 +1223,7 @@ static void parse_block(struct parser *p, struct kc_menu_node *parent)
 		case KC_TOK_ORSOURCE:
 			parse_source(p, parent, 1, 1);
 			break;
-		case KC_TOK_WORD:
-		{
+		case KC_TOK_WORD: {
 			char *var_name = sbuf_strdup(p->cur.value);
 
 			advance(p);
@@ -1138,9 +1247,8 @@ static void parse_block(struct parser *p, struct kc_menu_node *parent)
 			break;
 		}
 		default:
-			die("error: %s:%d: unexpected token %s",
-			    p->filename, p->cur.line,
-			    kc_token_type_name(p->cur.type));
+			die("error: %s:%d: unexpected token %s", p->filename,
+			    p->cur.line, kc_token_type_name(p->cur.type));
 		}
 		skip_newlines(p);
 	}
@@ -1166,8 +1274,7 @@ struct kc_menu_node *kc_parse_buffer(const char *buf, const char *filename,
 
 	if (ctx.cur.type != KC_TOK_EOF)
 		die("error: %s:%d: unexpected token %s at end of input",
-		    filename, ctx.cur.line,
-		    kc_token_type_name(ctx.cur.type));
+		    filename, ctx.cur.line, kc_token_type_name(ctx.cur.type));
 
 	kc_token_release(&ctx.cur);
 	return ctx.root;
