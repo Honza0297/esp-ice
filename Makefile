@@ -181,6 +181,7 @@ LIB_SRCS := \
 	progress.c \
 	sbuf.c \
 	slip.c \
+	smap.c \
 	svec.c \
 	http.c \
 	gzip.c \
