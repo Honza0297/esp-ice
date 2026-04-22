@@ -130,6 +130,7 @@ LIB_SRCS := \
 	cmd/help/help.c \
 	cmd/idf/idf.c \
 	cmd/idf/configdep/configdep.c \
+	cmd/idf/hints/hints.c \
 	cmd/idf/kconfgen/kc_eval.c \
 	cmd/idf/kconfgen/kc_io.c \
 	cmd/idf/kconfgen/kc_lex.c \
@@ -197,7 +198,8 @@ LIB_SRCS := \
 	vendor/sha256/sha256.c \
 	chip.c \
 	color_rules.c \
-	esf_port.c
+	esf_port.c \
+	yaml.c
 
 # MAIN_SRCS provide the program entry point.  Excluded from libice.a
 # so that unit tests (and any future external libice consumer) can
@@ -242,7 +244,7 @@ endif
 VENDOR_PREFIX := $(CURDIR)/vendor/install/$(TRIPLE)
 VENDOR_STAMP := $(VENDOR_PREFIX)/.stamp
 BUILD_CFLAGS += -I$(VENDOR_PREFIX)/include
-LIBS += -L$(VENDOR_PREFIX)/lib -lflasher
+LIBS += -L$(VENDOR_PREFIX)/lib -lflasher -lpcre2-8
 
 ifeq ($(S), win)
 
@@ -523,8 +525,8 @@ help:
 	@echo ' lint-platform    - enforce CONTRIBUTING.md platform-abstraction rules'
 	@echo ''
 	@echo 'dependency targets:'
-	@echo ' deps             - build external deps (zlib, mbedTLS, curl, libyaml, xz)'
-	@echo ' vendor           - build vendor libs (esp-serial-flasher)'
+	@echo ' deps             - build external deps (zlib, mbedTLS, curl, xz)'
+	@echo ' vendor           - build vendor libs (esp-serial-flasher, pcre2)'
 	@echo ''
 	@echo 'misc targets:'
 	@echo ' clean            - remove: $(O) $(DIST) $(STAGE) $(T_OUT)'

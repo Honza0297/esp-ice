@@ -44,6 +44,7 @@
 #include "smap.h"
 #include "svec.h"
 #include "term.h"
+#include "yaml.h"
 
 /* Subcommands -- cmake wrappers (see cmake.h) */
 int cmd_build(int argc, const char **argv);
