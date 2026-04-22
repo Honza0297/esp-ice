@@ -240,10 +240,26 @@ static void process_config_line(struct kc_ctx *ctx, char *line,
 		char *name_copy = sbuf_strndup(name, (size_t)(end - name));
 		char *val = sbuf_strdup("n");
 		rename_translate(ctx, &name_copy, &val);
-		if (*default_pending)
+		if (*default_pending) {
 			set_default_seeded(ctx, name_copy, val);
-		else
-			kc_sym_set_user(ctx, name_copy, val);
+		} else {
+			/*
+			 * A pragma-less `# CONFIG_X is not set` line in the
+			 * deprecated-rename block shouldn't downgrade an
+			 * already-default-seeded primary entry back to user-
+			 * set -- python kconfgen keeps the `# default:` marker
+			 * even after the rename alias round-trips through the
+			 * loader.  If the symbol hasn't been seen yet OR its
+			 * cur_val genuinely disagrees, treat the line as a
+			 * user override; otherwise leave the existing
+			 * user_set / cur_val alone.
+			 */
+			struct ksym *s = smap_get(&ctx->symtab, name_copy);
+			if (!s || !s->cur_val ||
+			    (strcmp(s->cur_val, val) && !s->user_set))
+				kc_sym_set_user(ctx, name_copy, val);
+			/* else: keep current state (user_set preserved). */
+		}
 		*default_pending = 0;
 		free(name_copy);
 		free(val);
@@ -275,10 +291,24 @@ static void process_config_line(struct kc_ctx *ctx, char *line,
 		val = sbuf_strdup(rhs);
 
 	rename_translate(ctx, &name, &val);
-	if (*default_pending)
+	if (*default_pending) {
 		set_default_seeded(ctx, name, val);
-	else
-		kc_sym_set_user(ctx, name, val);
+	} else {
+		/*
+		 * A pragma-less `CONFIG_X=value` line in the deprecated-
+		 * rename block shouldn't promote an already-default-seeded
+		 * primary entry to user-set -- e.g. CONFIG_LOG_BOOTLOADER_
+		 * LEVEL_INFO=y in the compat block feeds through the rename
+		 * table to BOOTLOADER_LOG_LEVEL_INFO which is already =y
+		 * via the matching primary entry.  Same idempotent check as
+		 * the `# is not set` branch.
+		 */
+		struct ksym *s = smap_get(&ctx->symtab, name);
+		if (!s || !s->cur_val ||
+		    (strcmp(s->cur_val, val) && !s->user_set))
+			kc_sym_set_user(ctx, name, val);
+		/* else: keep current state (user_set preserved). */
+	}
 	*default_pending = 0;
 	free(name);
 	free(val);
@@ -535,26 +565,47 @@ static void emit_symbol(struct sbuf *out, const struct ksym *s)
 }
 
 /*
- * True when walking @p m (pre-order) will produce at least one emitted
- * line -- any KM_SYM/KM_CHOICE whose symbol passes should_emit(), or
- * any descendant KM_MENU/KM_COMMENT.  Used to skip emitting empty
- * `# MenuTitle` / `# end of MenuTitle` pairs around menus whose entire
- * subtree is hidden; python kconfgen does this trimming too.
+ * Decide whether @p m's prompt markers should appear in the config
+ * output.  For a menu this requires its ctx_dep (parent menu-chain
+ * AND own `depends on`) to be true, AND any `visible if` guard on the
+ * menu itself to be true -- python only prints `# Menu Title` /
+ * `# end of Menu Title` markers around menus the user could see in
+ * menuconfig.  For a comment node we additionally require its own @p
+ * dep to be true (comments inside `visible if 0` or `depends on 0`
+ * chains get skipped).
  */
-static int subtree_has_emit(const struct kmenu *m)
+static int menu_emit_visible(const struct kmenu *m)
 {
 	if (!m)
 		return 0;
-	if ((m->kind == KM_SYM || m->kind == KM_CHOICE) && m->sym &&
-	    should_emit(m->sym))
-		return 1;
-	if (m->kind == KM_MENU || m->kind == KM_COMMENT)
-		if (m->prompt && *m->prompt)
-			return 1;
-	for (const struct kmenu *c = m->children; c; c = c->next)
-		if (subtree_has_emit(c))
-			return 1;
-	return 0;
+	if (m->ctx_dep && !kc_expr_bool(m->ctx_dep))
+		return 0;
+	if (m->visible_if && !kc_expr_bool(m->visible_if))
+		return 0;
+	if (m->dep && !kc_expr_bool(m->dep))
+		return 0;
+	return 1;
+}
+
+/*
+ * True when @p out's last emitted line starts with "# end of ".
+ * Walks backward to the previous newline and checks the prefix.
+ * Used to decide whether to insert a blank line between a close
+ * marker and a following sibling (which may be a symbol or another
+ * menu / comment block).
+ */
+static int tail_is_end_marker(const struct sbuf *out)
+{
+	if (out->len < 2 || out->buf[out->len - 1] != '\n')
+		return 0;
+	size_t i = out->len - 1;
+	while (i > 0 && out->buf[i - 1] != '\n')
+		i--;
+	const char *line = out->buf + i;
+	size_t llen = out->len - 1 - i;
+	static const char prefix[] = "# end of ";
+	return llen >= sizeof(prefix) - 1 &&
+	       !memcmp(line, prefix, sizeof(prefix) - 1);
 }
 
 /*
@@ -562,29 +613,59 @@ static int subtree_has_emit(const struct kmenu *m)
  * of Title\n` markers around each visible menu and `#\n# Comment\n#\n`
  * comment-node blocks, plus the actual symbol lines inside.  KM_CHOICE,
  * KM_IF, KM_ROOT are transparent -- they group symbols but contribute
- * no label to sdkconfig.
+ * no label to sdkconfig.  A menu whose own visibility is false still
+ * gets recursed into (its symbols' values compute independently via
+ * their own depends-on chains), but the `# Menu Title` markers are
+ * suppressed -- matches python's "hidden menu, visible children" case
+ * like `menu "SoC Settings" ... visible if 0`.
+ *
+ * Blank-line shaping: python puts one blank between any post-menu-
+ * close sibling and the close itself.  Consecutive `# end of`
+ * closes stack with no blanks.  We implement that by always emitting
+ * `# end of X\n` without a trailing blank and inserting the blank
+ * lazily right before the next non-close sibling (menu open, comment
+ * open, or symbol).
  */
 static void walk_config(const struct kmenu *m, struct sbuf *out)
 {
 	if (!m)
 		return;
 
-	if (m->kind == KM_MENU && m->prompt && subtree_has_emit(m)) {
-		sbuf_addf(out, "\n#\n# %s\n#\n", m->prompt);
+	if (m->kind == KM_MENU && m->prompt) {
+		int vis = menu_emit_visible(m);
+		if (vis) {
+			if (out->len < 2 || out->buf[out->len - 1] != '\n' ||
+			    out->buf[out->len - 2] != '\n')
+				sbuf_addch(out, '\n');
+			sbuf_addf(out, "#\n# %s\n#\n", m->prompt);
+		}
 		for (const struct kmenu *c = m->children; c; c = c->next)
 			walk_config(c, out);
-		sbuf_addf(out, "# end of %s\n", m->prompt);
+		if (vis)
+			sbuf_addf(out, "# end of %s\n", m->prompt);
 		return;
 	}
 
 	if (m->kind == KM_COMMENT && m->prompt) {
-		sbuf_addf(out, "\n#\n# %s\n#\n", m->prompt);
+		if (menu_emit_visible(m)) {
+			if (out->len < 2 || out->buf[out->len - 1] != '\n' ||
+			    out->buf[out->len - 2] != '\n')
+				sbuf_addch(out, '\n');
+			sbuf_addf(out, "#\n# %s\n#\n", m->prompt);
+		}
 		return;
 	}
 
 	if ((m->kind == KM_SYM || m->kind == KM_CHOICE) && m->sym &&
-	    should_emit(m->sym))
+	    should_emit(m->sym)) {
+		/* A symbol line right after a menu close gets a blank line
+		 * separator, so `# end of X` doesn't butt up against the
+		 * next CONFIG_.  Nested closes have already stacked without
+		 * blanks; this runs only at the first non-close sibling. */
+		if (tail_is_end_marker(out))
+			sbuf_addch(out, '\n');
 		emit_symbol(out, m->sym);
+	}
 
 	for (const struct kmenu *c = m->children; c; c = c->next)
 		walk_config(c, out);
