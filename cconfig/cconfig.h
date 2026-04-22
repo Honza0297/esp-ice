@@ -165,9 +165,17 @@ struct kc_intern_str {
 	struct kc_intern_str *next;
 };
 
+struct kc_variable {
+	char *name;
+	char *value;
+	int is_immediate;               /* := (1) vs = (0) */
+	struct kc_variable *next;
+};
+
 struct kc_symtab {
 	struct kc_symbol *buckets[KC_SYMTAB_BUCKETS];
 	struct kc_intern_str *interned_strings;
+	struct kc_variable *variables;   /* Kconfig macro variable list */
 	unsigned int choice_counter;
 	int source_depth;
 };
@@ -250,6 +258,7 @@ enum kc_token_type {
 
 	/* Operators */
 	KC_TOK_ASSIGN,          /* = */
+	KC_TOK_COLON_ASSIGN,    /* := */
 	KC_TOK_NOT_EQUAL,       /* != */
 	KC_TOK_LESS,            /* < */
 	KC_TOK_GREATER,         /* > */
@@ -310,5 +319,19 @@ struct kc_menu_node *kc_parse_buffer(const char *buf, const char *filename,
 				     struct kc_symtab *tab);
 struct kc_menu_node *kc_parse_file(const char *path, struct kc_symtab *tab);
 void kc_menu_free(struct kc_menu_node *root);
+
+/* ------------------------------------------------------------------
+ *  Preprocessor (macro/variable expansion)
+ *
+ *  kc_preproc_set records a variable in the symtab's variable list.
+ *  kc_preproc_expand expands all $(NAME) references in a string,
+ *  consulting the variable table first and falling back to getenv().
+ *  Undefined variables expand to the empty string.
+ * ------------------------------------------------------------------ */
+
+void kc_preproc_set(struct kc_symtab *tab, const char *name,
+		    const char *value, int is_immediate);
+char *kc_preproc_expand(const struct kc_symtab *tab, const char *raw);
+void kc_preproc_release(struct kc_symtab *tab);
 
 #endif /* CCONFIG_H */

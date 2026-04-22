@@ -383,6 +383,13 @@ void kc_lexer_next(struct kc_lexer *lex, struct kc_token *tok)
 	}
 
 	/* Two-character operators */
+	if (ptr[0] == ':' && ptr[1] == '=') {
+		emit(tok, KC_TOK_COLON_ASSIGN, lex->file, lex->line,
+		     lex->col, ":=");
+		lex->pos = ptr + 2;
+		lex->col += 2;
+		return;
+	}
 	if (ptr[0] == '!' && ptr[1] == '=') {
 		emit(tok, KC_TOK_NOT_EQUAL, lex->file, lex->line, lex->col,
 		     "!=");
@@ -541,6 +548,7 @@ static const char *const tok_names[] = {
 	[KC_TOK_DEF_TRISTATE] = "DEF_TRISTATE",
 	[KC_TOK_DEF_FLOAT]   = "DEF_FLOAT",
 	[KC_TOK_ASSIGN]       = "ASSIGN",
+	[KC_TOK_COLON_ASSIGN] = "COLON_ASSIGN",
 	[KC_TOK_NOT_EQUAL]   = "NOT_EQUAL",
 	[KC_TOK_LESS]         = "LESS",
 	[KC_TOK_GREATER]      = "GREATER",

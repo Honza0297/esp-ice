@@ -95,6 +95,8 @@ void kc_symtab_release(struct kc_symtab *tab)
 		tab->interned_strings = NULL;
 	}
 
+	kc_preproc_release(tab);
+
 	kc_sym_yes = NULL;
 	kc_sym_no = NULL;
 }

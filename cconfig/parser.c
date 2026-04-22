@@ -41,6 +41,14 @@ static void advance(struct parser *p)
 {
 	kc_token_release(&p->cur);
 	kc_lexer_next(&p->lex, &p->cur);
+
+	/* Expand $(NAME) references in quoted string tokens. */
+	if (p->cur.type == KC_TOK_QUOTED &&
+	    p->cur.value && strchr(p->cur.value, '$')) {
+		char *expanded = kc_preproc_expand(p->tab, p->cur.value);
+		free((void *)p->cur.value);
+		p->cur.value = expanded;
+	}
 }
 
 static void skip_newlines(struct parser *p)
@@ -794,40 +802,34 @@ static void parse_if_block(struct parser *p, struct kc_menu_node *parent)
 /*  source/rsource/osource/orsource                                    */
 /* ------------------------------------------------------------------ */
 
-/**
- * Expand $(NAME) patterns in @p raw using getenv().
- *
- * Only handles simple, non-nested $(NAME) references — the common
- * case for environment variables in source paths.  Nested forms like
- * $(A$(B)), bare $NAME, and Kconfig-level macro assignments are not
- * supported here; those require the full macro preprocessor (T05).
- */
-static char *expand_env_vars(const char *raw)
-{
-	struct sbuf sb = SBUF_INIT;
-	const char *ptr = raw;
+/* ------------------------------------------------------------------ */
+/*  Variable assignment: WORD = value | WORD := value                  */
+/* ------------------------------------------------------------------ */
 
-	while (*ptr) {
-		if (ptr[0] == '$' && ptr[1] == '(') {
-			const char *name_start = ptr + 2;
-			const char *closing = strchr(name_start, ')');
-			if (closing) {
-				char *var_name = sbuf_strndup(
-					name_start,
-					(size_t)(closing - name_start));
-				const char *val = getenv(var_name);
-				if (val)
-					sbuf_addstr(&sb, val);
-				free(var_name);
-				ptr = closing + 1;
-				continue;
-			}
-		}
-		sbuf_addch(&sb, *ptr);
-		ptr++;
+/**
+ * Parse the rest-of-line after the assignment operator as the variable
+ * value.  Tokens are concatenated without separators, which works for
+ * the common `$(NAME)` pattern (lexed as separate `$`/`(`/name/`)`
+ * tokens).  Multi-word values like `FOO = hello world` lose the space;
+ * this is a known limitation — Kconfig macro values rarely contain
+ * literal whitespace.
+ */
+static void parse_variable_assignment(struct parser *p, const char *name,
+				      int is_immediate)
+{
+	struct sbuf val = SBUF_INIT;
+
+	while (p->cur.type != KC_TOK_NEWLINE && p->cur.type != KC_TOK_EOF) {
+		if (p->cur.value)
+			sbuf_addstr(&val, p->cur.value);
+		advance(p);
 	}
 
-	return sbuf_detach(&sb);
+	kc_preproc_set(p->tab, name, val.buf, is_immediate);
+	sbuf_release(&val);
+
+	if (p->cur.type == KC_TOK_NEWLINE)
+		advance(p);
 }
 
 static void parse_source(struct parser *p, struct kc_menu_node *parent,
@@ -846,7 +848,8 @@ static void parse_source(struct parser *p, struct kc_menu_node *parent,
 		    "directive",
 		    p->filename, p->cur.line);
 
-	expanded = expand_env_vars(p->cur.value);
+	/* Already expanded by advance(); just duplicate. */
+	expanded = sbuf_strdup(p->cur.value);
 	advance(p);
 	expect_newline(p);
 
@@ -1110,6 +1113,30 @@ static void parse_block(struct parser *p, struct kc_menu_node *parent)
 		case KC_TOK_ORSOURCE:
 			parse_source(p, parent, 1, 1);
 			break;
+		case KC_TOK_WORD:
+		{
+			char *var_name = sbuf_strdup(p->cur.value);
+
+			advance(p);
+			if (p->cur.type == KC_TOK_ASSIGN) {
+				advance(p);
+				parse_variable_assignment(p, var_name, 0);
+				free(var_name);
+				break;
+			}
+			if (p->cur.type == KC_TOK_COLON_ASSIGN) {
+				advance(p);
+				parse_variable_assignment(p, var_name, 1);
+				free(var_name);
+				break;
+			}
+			free(var_name);
+			die("error: %s:%d: unexpected token %s after "
+			    "identifier",
+			    p->filename, p->cur.line,
+			    kc_token_type_name(p->cur.type));
+			break;
+		}
 		default:
 			die("error: %s:%d: unexpected token %s",
 			    p->filename, p->cur.line,
