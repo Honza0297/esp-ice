@@ -165,9 +165,9 @@ static int sym_has_env(const struct ksym *s)
 }
 
 /*
- * True for the pseudo-symbols the lexer interns for barewords (y, n,
- * m, numeric literals) -- these are never written as real CONFIG_
- * lines.
+ * True for symbols that should never appear in a CONFIG_ line: the
+ * lexer-interned barewords (y, n, m, numeric literals) and choice
+ * parents (whose "value" is synthetic, matching python kconfgen).
  */
 static int is_pseudo_sym(const struct ksym *s)
 {
@@ -179,7 +179,27 @@ static int is_pseudo_sym(const struct ksym *s)
 		return 1;
 	if (s->type == KS_UNKNOWN && !s->props)
 		return 1;
+	if (s->is_choice)
+		return 1;
 	return 0;
+}
+
+/*
+ * Walk the menu tree pre-order and invoke @p cb on every symbol that
+ * backs a KM_SYM / KM_CHOICE menu node -- i.e. the declaration order
+ * python kconfgen uses for its output files.  Filtering out
+ * pseudo-syms, env-options, etc. is the caller's job.
+ */
+typedef void (*sym_cb)(struct sbuf *out, const struct ksym *s, void *ud);
+static void walk_syms(const struct kmenu *m, struct sbuf *out, sym_cb cb,
+		      void *ud)
+{
+	if (!m)
+		return;
+	if ((m->kind == KM_SYM || m->kind == KM_CHOICE) && m->sym)
+		cb(out, m->sym, ud);
+	for (const struct kmenu *c = m->children; c; c = c->next)
+		walk_syms(c, out, cb, ud);
 }
 
 /*
@@ -230,6 +250,14 @@ static void emit_symbol(struct sbuf *out, const struct ksym *s)
 	sbuf_addf(out, "%s%s=%s\n", CONFIG_PREFIX, s->name, val);
 }
 
+static void cb_config(struct sbuf *out, const struct ksym *s, void *ud)
+{
+	(void)ud;
+	if (is_pseudo_sym(s) || sym_has_env(s))
+		return;
+	emit_symbol(out, s);
+}
+
 void kc_write_config(const struct kc_ctx *ctx, const char *path)
 {
 	struct sbuf out = SBUF_INIT;
@@ -245,16 +273,7 @@ void kc_write_config(const struct kc_ctx *ctx, const char *path)
 			  "Project Configuration\n"
 			  "#\n");
 
-	for (size_t i = 0; i < ctx->symlist.nr; i++) {
-		struct ksym *s = smap_get(&ctx->symtab, ctx->symlist.v[i]);
-		if (!s)
-			continue;
-		if (is_pseudo_sym(s))
-			continue;
-		if (sym_has_env(s))
-			continue;
-		emit_symbol(&out, s);
-	}
+	walk_syms(ctx->root, &out, cb_config, NULL);
 
 	if (write_file_atomic(path, out.buf, out.len) < 0)
 		die_errno("cannot write '%s'", path);
@@ -290,6 +309,14 @@ static void emit_header_symbol(struct sbuf *out, const struct ksym *s)
 	sbuf_addf(out, "#define %s%s %s\n", CONFIG_PREFIX, s->name, val);
 }
 
+static void cb_header(struct sbuf *out, const struct ksym *s, void *ud)
+{
+	(void)ud;
+	if (is_pseudo_sym(s) || sym_has_env(s))
+		return;
+	emit_header_symbol(out, s);
+}
+
 void kc_write_header(const struct kc_ctx *ctx, const char *path)
 {
 	struct sbuf out = SBUF_INIT;
@@ -301,16 +328,7 @@ void kc_write_header(const struct kc_ctx *ctx, const char *path)
 			  " */\n"
 			  "#pragma once\n");
 
-	for (size_t i = 0; i < ctx->symlist.nr; i++) {
-		struct ksym *s = smap_get(&ctx->symtab, ctx->symlist.v[i]);
-		if (!s)
-			continue;
-		if (is_pseudo_sym(s))
-			continue;
-		if (sym_has_env(s))
-			continue;
-		emit_header_symbol(&out, s);
-	}
+	walk_syms(ctx->root, &out, cb_header, NULL);
 
 	if (write_file_atomic(path, out.buf, out.len) < 0)
 		die_errno("cannot write '%s'", path);
@@ -338,6 +356,23 @@ static void emit_cmake_symbol(struct sbuf *out, const struct ksym *s)
 	sbuf_addstr(out, ")\n");
 }
 
+struct cmake_walk {
+	struct sbuf *list;
+	int first;
+};
+
+static void cb_cmake(struct sbuf *out, const struct ksym *s, void *ud)
+{
+	struct cmake_walk *w = ud;
+	if (is_pseudo_sym(s) || sym_has_env(s))
+		return;
+	emit_cmake_symbol(out, s);
+	if (!w->first)
+		sbuf_addch(w->list, ';');
+	sbuf_addf(w->list, "%s%s", CONFIG_PREFIX, s->name);
+	w->first = 0;
+}
+
 void kc_write_cmake(const struct kc_ctx *ctx, const char *path)
 {
 	struct sbuf out = SBUF_INIT;
@@ -352,23 +387,8 @@ void kc_write_cmake(const struct kc_ctx *ctx, const char *path)
 			  "#\n");
 
 	struct sbuf list = SBUF_INIT;
-	int first = 1;
-
-	for (size_t i = 0; i < ctx->symlist.nr; i++) {
-		struct ksym *s = smap_get(&ctx->symtab, ctx->symlist.v[i]);
-		if (!s)
-			continue;
-		if (is_pseudo_sym(s))
-			continue;
-		if (sym_has_env(s))
-			continue;
-		emit_cmake_symbol(&out, s);
-
-		if (!first)
-			sbuf_addch(&list, ';');
-		sbuf_addf(&list, "%s%s", CONFIG_PREFIX, s->name);
-		first = 0;
-	}
+	struct cmake_walk w = {.list = &list, .first = 1};
+	walk_syms(ctx->root, &out, cb_cmake, &w);
 
 	/* Trailing enumeration, unquoted, semicolon-separated.  Python
 	 * kconfgen does NOT emit a newline after this final line, so we

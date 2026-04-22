@@ -380,6 +380,137 @@ static char *range_clamp(char *val, const struct kexpr *lo,
 }
 
 /* ================================================================== */
+/*  Pass 3.5: link choice members to their choice group               */
+/* ================================================================== */
+
+/*
+ * Recursively attach @p choice_sym as the choice_parent of every
+ * descendant bool symbol, stopping at nested choices / menus that
+ * start their own scope.  @c if-blocks (KM_IF) are transparent so
+ * that `if X config Y` inside a choice still makes Y a member.
+ */
+static void link_choice_members(struct kmenu *m, struct ksym *choice_sym)
+{
+	for (struct kmenu *c = m->children; c; c = c->next) {
+		switch (c->kind) {
+		case KM_SYM:
+			if (c->sym && c->sym->type == KS_BOOL &&
+			    !c->sym->choice_parent)
+				c->sym->choice_parent = choice_sym;
+			break;
+		case KM_IF:
+			link_choice_members(c, choice_sym);
+			break;
+		case KM_CHOICE:
+		case KM_MENU:
+		case KM_COMMENT:
+		case KM_ROOT:
+			/* Do not descend into nested scopes. */
+			break;
+		}
+	}
+}
+
+static void pass_link_choices(struct kc_ctx *ctx)
+{
+	struct kmenu *stack[256];
+	int sp = 0;
+	stack[sp++] = ctx->root;
+	while (sp) {
+		struct kmenu *m = stack[--sp];
+		if (m->kind == KM_CHOICE && m->sym)
+			link_choice_members(m, m->sym);
+		for (struct kmenu *c = m->children; c; c = c->next)
+			if (sp < 256)
+				stack[sp++] = c;
+	}
+}
+
+/* ================================================================== */
+/*  Choice enforcement inside the fixpoint                            */
+/* ================================================================== */
+
+/*
+ * Pick the "winner" member for @p choice_sym and force every other
+ * member to "n".  Returns 1 if any value changed.
+ *
+ * Selection precedence (matches python kconfgen):
+ *   1. The last user-set member with value "y" (CLI argv order).
+ *   2. The first @c default MEMBER prop on the choice whose @c if-
+ *      condition is satisfied and whose target is one of the members.
+ *   3. Otherwise the first member in declaration order.
+ */
+static int enforce_choice(struct kc_ctx *ctx, struct ksym *choice_sym)
+{
+	struct ksym *winner = NULL;
+
+	/* Collect members in declaration order. */
+	struct ksym *members[64];
+	int n_members = 0;
+	for (size_t i = 0; i < ctx->symlist.nr; i++) {
+		struct ksym *m = smap_get(&ctx->symtab, ctx->symlist.v[i]);
+		if (m && m->choice_parent == choice_sym && n_members < 64)
+			members[n_members++] = m;
+	}
+	if (!n_members)
+		return 0;
+
+	/* Rule 1: last user-set "y" wins. */
+	for (int i = n_members - 1; i >= 0; i--) {
+		if (members[i]->user_set && members[i]->cur_val &&
+		    !strcmp(members[i]->cur_val, "y")) {
+			winner = members[i];
+			break;
+		}
+	}
+	/* Rule 2: first applicable default that names a member. */
+	if (!winner) {
+		for (struct kprop *p = choice_sym->props; p; p = p->next) {
+			if (p->kind != KP_DEFAULT || !p->expr ||
+			    p->expr->op != KE_SYMREF)
+				continue;
+			if (!eval_bool(p->cond))
+				continue;
+			struct ksym *target = p->expr->sym;
+			for (int i = 0; i < n_members; i++) {
+				if (members[i] == target) {
+					winner = members[i];
+					break;
+				}
+			}
+			if (winner)
+				break;
+		}
+	}
+	/* Rule 3: first member in declaration order. */
+	if (!winner)
+		winner = members[0];
+
+	int changed = 0;
+	for (int i = 0; i < n_members; i++) {
+		const char *target = (members[i] == winner) ? "y" : "n";
+		if (!members[i]->cur_val ||
+		    strcmp(members[i]->cur_val, target)) {
+			free(members[i]->cur_val);
+			members[i]->cur_val = sbuf_strdup(target);
+			changed = 1;
+		}
+	}
+	return changed;
+}
+
+static int fixpoint_enforce_choices(struct kc_ctx *ctx)
+{
+	int changed = 0;
+	for (size_t i = 0; i < ctx->symlist.nr; i++) {
+		struct ksym *s = smap_get(&ctx->symtab, ctx->symlist.v[i]);
+		if (s && s->is_choice)
+			changed |= enforce_choice(ctx, s);
+	}
+	return changed;
+}
+
+/* ================================================================== */
 /*  Pass 5: fixpoint                                                  */
 /* ================================================================== */
 
@@ -396,6 +527,24 @@ static int fixpoint_step(struct kc_ctx *ctx)
 		/* Numeric/string bareword literals aren't real symbols. */
 		if (s->type == KS_UNKNOWN && !s->props)
 			continue;
+
+		/*
+		 * Choice members are entirely owned by
+		 * fixpoint_enforce_choices: it picks the winner and
+		 * forces every other member to "n".  Touching their
+		 * values here would fight with that pass and oscillate
+		 * the fixpoint indefinitely.  We still need to keep
+		 * @c visible up-to-date so depends-on expressions that
+		 * reference members still read a sane value.
+		 */
+		if (s->choice_parent) {
+			int new_visible = eval_bool(s->effective_dep);
+			if (s->visible != new_visible) {
+				s->visible = new_visible;
+				changed = 1;
+			}
+			continue;
+		}
 
 		int new_visible = eval_bool(s->effective_dep);
 
@@ -487,9 +636,14 @@ void kc_eval(struct kc_ctx *ctx)
 	pass_ctx_dep(ctx->root, NULL);
 	pass_sym_dep(ctx);
 	pass_rev_dep(ctx);
+	pass_link_choices(ctx);
 
 	int iter = 0;
-	while (fixpoint_step(ctx)) {
+	for (;;) {
+		int changed = fixpoint_step(ctx);
+		changed |= fixpoint_enforce_choices(ctx);
+		if (!changed)
+			break;
 		if (++iter >= MAX_FIXPOINT_ITERS)
 			die("kc_eval: fixpoint did not converge after %d "
 			    "iterations",
