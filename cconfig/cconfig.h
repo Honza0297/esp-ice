@@ -367,6 +367,26 @@ void kc_finalize(struct kc_menu_node *root, struct kc_symtab *tab);
 int kc_menu_visible(const struct kc_menu_node *node);
 
 /* ------------------------------------------------------------------
+ *  Configuration writing (sdkconfig writer)
+ *
+ *  kc_config_contents builds the sdkconfig text into an sbuf.
+ *  kc_write_config writes it atomically to a file.
+ *  Both walk the finalised menu tree in the same order as kconfgen.
+ *
+ *  kc_config_contents is NOT re-entrant and NOT thread-safe: it
+ *  temporarily mutates sym->flags (sets/clears a visited bit) for
+ *  the duration of the walk.
+ *
+ *  @p idf_version appears in the banner; NULL or "" produces the
+ *  default two-space gap before "Project Configuration".
+ * ------------------------------------------------------------------ */
+
+void kc_config_contents(struct sbuf *out, const struct kc_menu_node *root,
+			struct kc_symtab *tab, const char *idf_version);
+int kc_write_config(const char *path, const struct kc_menu_node *root,
+		    struct kc_symtab *tab, const char *idf_version);
+
+/* ------------------------------------------------------------------
  *  Deferred diagnostic reporting
  *
  *  Non-fatal diagnostics (invalid defaults, multiple definitions,
