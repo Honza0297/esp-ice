@@ -14,10 +14,9 @@ int main(void)
 {
 	/* Block mapping with string, bool, and nested list values. */
 	{
-		const char *src =
-		    "re: \"warning: foo\"\n"
-		    "hint: 'use bar'\n"
-		    "match_to_output: True\n";
+		const char *src = "re: \"warning: foo\"\n"
+				  "hint: 'use bar'\n"
+				  "match_to_output: True\n";
 		struct yaml_value *root = yaml_parse(src, strlen(src));
 
 		tap_check(root != NULL);
@@ -34,31 +33,29 @@ int main(void)
 
 	/* Flow sequence with quoted strings and escapes. */
 	{
-		const char *src =
-		    "items: ['a', 'b', \"c\\nd\"]\n";
+		const char *src = "items: ['a', 'b', \"c\\nd\"]\n";
 		struct yaml_value *root = yaml_parse(src, strlen(src));
 		struct yaml_value *items;
 
 		tap_check(root != NULL);
 		items = yaml_get(root, "items");
 		tap_check(yaml_seq_size(items) == 3);
-		tap_check(strcmp(yaml_as_string(yaml_seq_at(items, 0)),
-				 "a") == 0);
-		tap_check(strcmp(yaml_as_string(yaml_seq_at(items, 2)),
-				 "c\nd") == 0);
+		tap_check(strcmp(yaml_as_string(yaml_seq_at(items, 0)), "a") ==
+			  0);
+		tap_check(
+		    strcmp(yaml_as_string(yaml_seq_at(items, 2)), "c\nd") == 0);
 		yaml_free(root);
 		tap_done("parse flow sequence with quoted strings + escapes");
 	}
 
 	/* Block sequence of block mappings -- the hints.yml shape. */
 	{
-		const char *src =
-		    "-\n"
-		    "    re: \"err: foo\"\n"
-		    "    hint: \"fix foo\"\n"
-		    "-\n"
-		    "    re: \"err: bar\"\n"
-		    "    hint: \"fix bar\"\n";
+		const char *src = "-\n"
+				  "    re: \"err: foo\"\n"
+				  "    hint: \"fix foo\"\n"
+				  "-\n"
+				  "    re: \"err: bar\"\n"
+				  "    hint: \"fix bar\"\n";
 		struct yaml_value *root = yaml_parse(src, strlen(src));
 		struct yaml_value *e0, *e1;
 
@@ -78,15 +75,14 @@ int main(void)
 
 	/* Nested: mapping containing a sequence containing mappings. */
 	{
-		const char *src =
-		    "re: \"err {}\"\n"
-		    "variables:\n"
-		    "    -\n"
-		    "        re_variables: ['x']\n"
-		    "        hint_variables: ['y']\n"
-		    "    -\n"
-		    "        re_variables: ['p']\n"
-		    "        hint_variables: ['q']\n";
+		const char *src = "re: \"err {}\"\n"
+				  "variables:\n"
+				  "    -\n"
+				  "        re_variables: ['x']\n"
+				  "        hint_variables: ['y']\n"
+				  "    -\n"
+				  "        re_variables: ['p']\n"
+				  "        hint_variables: ['q']\n";
 		struct yaml_value *root = yaml_parse(src, strlen(src));
 		struct yaml_value *vars, *entry;
 
@@ -103,11 +99,10 @@ int main(void)
 
 	/* Comments: own-line and end-of-line. */
 	{
-		const char *src =
-		    "# leading comment\n"
-		    "key1: value1  # trailing\n"
-		    "# middle\n"
-		    "key2: value2\n";
+		const char *src = "# leading comment\n"
+				  "key1: value1  # trailing\n"
+				  "# middle\n"
+				  "key2: value2\n";
 		struct yaml_value *root = yaml_parse(src, strlen(src));
 
 		tap_check(root != NULL);
@@ -121,13 +116,12 @@ int main(void)
 
 	/* Boolean variants: true, True, TRUE, false, False, FALSE. */
 	{
-		const char *src =
-		    "a: true\n"
-		    "b: True\n"
-		    "c: TRUE\n"
-		    "d: false\n"
-		    "e: False\n"
-		    "f: FALSE\n";
+		const char *src = "a: true\n"
+				  "b: True\n"
+				  "c: TRUE\n"
+				  "d: false\n"
+				  "e: False\n"
+				  "f: FALSE\n";
 		struct yaml_value *root = yaml_parse(src, strlen(src));
 
 		tap_check(yaml_as_bool(yaml_get(root, "a")) == 1);

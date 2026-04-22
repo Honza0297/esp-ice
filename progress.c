@@ -353,6 +353,25 @@ int process_run_progress(struct process *proc, const char *msg,
 		if (!verbose)
 			dump_failure_log(log_path.buf, on_fail);
 		/*
+		 * Scan the captured log against ESP-IDF's hints.yml and
+		 * emit HINT: lines for any matching rule.  Gated on the
+		 * same "configured project" check as `ice log` below --
+		 * outside a project we have no idf-path to find the rules
+		 * file.  --no-hints / core.no-hints opts out.
+		 */
+		if (!global_no_hints && config_has("_project.configured")) {
+			const char *idf = config_get("_project.idf-path");
+			if (idf && *idf) {
+				struct sbuf hints_yml = SBUF_INIT;
+				sbuf_addf(&hints_yml,
+					  "%s/tools/idf_py_actions/hints.yml",
+					  idf);
+				hints_scan(hints_yml.buf, log_path.buf);
+				sbuf_release(&hints_yml);
+				fflush(stdout);
+			}
+		}
+		/*
 		 * `ice log` only works inside a configured project (it
 		 * walks the profile's log-dir).  Gate the "run ice log"
 		 * hint on that so standalone commands (ice repo clone,

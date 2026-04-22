@@ -104,7 +104,8 @@ struct yaml_value *yaml_get(const struct yaml_value *obj, const char *key);
 /** Number of items in a YAML sequence (0 if not a sequence). */
 int yaml_seq_size(const struct yaml_value *seq);
 
-/** Item at @p idx in a YAML sequence, or NULL if out of range or not a sequence. */
+/** Item at @p idx in a YAML sequence, or NULL if out of range or not a
+ * sequence. */
 struct yaml_value *yaml_seq_at(const struct yaml_value *seq, int idx);
 
 #endif /* YAML_H */

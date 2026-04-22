@@ -199,6 +199,7 @@ LIB_SRCS := \
 	chip.c \
 	color_rules.c \
 	esf_port.c \
+	hints.c \
 	yaml.c
 
 # MAIN_SRCS provide the program entry point.  Excluded from libice.a

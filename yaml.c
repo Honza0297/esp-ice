@@ -12,8 +12,8 @@
  * YAML needed for hints.yml and similar config-like documents.  See
  * yaml.h for the feature list and scope limits.
  */
-#include "ice.h"
 #include "yaml.h"
+#include "ice.h"
 
 /* ------------------------------------------------------------------ */
 /*  Construction                                                      */
@@ -166,8 +166,9 @@ static int peek(const struct parser *ps)
 
 static int peek_at(const struct parser *ps, size_t off)
 {
-	return (ps->pos + off >= ps->len) ? -1
-					  : (unsigned char)ps->buf[ps->pos + off];
+	return (ps->pos + off >= ps->len)
+		   ? -1
+		   : (unsigned char)ps->buf[ps->pos + off];
 }
 
 static void advance(struct parser *ps)
@@ -244,10 +245,7 @@ static int line_indent(const struct parser *ps)
 	return n;
 }
 
-static void consume_spaces(struct parser *ps, int n)
-{
-	ps->pos += n;
-}
+static void consume_spaces(struct parser *ps, int n) { ps->pos += n; }
 
 /* After inline content on a line, allow trailing whitespace + optional
  * comment before the newline.  Returns 0 on success, -1 if stray
@@ -579,9 +577,9 @@ static int line_is_map_key(const struct parser *ps)
 		if (c == '#')
 			return 0;
 		if (c == ':') {
-			int next =
-			    (i + 1 < ps->len) ? (unsigned char)ps->buf[i + 1]
-					      : -1;
+			int next = (i + 1 < ps->len)
+				       ? (unsigned char)ps->buf[i + 1]
+				       : -1;
 			if (next == -1 || next == ' ' || next == '\t' ||
 			    next == '\n' || next == '\r')
 				return 1;
@@ -768,14 +766,17 @@ static struct yaml_value *parse_node(struct parser *ps, int min_indent)
 		return NULL;
 	}
 
-	/* Peek past indent without consuming -- we pass cur into parse_block_*. */
+	/* Peek past indent without consuming -- we pass cur into parse_block_*.
+	 */
 	consume_spaces(ps, cur);
 	int c = peek(ps);
 
 	if (c == '-') {
 		int n = peek_at(ps, 1);
-		if (n == ' ' || n == '\t' || n == '\n' || n == '\r' || n == -1) {
-			/* Put back the indent -- parse_block_seq re-reads it. */
+		if (n == ' ' || n == '\t' || n == '\n' || n == '\r' ||
+		    n == -1) {
+			/* Put back the indent -- parse_block_seq re-reads it.
+			 */
 			ps->pos -= cur;
 			return parse_block_seq(ps, cur);
 		}
