@@ -413,6 +413,22 @@ int kc_write_config(const char *path, const struct kc_menu_node *root,
 		    struct kc_symtab *tab, const char *idf_version);
 
 /* ------------------------------------------------------------------
+ *  C header output (sdkconfig.h)
+ *
+ *  kc_header_contents builds the C #define header into an sbuf.
+ *  kc_write_header writes it atomically to a file.
+ *  Same tree walk as the config writer, but emits #define lines
+ *  instead of CONFIG_FOO=value lines.  Bool "n" is omitted entirely.
+ *
+ *  NOT re-entrant / NOT thread-safe (same visited-flag mechanism).
+ * ------------------------------------------------------------------ */
+
+void kc_header_contents(struct sbuf *out, const struct kc_menu_node *root,
+			struct kc_symtab *tab, const char *idf_version);
+int kc_write_header(const char *path, const struct kc_menu_node *root,
+		    struct kc_symtab *tab, const char *idf_version);
+
+/* ------------------------------------------------------------------
  *  Deferred diagnostic reporting
  *
  *  Non-fatal diagnostics (invalid defaults, multiple definitions,
