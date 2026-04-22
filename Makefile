@@ -1,4 +1,4 @@
-VERSION = 0.3.1
+VERSION = 0.4.0
 NAME := ice
 
 O ?= build/$(TRIPLE)
@@ -146,6 +146,7 @@ LIB_SRCS := \
 	cmd/image/info/info.c \
 	cmd/image/merge/merge.c \
 	cmd/init/init.c \
+	cmd/log/log.c \
 	cmd/menuconfig/menuconfig.c \
 	cmd/repo/repo.c \
 	cmd/repo/clone/clone.c \
@@ -156,7 +157,7 @@ LIB_SRCS := \
 	cmd/status/status.c \
 	cmd/target/target.c \
 	cmd/monitor/monitor.c \
-	cmd/target/flash.c \
+	cmd/target/flash/flash.c \
 	cmd/target/list/list.c \
 	cmd/target/monitor/monitor.c \
 	cmd/tools/tools.c \
@@ -191,6 +192,7 @@ LIB_SRCS := \
 	toolenv.c \
 	vendor/sha256/sha256.c \
 	chip.c \
+	color_rules.c \
 	esf_port.c
 
 # MAIN_SRCS provide the program entry point.  Excluded from libice.a
