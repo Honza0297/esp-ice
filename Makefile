@@ -120,6 +120,7 @@ PKG_NAME := $(NAME)-$(VERSION)-$(S)-$(ARCH)$(PKG_SUFFIX)
 LIB_SRCS := \
 	ar.c \
 	cconfig/confread.c \
+	cconfig/confwrite.c \
 	cconfig/eval.c \
 	cconfig/expr.c \
 	cconfig/lexer.c \
