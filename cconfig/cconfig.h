@@ -41,6 +41,7 @@ enum kc_sym_type {
 #define KC_SYM_CONST (1 << 2)	  /* constant symbol (y/n) */
 #define KC_SYM_AUTO (1 << 3)	  /* automatically created by parser */
 #define KC_SYM_VALID (1 << 4)	  /* value has been computed */
+#define KC_SYM_CHANGED (1 << 5)	  /* value set by kc_load_config */
 
 /* ------------------------------------------------------------------
  *  Expression AST
@@ -333,6 +334,21 @@ void kc_preproc_set(struct kc_symtab *tab, const char *name, const char *value,
 		    int is_immediate);
 char *kc_preproc_expand(const struct kc_symtab *tab, const char *raw);
 void kc_preproc_release(struct kc_symtab *tab);
+
+/* ------------------------------------------------------------------
+ *  Configuration loading (sdkconfig reader)
+ *
+ *  kc_load_config reads an sdkconfig file and sets curr_value on
+ *  matching symbols in the symbol table.  Call it AFTER parsing the
+ *  Kconfig tree and BEFORE kc_finalize so that loaded values take
+ *  part in dependency propagation.
+ *
+ *  Returns -1 if the file cannot be read, 0 if no warnings were
+ *  emitted, or a positive count of warnings on recoverable issues
+ *  (unknown symbols, type mismatches, malformed lines).
+ * ------------------------------------------------------------------ */
+
+int kc_load_config(const char *path, struct kc_symtab *tab);
 
 /* ------------------------------------------------------------------
  *  Evaluation
