@@ -18,8 +18,8 @@
 #define PCRE2_CODE_UNIT_WIDTH 8
 #include <pcre2.h>
 
-#include "ice.h"
 #include "hints.h"
+#include "ice.h"
 
 /* ------------------------------------------------------------------ */
 /*  Log normalization                                                 */
@@ -45,8 +45,7 @@ static void normalize_log(const char *buf, size_t len, struct sbuf *out)
 		if (i < len && buf[i] == '\n')
 			i++;
 
-		while (start < end &&
-		       (buf[start] == ' ' || buf[start] == '\t'))
+		while (start < end && (buf[start] == ' ' || buf[start] == '\t'))
 			start++;
 		while (end > start &&
 		       (buf[end - 1] == ' ' || buf[end - 1] == '\t'))
@@ -145,7 +144,8 @@ static int collect_str_seq(const struct yaml_value *seq, const char ***out_arr)
 /* ------------------------------------------------------------------ */
 
 struct re_match {
-	char *groups_joined; /**< Captures joined with ", " (match_to_output). */
+	char
+	    *groups_joined; /**< Captures joined with ", " (match_to_output). */
 	int matched;
 };
 
@@ -209,21 +209,13 @@ static void pcre_search(const char *pattern, const char *subject,
 /* ------------------------------------------------------------------ */
 
 /*
- * Colored to match ESP-IDF's own yellow_print("HINT: ...") convention.
- * Color tokens live in the format string, not in @p msg, so a stray
- * '}' in the hint text cannot unbalance the color block.  When stdout
- * is piped (grep, redirection) use_color_for() strips the tokens and
- * consumers see the plain "HINT: ..." line.
- */
-static void emit_hint(const char *msg) { printf("@y{HINT: %s}\n", msg); }
-
-/*
- * Execute a single rule against the normalized log buffer.  Returns
- * the number of hints emitted for this rule (0, or >= 1 with
- * variables).  @p source is used only for warn() diagnostics.
+ * Execute a single rule against the normalized log buffer.  Matched
+ * expanded hints are appended to @p out via svec_push().  Returns the
+ * number of hints pushed for this rule (0, or >= 1 with variables).
+ * @p source is used only for warn() diagnostics.
  */
 static int run_rule(const struct yaml_value *rule, const char *log,
-		    const char *source)
+		    const char *source, struct svec *out)
 {
 	const char *re = yaml_as_string(yaml_get(rule, "re"));
 	const char *hint = yaml_as_string(yaml_get(rule, "hint"));
@@ -264,7 +256,7 @@ static int run_rule(const struct yaml_value *rule, const char *log,
 			struct re_match m = {0};
 			pcre_search(pat.buf, log, 0, &m, source);
 			if (m.matched) {
-				emit_hint(msg.buf);
+				svec_push(out, msg.buf);
 				emitted++;
 			}
 			free(m.groups_joined);
@@ -286,7 +278,7 @@ static int run_rule(const struct yaml_value *rule, const char *log,
 		const char *args[1] = {arg};
 		struct sbuf msg = SBUF_INIT;
 		if (format_template(&msg, hint, args, 1) == 0) {
-			emit_hint(msg.buf);
+			svec_push(out, msg.buf);
 			emitted++;
 		} else {
 			warn("%s: cannot expand 'hint' template /%s/"
@@ -303,7 +295,8 @@ static int run_rule(const struct yaml_value *rule, const char *log,
 /*  Public entry point                                                */
 /* ------------------------------------------------------------------ */
 
-int hints_scan(const char *hints_yml_path, const char *log_path)
+int hints_scan(const char *hints_yml_path, const char *log_path,
+	       struct svec *out)
 {
 	struct sbuf yml = SBUF_INIT, log = SBUF_INIT, normalized = SBUF_INIT;
 	struct yaml_value *root = NULL;
@@ -337,7 +330,7 @@ int hints_scan(const char *hints_yml_path, const char *log_path)
 			     hints_yml_path, i);
 			continue;
 		}
-		emitted += run_rule(rule, normalized.buf, hints_yml_path);
+		emitted += run_rule(rule, normalized.buf, hints_yml_path, out);
 	}
 
 done:

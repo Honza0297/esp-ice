@@ -77,11 +77,29 @@ const struct cmd_desc cmd_idf_hints_desc = {
 
 int cmd_idf_hints(int argc, const char **argv)
 {
+	struct svec hints = SVEC_INIT;
+	int rc = 0;
+
 	argc = parse_options(argc, argv, &cmd_idf_hints_desc);
 	if (argc != 2)
 		die("usage: ice idf hints <hints.yml> <log>");
 
-	if (hints_scan(argv[0], argv[1]) < 0)
-		return 1;
-	return 0;
+	if (hints_scan(argv[0], argv[1], &hints) < 0) {
+		rc = 1;
+		goto done;
+	}
+
+	/*
+	 * Colored to match ESP-IDF's yellow_print("HINT: ...") convention.
+	 * Color tokens live in the format string, not in the hint message,
+	 * so a stray '}' in the text cannot unbalance the color block.
+	 * When stdout is piped the tokens are stripped and callers see the
+	 * plain "HINT: ..." line.
+	 */
+	for (size_t i = 0; i < hints.nr; i++)
+		printf("@y{HINT: %s}\n", hints.v[i]);
+
+done:
+	svec_clear(&hints);
+	return rc;
 }

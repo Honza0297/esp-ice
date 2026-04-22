@@ -357,18 +357,23 @@ int process_run_progress(struct process *proc, const char *msg,
 		 * emit HINT: lines for any matching rule.  Gated on the
 		 * same "configured project" check as `ice log` below --
 		 * outside a project we have no idf-path to find the rules
-		 * file.  --no-hints / core.no-hints opts out.
+		 * file.  --no-hints / core.no-hints opts out.  Format
+		 * matches ESP-IDF's yellow_print("HINT: ...") convention.
 		 */
 		if (!global_no_hints && config_has("_project.configured")) {
 			const char *idf = config_get("_project.idf-path");
 			if (idf && *idf) {
 				struct sbuf hints_yml = SBUF_INIT;
+				struct svec hints = SVEC_INIT;
 				sbuf_addf(&hints_yml,
 					  "%s/tools/idf_py_actions/hints.yml",
 					  idf);
-				hints_scan(hints_yml.buf, log_path.buf);
-				sbuf_release(&hints_yml);
+				hints_scan(hints_yml.buf, log_path.buf, &hints);
+				for (size_t i = 0; i < hints.nr; i++)
+					printf("@y{HINT: %s}\n", hints.v[i]);
 				fflush(stdout);
+				svec_clear(&hints);
+				sbuf_release(&hints_yml);
 			}
 		}
 		/*
