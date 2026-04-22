@@ -36,12 +36,31 @@ enum kc_sym_type {
  *  Symbol flags
  * ------------------------------------------------------------------ */
 
+/*
+ * Public flags (bits 0–5): used across cconfig modules.
+ */
 #define KC_SYM_CHOICE (1 << 0)	  /* symbol is a choice group */
 #define KC_SYM_CHOICEVAL (1 << 1) /* symbol is a member of a choice */
 #define KC_SYM_CONST (1 << 2)	  /* constant symbol (y/n) */
 #define KC_SYM_AUTO (1 << 3)	  /* automatically created by parser */
 #define KC_SYM_VALID (1 << 4)	  /* value has been computed */
 #define KC_SYM_CHANGED (1 << 5)	  /* value set by kc_load_config */
+
+/*
+ * Private per-subsystem flags (bits 6–8): temporarily set/cleared
+ * during tree walks.  Each must be disjoint from the others and
+ * from the public flags above.
+ */
+#define CONFWRITE_VISITED (1u << 6) /* confwrite.c: already emitted */
+#define KC_SET_DONE (1u << 7)	    /* eval.c: strong set applied */
+#define KC_SET_WEAK_DONE (1u << 8)  /* eval.c: weak set applied */
+
+typedef char
+    _confwrite_above_changed[CONFWRITE_VISITED > KC_SYM_CHANGED ? 1 : -1];
+typedef char _set_done_above_visited[KC_SET_DONE > CONFWRITE_VISITED ? 1 : -1];
+typedef char _weak_above_strong[KC_SET_WEAK_DONE > KC_SET_DONE ? 1 : -1];
+typedef char
+    _set_flags_disjoint[(KC_SET_DONE & KC_SET_WEAK_DONE) == 0 ? 1 : -1];
 
 /* ------------------------------------------------------------------
  *  Expression AST
@@ -112,6 +131,8 @@ struct kc_property {
 	struct kc_expr *cond;
 	const char *file;
 	int line;
+	struct kc_symbol
+	    *set_target; /* target for KC_PROP_SET / KC_PROP_SET_DEFAULT */
 	struct kc_property *next;
 };
 
@@ -176,6 +197,7 @@ struct kc_variable {
 struct kc_symtab {
 	struct kc_symbol *buckets[KC_SYMTAB_BUCKETS];
 	struct kc_intern_str *interned_strings;
+	struct kc_symbol *orphan_syms; /* const syms not in hash table */
 	struct kc_variable *variables; /* Kconfig macro variable list */
 	unsigned int choice_counter;
 	int source_depth;
@@ -250,6 +272,7 @@ enum kc_token_type {
 	KC_TOK_OPTIONAL,
 	KC_TOK_SET,
 	KC_TOK_WARNING,
+	KC_TOK_OPTION,
 	KC_TOK_DEF_BOOL,
 	KC_TOK_DEF_INT,
 	KC_TOK_DEF_HEX,
@@ -325,8 +348,11 @@ void kc_menu_free(struct kc_menu_node *root);
  *  Preprocessor (macro/variable expansion)
  *
  *  kc_preproc_set records a variable in the symtab's variable list.
- *  kc_preproc_expand expands all $(NAME) references in a string,
- *  consulting the variable table first and falling back to getenv().
+ *  kc_preproc_expand expands $() / ${} / $NAME references in a
+ *  string:
+ *    $(NAME)  — Kconfig variable table first, then getenv()
+ *    ${NAME}  — getenv() only (environment-only lookup)
+ *    $NAME    — same as $(NAME) (Kconfig-then-env)
  *  Undefined variables expand to the empty string.
  * ------------------------------------------------------------------ */
 
