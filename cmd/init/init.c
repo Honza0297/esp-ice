@@ -355,17 +355,31 @@ static int cmake_configure(void)
 	 */
 	svec_push(&args, "-DPYTHON_DEPS_CHECKED=1");
 	/*
-	 * Pin cmake's Python3 interpreter to the ice-managed venv so every
-	 * ${Python3_EXECUTABLE} invocation -- at configure time and inside
-	 * the generated ninja / Makefile rules -- runs sitecustomize.py and
-	 * is routed through ice for the scripts we have native replacements
-	 * for.  See setup_venv() for the full mechanism.
+	 * Pin every Python interpreter cmake and IDF might spawn to the
+	 * ice-managed venv so their invocations route through
+	 * sitecustomize.py (see setup_venv() for the mechanism).  We have
+	 * to set two variables because ESP-IDF and cmake name the
+	 * interpreter differently:
+	 *
+	 *   Python3_EXECUTABLE  cmake's find_package(Python3) result,
+	 *                       consumed by generic rules.
+	 *   PYTHON              IDF's `project.cmake` build property
+	 *                       (set_default(PYTHON "python") in
+	 *                       tools/cmake/build.cmake); used as
+	 *                       ${python} in all ESP-IDF COMMAND lines
+	 *                       including `${python} -m kconfgen`.
+	 *
+	 * Without the PYTHON override IDF would fall back to searching
+	 * PATH for "python", which on a machine with a previous
+	 * esp-idf/install.sh run resolves to ~/.espressif/python_env/...
+	 * and bypasses our sitecustomize entirely.
 	 */
 	{
 		struct sbuf py = SBUF_INIT;
 
 		venv_python(&py);
 		svec_pushf(&args, "-DPython3_EXECUTABLE=%s", py.buf);
+		svec_pushf(&args, "-DPYTHON=%s", py.buf);
 		sbuf_release(&py);
 	}
 	for (size_t i = 0; i < defines.nr; i++)
@@ -394,8 +408,10 @@ static int cmake_configure(void)
 /*   ldgen.py            -> ice idf ldgen                              */
 /*   gen_esp32part.py    -> ice idf partition-table  (generate form)   */
 /*   gen_esp32part.py    -> exit 0                   (display form)    */
+/*   gen_crt_bundle.py   -> ice idf crt-bundle                         */
 /*   esptool.py          -> ice image create         (elf2image only)  */
 /*   python -m esptool   -> ice image create         (elf2image only)  */
+/*   python -m kconfgen  -> ice idf kconfgen                           */
 /*                                                                     */
 /* IDF wires these scripts into its cmake rules (and thus into         */
 /* build.ninja, or Makefiles when -G "Unix Makefiles") as              */
@@ -539,6 +555,9 @@ static void write_sitecustomize(const char *site_packages, const char *ice_path)
 		  "                      *sys.argv[1:]])\n"
 		  "        else:\n"
 		  "            os._exit(0)\n"
+		  "    elif base == \"gen_crt_bundle.py\":\n"
+		  "        os.execv(_ICE,\n"
+		  "                 [_ICE, \"idf\", \"crt-bundle\", *sys.argv[1:]])\n"
 		  "    elif base == \"esptool.py\":\n"
 		  "        _esptool_dispatch(sys.argv[1:])\n"
 		  "    elif sys.argv[0] == \"-m\" and \"elf2image\" in sys.argv[1:]:\n"
@@ -548,6 +567,13 @@ static void write_sitecustomize(const char *site_packages, const char *ice_path)
 		  "        # presence as the disambiguator -- that matches\n"
 		  "        # patch_ninja's exact coverage.\n"
 		  "        _esptool_dispatch(sys.argv[1:])\n"
+		  "    elif sys.argv[0] == \"-m\" and \"--kconfig\" in sys.argv[1:]:\n"
+		  "        # `python -m kconfgen ...`: same argv-eating quirk as\n"
+		  "        # esptool above.  `--kconfig` is kconfgen's mandatory\n"
+		  "        # root flag and doesn't appear in any other IDF-invoked\n"
+		  "        # python module, so it is a safe disambiguator.\n"
+		  "        os.execv(_ICE,\n"
+		  "                 [_ICE, \"idf\", \"kconfgen\", *sys.argv[1:]])\n"
 		  "\n"
 		  "\n"
 		  "try:\n"
