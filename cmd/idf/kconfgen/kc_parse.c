@@ -489,9 +489,8 @@ static enum ksym_type tok_to_ksym_type(int tok)
 {
 	switch (tok) {
 	case KT_BOOL:
+	case KT_TRISTATE: /* ESP has no tristate; treat as bool. */
 		return KS_BOOL;
-	case KT_TRISTATE:
-		return KS_BOOL; /* ESP has no tristate. */
 	case KT_INT:
 		return KS_INT;
 	case KT_HEX:
@@ -536,9 +535,7 @@ static void parse_deftype_line(struct kc_parser *p, struct ksym *sym)
 	enum ksym_type t;
 	switch (tok) {
 	case KT_DEF_BOOL:
-		t = KS_BOOL;
-		break;
-	case KT_DEF_TRISTATE:
+	case KT_DEF_TRISTATE: /* ESP has no tristate; treat as bool. */
 		t = KS_BOOL;
 		break;
 	case KT_DEF_INT:
@@ -1524,16 +1521,17 @@ static int finalize_expr_depends_on(const struct kexpr *e,
 	if (e->op == KE_SYMREF)
 		return e->sym == sym;
 	if (e->op == KE_EQ || e->op == KE_NE) {
-		/* Normalise so @p sym is on the left side. */
+		/* Normalise so @p sym is on the left side; only @p b is
+		 * inspected below, so we just pick whichever side isn't
+		 * @p sym. */
 		const struct kexpr *a = e->l, *b = e->r;
 		if (b && b->op == KE_SYMREF && b->sym == sym) {
-			a = e->r;
 			b = e->l;
 		} else if (!(a && a->op == KE_SYMREF && a->sym == sym)) {
 			return 0;
 		}
-		/* a is @p sym; b must be the constant y (for EQ) / n (for NE).
-		 */
+		/* @p sym is on one side; b must be the constant y (for EQ) /
+		 * n (for NE). */
 		if (!b)
 			return 0;
 		const char *name = NULL;

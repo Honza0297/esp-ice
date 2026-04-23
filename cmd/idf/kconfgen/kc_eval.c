@@ -576,7 +576,7 @@ static int enforce_choice(struct kc_ctx *ctx, struct ksym *choice_sym)
 		int changed = 0;
 		for (int i = 0; i < n_members; i++) {
 			if (!members[i]->cur_val ||
-			    strcmp(members[i]->cur_val, "n")) {
+			    strcmp(members[i]->cur_val, "n") != 0) {
 				free(members[i]->cur_val);
 				members[i]->cur_val = sbuf_strdup("n");
 				changed = 1;
@@ -620,7 +620,7 @@ static int enforce_choice(struct kc_ctx *ctx, struct ksym *choice_sym)
 	for (int i = 0; i < n_members; i++) {
 		const char *target = (members[i] == winner) ? "y" : "n";
 		if (!members[i]->cur_val ||
-		    strcmp(members[i]->cur_val, target)) {
+		    strcmp(members[i]->cur_val, target) != 0) {
 			free(members[i]->cur_val);
 			members[i]->cur_val = sbuf_strdup(target);
 			changed = 1;

@@ -89,8 +89,8 @@ void kc_load_rename(struct kc_ctx *ctx, const char *path)
 			new_start++;
 		}
 
-		if (strncmp(old_start, CONFIG_PREFIX, CONFIG_PREFIX_LEN) ||
-		    strncmp(new_start, CONFIG_PREFIX, CONFIG_PREFIX_LEN))
+		if (strncmp(old_start, CONFIG_PREFIX, CONFIG_PREFIX_LEN) != 0 ||
+		    strncmp(new_start, CONFIG_PREFIX, CONFIG_PREFIX_LEN) != 0)
 			continue; /* not a CONFIG_* rename; skip silently */
 
 		const char *old_short = old_start + CONFIG_PREFIX_LEN;
@@ -274,7 +274,7 @@ static void process_config_line(struct kc_ctx *ctx, char *line,
 			 */
 			struct ksym *s = smap_get(&ctx->symtab, name_copy);
 			if (!s || !s->cur_val ||
-			    (strcmp(s->cur_val, val) && !s->user_set))
+			    (strcmp(s->cur_val, val) != 0 && !s->user_set))
 				kc_sym_set_user(ctx, name_copy, val);
 			/* else: keep current state (user_set preserved). */
 		}
@@ -323,7 +323,7 @@ static void process_config_line(struct kc_ctx *ctx, char *line,
 		 */
 		struct ksym *s = smap_get(&ctx->symtab, name);
 		if (!s || !s->cur_val ||
-		    (strcmp(s->cur_val, val) && !s->user_set))
+		    (strcmp(s->cur_val, val) != 0 && !s->user_set))
 			kc_sym_set_user(ctx, name, val);
 		/* else: keep current state (user_set preserved). */
 	}
@@ -809,7 +809,7 @@ static void emit_deprecated_for_sym(struct sbuf *out, const struct ksym *s,
 	 * node's deprecated aliases separately.  Mirror that. */
 	for (size_t i = 0; i < dctx->ctx->n_renames; i++) {
 		const struct kc_rename *r = &dctx->ctx->renames[i];
-		if (strcmp(r->new_name, s->name))
+		if (strcmp(r->new_name, s->name) != 0)
 			continue;
 		emit_deprecated_alias(out, r, s);
 	}
@@ -1316,7 +1316,7 @@ static void emit_deprecated_cmake_for_sym(struct sbuf *out,
 	const char *val = s->cur_val ? s->cur_val : "";
 	for (size_t i = 0; i < dctx->ctx->n_renames; i++) {
 		const struct kc_rename *r = &dctx->ctx->renames[i];
-		if (strcmp(r->new_name, s->name))
+		if (strcmp(r->new_name, s->name) != 0)
 			continue;
 		const char *effective = val;
 		if (s->type == KS_BOOL) {
@@ -1476,7 +1476,8 @@ void kc_write_json(const struct kc_ctx *ctx, const char *path)
 	struct json_collect c = {0};
 	reset_emit_seen(ctx);
 	walk_syms(ctx->root, NULL, cb_json_collect, &c);
-	qsort(c.entries, c.nr, sizeof(*c.entries), json_kv_cmp);
+	if (c.nr)
+		qsort(c.entries, c.nr, sizeof(*c.entries), json_kv_cmp);
 
 	struct sbuf out = SBUF_INIT;
 	sbuf_addstr(&out, "{");
@@ -1810,7 +1811,6 @@ static void json_menu_write_node(struct sbuf *out, const struct kc_ctx *ctx,
 		if (is_sym_entry && m->sym->choice_parent) {
 			if (!first)
 				sbuf_addstr(&acc, " && ");
-			first = 0;
 			/*
 			 * The choice symbol is interned under
 			 * `__choice:<NAME>` to avoid colliding with a
@@ -2128,10 +2128,9 @@ void kc_write_cmake(const struct kc_ctx *ctx, const char *path)
 
 	/* Trailing enumeration, unquoted, semicolon-separated.  When
 	 * there are no deprecated aliases to follow, python kconfgen
-	 * does NOT emit a newline after this final line -- emit NL only
-	 * when a deprecated block follows. */
-	int has_dep = !ctx->no_deprecated && ctx->n_renames > 0;
-	sbuf_addf(&out, "set(CONFIGS_LIST %s)%s", list.buf, has_dep ? "" : "");
+	 * does NOT emit a newline after this final line; otherwise the
+	 * deprecated block's own leading "\n" provides the separator. */
+	sbuf_addf(&out, "set(CONFIGS_LIST %s)", list.buf);
 	sbuf_release(&list);
 	emit_deprecated_cmake(&out, ctx);
 
