@@ -366,31 +366,6 @@ static void pass_rev_dep(struct kc_ctx *ctx)
 /* Extract a concrete string value from a default-expression given the
  * symbol's type.  For bool symbols the expr is evaluated as a boolean
  * ("y"/"n"); for others we pull the leaf literal. */
-/*
- * For a hex-type symbol, a bare `default 33` literal is parsed by
- * esp_kconfiglib as hex digits (value 0x33 = 51), not decimal 33.
- * Mirror that by prefixing `0x` when the literal lacks one AND
- * parses as a valid hex string.  Applies only to default/range
- * literals on hex symbols; plain int/float/string types are left
- * alone.
- */
-static char *normalise_hex_literal(const char *raw)
-{
-	if (!raw || !*raw)
-		return sbuf_strdup(raw ? raw : "");
-	if (raw[0] == '0' && (raw[1] == 'x' || raw[1] == 'X'))
-		return sbuf_strdup(raw);
-	/* Accept only pure hex digits; a value like "abc" on a hex
-	 * symbol is unusual but python treats it as hex -- we do too. */
-	for (const char *p = raw; *p; p++) {
-		if (!isxdigit((unsigned char)*p))
-			return sbuf_strdup(raw);
-	}
-	struct sbuf sb = SBUF_INIT;
-	sbuf_addf(&sb, "0x%s", raw);
-	return sbuf_detach(&sb);
-}
-
 static char *default_value(const struct kexpr *expr, enum ksym_type type)
 {
 	if (!expr)
@@ -400,19 +375,15 @@ static char *default_value(const struct kexpr *expr, enum ksym_type type)
 	}
 	/* Non-bool: prefer a literal leaf; otherwise fall back to the
 	 * symref's current string.  Complex expressions are rare on
-	 * non-bool defaults in ESP-IDF. */
-	if (expr->op == KE_LITERAL) {
-		const char *raw = expr->str ? expr->str : "";
-		if (type == KS_HEX)
-			return normalise_hex_literal(raw);
-		return sbuf_strdup(raw);
-	}
-	if (expr->op == KE_SYMREF) {
-		const char *raw = sym_str(expr->sym);
-		if (type == KS_HEX)
-			return normalise_hex_literal(raw);
-		return sbuf_strdup(raw);
-	}
+	 * non-bool defaults in ESP-IDF.  Hex literals are kept verbatim
+	 * -- python's str_value for `default 0` on a hex symbol is "0",
+	 * for `default 33` it's "33".  The sdkconfig.h / sdkconfig.cmake
+	 * writers (emit_hex_for_header, emit_hex_for_cmake) add the 0x
+	 * prefix at emit time, which is where python adds it too. */
+	if (expr->op == KE_LITERAL)
+		return sbuf_strdup(expr->str ? expr->str : "");
+	if (expr->op == KE_SYMREF)
+		return sbuf_strdup(sym_str(expr->sym));
 	/* Fallback. */
 	return sbuf_strdup("");
 }
@@ -496,8 +467,10 @@ static void pass_link_choices(struct kc_ctx *ctx)
 	stack[sp++] = ctx->root;
 	while (sp) {
 		struct kmenu *m = stack[--sp];
-		if (m->kind == KM_CHOICE && m->sym)
+		if (m->kind == KM_CHOICE && m->sym) {
+			m->sym->choice_menu = m;
 			link_choice_members(m, m->sym);
+		}
 		for (struct kmenu *c = m->children; c; c = c->next) {
 			ALLOC_GROW(stack, sp + 1, salloc);
 			stack[sp++] = c;
@@ -520,18 +493,47 @@ static void pass_link_choices(struct kc_ctx *ctx)
  *      condition is satisfied and whose target is one of the members.
  *   3. Otherwise the first member in declaration order.
  */
+static void collect_choice_members(const struct kmenu *m,
+				   struct ksym *choice_sym, struct ksym **out,
+				   int *n, int max)
+{
+	if (!m)
+		return;
+	if ((m->kind == KM_SYM || m->kind == KM_CHOICE) && m->sym &&
+	    m->sym->choice_parent == choice_sym && *n < max) {
+		/* Dedup: a Kconfig with `# ignore: multiple-definition` can
+		 * back the same ksym from several KM_SYM nodes. */
+		int dup = 0;
+		for (int i = 0; i < *n; i++) {
+			if (out[i] == m->sym) {
+				dup = 1;
+				break;
+			}
+		}
+		if (!dup)
+			out[(*n)++] = m->sym;
+	}
+	for (const struct kmenu *c = m->children; c; c = c->next)
+		collect_choice_members(c, choice_sym, out, n, max);
+}
+
 static int enforce_choice(struct kc_ctx *ctx, struct ksym *choice_sym)
 {
 	struct ksym *winner = NULL;
 
-	/* Collect members in declaration order. */
+	/*
+	 * Collect members in Kconfig declaration order by walking the
+	 * choice's KM_CHOICE menu subtree.  Using ctx->symlist here would
+	 * be wrong: a forward reference like `default MEMBER if COND` in
+	 * the choice body registers MEMBER in the symbol table before the
+	 * member's own @c config line runs, so symlist order differs from
+	 * source order.  Rule 3 below relies on source order.
+	 */
+	(void)ctx;
 	struct ksym *members[64];
 	int n_members = 0;
-	for (size_t i = 0; i < ctx->symlist.nr; i++) {
-		struct ksym *m = smap_get(&ctx->symtab, ctx->symlist.v[i]);
-		if (m && m->choice_parent == choice_sym && n_members < 64)
-			members[n_members++] = m;
-	}
+	collect_choice_members(choice_sym->choice_menu, choice_sym, members,
+			       &n_members, 64);
 	if (!n_members)
 		return 0;
 
@@ -680,9 +682,11 @@ static int fixpoint_step(struct kc_ctx *ctx)
 			new_val = sbuf_strdup(s->cur_val ? s->cur_val : "");
 			/* A stuck-default is still a default for emit
 			 * purposes; only a genuine user_set drops the pragma.
-			 * The fixpoint doesn't drive default_applied here
-			 * because we want the emit writer to consult
-			 * default_seeded + user_set directly. */
+			 * Propagate default_seeded to default_applied so the
+			 * no-prompt int/hex/string emit gate (which checks
+			 * default_applied || user_set) preserves round-tripped
+			 * `# default:` symbols across sdkconfig reloads. */
+			default_hit = s->default_seeded;
 		} else if (new_visible) {
 			/*
 			 * Defaults only apply when the symbol is visible.

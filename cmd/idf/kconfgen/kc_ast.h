@@ -44,6 +44,7 @@ enum kexpr_op {
 };
 
 struct ksym;
+struct kmenu;
 
 struct kexpr {
 	enum kexpr_op op;
@@ -113,6 +114,15 @@ struct ksym {
 	struct kprop *props_tail;   /**< O(1) append helper. */
 	int is_choice;		    /**< This symbol is a choice group. */
 	struct ksym *choice_parent; /**< For choice members; NULL otherwise. */
+	struct kmenu *choice_menu;  /**< For choice groups: the @c KM_CHOICE
+				     *   menu node backing this sym.  Populated
+				     *   by @c pass_link_choices so
+				     * enforce_choice  can enumerate members in
+				     * menu-tree  (declaration) order rather than
+				     * symbol-  table registration order -- the
+				     * two  differ when the choice body forward-
+				     *   references members via
+				     *   `default SYM if COND`. */
 
 	/*
 	 * Diagnostic-only location of the first @c config / @c menuconfig

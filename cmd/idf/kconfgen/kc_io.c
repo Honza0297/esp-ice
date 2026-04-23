@@ -965,11 +965,12 @@ void kc_write_header(const struct kc_ctx *ctx, const char *path)
  * current evaluator state.  Returns an owned string the caller frees.
  *
  * Walks the declaration-order property list, picks the first KP_DEFAULT
- * whose @c if condition evaluates true, and returns its literal (with
- * hex normalisation applied for KS_HEX -- matching the evaluator's
- * @c default_value path).  When no default fires we fall back to the
- * type's zero value so the comparison against @c cur_val cleanly
- * identifies any non-default state.
+ * whose @c if condition evaluates true, and returns its literal raw (no
+ * hex normalisation -- matches the evaluator's @c default_value path and
+ * python's @c str_value which keeps `default 0` / `default 33` verbatim
+ * for hex symbols).  When no default fires we fall back to the type's
+ * zero value so the comparison against @c cur_val cleanly identifies
+ * any non-default state.
  */
 static char *compute_kconfig_default(const struct ksym *s)
 {
@@ -990,25 +991,6 @@ static char *compute_kconfig_default(const struct ksym *s)
 			raw = p->expr->sym->cur_val;
 		if (!raw)
 			raw = "";
-		if (s->type == KS_HEX) {
-			/* Mirror default_value's hex normalisation so a bare
-			 * literal like `default 33` compares equal to an
-			 * evaluator-produced `0x33`. */
-			if (!*raw ||
-			    (raw[0] == '0' && (raw[1] == 'x' || raw[1] == 'X')))
-				return sbuf_strdup(raw);
-			int ok = 1;
-			for (const char *q = raw; *q; q++)
-				if (!isxdigit((unsigned char)*q)) {
-					ok = 0;
-					break;
-				}
-			if (!ok)
-				return sbuf_strdup(raw);
-			struct sbuf sb = SBUF_INIT;
-			sbuf_addf(&sb, "0x%s", raw);
-			return sbuf_detach(&sb);
-		}
 		return sbuf_strdup(raw);
 	}
 	switch (s->type) {
