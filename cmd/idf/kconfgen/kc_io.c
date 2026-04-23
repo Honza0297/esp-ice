@@ -60,7 +60,9 @@ void kc_load_rename(struct kc_ctx *ctx, const char *path)
 
 	size_t pos = 0;
 	char *line;
+	int lineno = 0;
 	while ((line = sbuf_getline(sb.buf, sb.len, &pos)) != NULL) {
+		lineno++;
 		while (*line == ' ' || *line == '\t')
 			line++;
 		if (!*line || *line == '#')
@@ -93,6 +95,19 @@ void kc_load_rename(struct kc_ctx *ctx, const char *path)
 
 		const char *old_short = old_start + CONFIG_PREFIX_LEN;
 		const char *new_short = new_start + CONFIG_PREFIX_LEN;
+
+		/*
+		 * Self-rename is a configuration error: a deprecated-alias
+		 * entry that points at itself can't express any migration.
+		 * Python kconfgen rejects these with a specific RuntimeError
+		 * message the upstream test suite matches on; mirror the
+		 * exact wording so drop-in compatibility holds.
+		 */
+		if (!strcmp(old_short, new_short)) {
+			die("RuntimeError: Error in %s (line %d): Replacement "
+			    "name is the same as original name (%s).",
+			    path, lineno, old_short);
+		}
 
 		/*
 		 * Skip duplicates.  ESP-IDF's build passes rename files both
@@ -193,7 +208,10 @@ static void set_default_seeded(struct kc_ctx *ctx, const char *name,
 		return;
 	free(s->cur_val);
 	s->cur_val = sbuf_strdup(val);
-	/* s->user_set stays 0 */
+	/* s->user_set stays 0; mark default_seeded so the evaluator can
+	 * honour KCONFIG_DEFAULTS_POLICY=sdkconfig and emit can still
+	 * write the `# default:` pragma regardless of policy. */
+	s->default_seeded = 1;
 }
 
 static void process_config_line(struct kc_ctx *ctx, char *line,
@@ -361,14 +379,6 @@ static void emit_quoted(struct sbuf *out, const char *s)
 	sbuf_addch(out, '"');
 }
 
-static int sym_has_env(const struct ksym *s)
-{
-	for (const struct kprop *p = s->props; p; p = p->next)
-		if (p->kind == KP_ENV)
-			return 1;
-	return 0;
-}
-
 /*
  * True for symbols that should never appear in a CONFIG_ line: the
  * lexer-interned barewords (y, n, m, numeric literals) and choice
@@ -511,8 +521,6 @@ static int emit_worthy_no_prompt(const struct ksym *s)
 static int should_emit(const struct ksym *s)
 {
 	if (is_pseudo_sym(s))
-		return 0;
-	if (sym_has_env(s))
 		return 0;
 	/*
 	 * Python kconfgen does NOT treat `user_set` as an emit
@@ -945,6 +953,234 @@ void kc_write_header(const struct kc_ctx *ctx, const char *path)
 	if (write_file_atomic(path, out.buf, out.len) < 0)
 		die_errno("cannot write '%s'", path);
 
+	sbuf_release(&out);
+}
+
+/* ================================================================== */
+/*  Minimal / savedefconfig writer                                    */
+/* ================================================================== */
+
+/*
+ * Compute what the symbol's Kconfig-default value would be, given the
+ * current evaluator state.  Returns an owned string the caller frees.
+ *
+ * Walks the declaration-order property list, picks the first KP_DEFAULT
+ * whose @c if condition evaluates true, and returns its literal (with
+ * hex normalisation applied for KS_HEX -- matching the evaluator's
+ * @c default_value path).  When no default fires we fall back to the
+ * type's zero value so the comparison against @c cur_val cleanly
+ * identifies any non-default state.
+ */
+static char *compute_kconfig_default(const struct ksym *s)
+{
+	for (const struct kprop *p = s->props; p; p = p->next) {
+		if (p->kind != KP_DEFAULT)
+			continue;
+		if (p->cond && !kc_expr_bool(p->cond))
+			continue;
+		if (!p->expr)
+			continue;
+		if (s->type == KS_BOOL)
+			return sbuf_strdup(kc_expr_bool(p->expr) ? "y" : "n");
+		const char *raw = NULL;
+		if (p->expr->op == KE_LITERAL)
+			raw = p->expr->str;
+		else if (p->expr->op == KE_SYMREF && p->expr->sym &&
+			 p->expr->sym->cur_val)
+			raw = p->expr->sym->cur_val;
+		if (!raw)
+			raw = "";
+		if (s->type == KS_HEX) {
+			/* Mirror default_value's hex normalisation so a bare
+			 * literal like `default 33` compares equal to an
+			 * evaluator-produced `0x33`. */
+			if (!*raw ||
+			    (raw[0] == '0' && (raw[1] == 'x' || raw[1] == 'X')))
+				return sbuf_strdup(raw);
+			int ok = 1;
+			for (const char *q = raw; *q; q++)
+				if (!isxdigit((unsigned char)*q)) {
+					ok = 0;
+					break;
+				}
+			if (!ok)
+				return sbuf_strdup(raw);
+			struct sbuf sb = SBUF_INIT;
+			sbuf_addf(&sb, "0x%s", raw);
+			return sbuf_detach(&sb);
+		}
+		return sbuf_strdup(raw);
+	}
+	switch (s->type) {
+	case KS_BOOL:
+		return sbuf_strdup("n");
+	case KS_INT:
+		return sbuf_strdup("0");
+	case KS_HEX:
+		return sbuf_strdup("0x0");
+	case KS_FLOAT:
+		return sbuf_strdup("0.0");
+	case KS_STRING:
+	case KS_UNKNOWN:
+	default:
+		return sbuf_strdup("");
+	}
+}
+
+/*
+ * Emit @p s as a savedefconfig line: `CONFIG_X=value`.  Bool-n is
+ * written explicitly rather than the `# ... is not set` form the full
+ * config uses -- matches python kconfgen's @c normalize_unset=True
+ * post-processing on the minimal config.
+ */
+static void emit_symbol_min(struct sbuf *out, const struct ksym *s)
+{
+	const char *val = s->cur_val ? s->cur_val : "";
+
+	if (s->type == KS_BOOL) {
+		sbuf_addf(out, "%s%s=%s\n", CONFIG_PREFIX, s->name,
+			  strcmp(val, "y") == 0 ? "y" : "n");
+		return;
+	}
+	if (s->type == KS_STRING) {
+		sbuf_addf(out, "%s%s=", CONFIG_PREFIX, s->name);
+		emit_quoted(out, val);
+		sbuf_addch(out, '\n');
+		return;
+	}
+	sbuf_addf(out, "%s%s=%s\n", CONFIG_PREFIX, s->name, val);
+}
+
+static int min_config_should_emit(const struct ksym *s)
+{
+	if (is_pseudo_sym(s))
+		return 0;
+	if (!should_emit(s))
+		return 0;
+	char *def = compute_kconfig_default(s);
+	const char *cur = s->cur_val ? s->cur_val : "";
+	int differs = strcmp(cur, def) != 0;
+	free(def);
+	return differs;
+}
+
+/*
+ * With ESP_IDF_KCONFIG_MIN_LABELS=1 set, bracket groups of
+ * non-default symbols with their owning menu's prompt.  Deferred-label
+ * shape: a `# Menu Name` marker is only emitted just before the first
+ * minimal symbol inside that menu; `# end of Menu Name` is only
+ * emitted when the menu actually produced content.
+ */
+struct min_walk {
+	struct sbuf *out;
+	/* Pending labels stack: each entry is a menu prompt waiting to
+	 * be written if/when a minimal symbol fires inside it. */
+	const struct kmenu **pending;
+	size_t n_pending;
+	size_t alloc_pending;
+	/* Stack of menus whose `# Menu` marker has already been written,
+	 * used to pair them with `# end of` markers on scope exit. */
+	const struct kmenu **opened;
+	size_t n_opened;
+	size_t alloc_opened;
+	int after_end;
+};
+
+static void min_flush_pending(struct min_walk *w)
+{
+	for (size_t i = 0; i < w->n_pending; i++) {
+		const struct kmenu *m = w->pending[i];
+		if (w->out->len && w->out->buf[w->out->len - 1] == '\n' &&
+		    (w->out->len < 2 || w->out->buf[w->out->len - 2] != '\n'))
+			sbuf_addch(w->out, '\n');
+		sbuf_addf(w->out, "# %s\n", m->prompt);
+		ALLOC_GROW(w->opened, w->n_opened + 1, w->alloc_opened);
+		w->opened[w->n_opened++] = m;
+	}
+	w->n_pending = 0;
+	w->after_end = 0;
+}
+
+static void min_walk_tree(const struct kmenu *m, struct min_walk *w,
+			  int with_labels)
+{
+	if (!m)
+		return;
+
+	int pushed_pending = 0;
+	if (with_labels && m->kind == KM_MENU && m->prompt) {
+		ALLOC_GROW(w->pending, w->n_pending + 1, w->alloc_pending);
+		w->pending[w->n_pending++] = m;
+		pushed_pending = 1;
+	}
+
+	if (m->kind == KM_SYM && m->sym && min_config_should_emit(m->sym) &&
+	    !m->sym->emit_seen) {
+		if (with_labels)
+			min_flush_pending(w);
+		((struct ksym *)m->sym)->emit_seen = 1;
+		emit_symbol_min(w->out, m->sym);
+	}
+
+	for (const struct kmenu *c = m->children; c; c = c->next)
+		min_walk_tree(c, w, with_labels);
+
+	if (with_labels && m->kind == KM_MENU && m->prompt) {
+		if (pushed_pending && w->n_pending &&
+		    w->pending[w->n_pending - 1] == m) {
+			/* No symbols fired inside this menu; drop the
+			 * pending label without emitting anything. */
+			w->n_pending--;
+		} else if (w->n_opened && w->opened[w->n_opened - 1] == m) {
+			w->n_opened--;
+			sbuf_addf(w->out, "# end of %s\n", m->prompt);
+			w->after_end = 1;
+		}
+	}
+}
+
+void kc_write_min_config(const struct kc_ctx *ctx, const char *path)
+{
+	struct sbuf out = SBUF_INIT;
+	reset_emit_seen(ctx);
+
+	const char *ver =
+	    (ctx->idf_version && *ctx->idf_version) ? ctx->idf_version : "";
+	sbuf_addstr(&out,
+		    "# This file was generated using idf.py save-defconfig or "
+		    "menuconfig [D] key. It can be edited manually.\n");
+	sbuf_addf(&out,
+		  "# Espressif IoT Development Framework (ESP-IDF) %s Project "
+		  "Minimal Configuration\n",
+		  ver);
+	sbuf_addstr(&out, "#\n");
+
+	/*
+	 * Prepend @c CONFIG_IDF_TARGET when the build target differs from
+	 * the python default `esp32`.  The target assignment is what lets
+	 * a checked-in @c sdkconfig.defaults round-trip across chip-family
+	 * workspaces without the user redefining the target each time.
+	 */
+	struct ksym *target = smap_get(&ctx->symtab, "IDF_TARGET");
+	if (target && target->cur_val && target->type == KS_STRING &&
+	    strcmp(target->cur_val, "esp32") != 0) {
+		sbuf_addf(&out, "%sIDF_TARGET=", CONFIG_PREFIX);
+		emit_quoted(&out, target->cur_val);
+		sbuf_addch(&out, '\n');
+	}
+
+	int with_labels = 0;
+	const char *lbl = getenv("ESP_IDF_KCONFIG_MIN_LABELS");
+	if (lbl && !strcmp(lbl, "1"))
+		with_labels = 1;
+
+	struct min_walk w = {.out = &out};
+	min_walk_tree(ctx->root, &w, with_labels);
+	free(w.pending);
+	free(w.opened);
+
+	if (write_file_atomic(path, out.buf, out.len) < 0)
+		die_errno("cannot write '%s'", path);
 	sbuf_release(&out);
 }
 
@@ -1568,12 +1804,22 @@ static void json_menu_write_node(struct sbuf *out, const struct kc_ctx *ctx,
 
 		json_indent(out, level + 1);
 		sbuf_addstr(out, "\"range\": ");
+		/*
+		 * Pick the first range property whose @c if condition matches
+		 * the current evaluation state (or has no condition).  The
+		 * kconfig_menus.json consumer needs the effective bounds for
+		 * the selected target, not the first one in declaration order,
+		 * and python kconfiglib serialises the matched range here.
+		 */
 		const struct kprop *rng = NULL;
-		for (const struct kprop *p = m->sym->props; p; p = p->next)
-			if (p->kind == KP_RANGE && p->expr && p->expr2) {
-				rng = p;
-				break;
-			}
+		for (const struct kprop *p = m->sym->props; p; p = p->next) {
+			if (p->kind != KP_RANGE || !p->expr || !p->expr2)
+				continue;
+			if (p->cond && !kc_expr_bool(p->cond))
+				continue;
+			rng = p;
+			break;
+		}
 		if (rng) {
 			const char *los =
 			    rng->expr->op == KE_LITERAL ? rng->expr->str
@@ -1585,18 +1831,36 @@ static void json_menu_write_node(struct sbuf *out, const struct kc_ctx *ctx,
 			    : rng->expr2->op == KE_SYMREF && rng->expr2->sym
 				? rng->expr2->sym->name
 				: NULL;
+			/*
+			 * Parse both bounds as integers first; if the symbol
+			 * type is float (or either bound fails to parse as an
+			 * int), re-parse as double so kconfig_menus.json holds
+			 * the numeric literal python kconfiglib would emit.
+			 */
 			char *e;
 			long long lv = los ? strtoll(los, &e, 0) : 0;
 			int lo_num = los && e != los && !*e;
 			long long hv = his ? strtoll(his, &e, 0) : 0;
 			int hi_num = his && e != his && !*e;
-			if (lo_num && hi_num)
+			if (m->sym->type == KS_FLOAT || !lo_num || !hi_num) {
+				double dlo = los ? strtod(los, &e) : 0.0;
+				int lo_f = los && e != los && !*e;
+				double dhi = his ? strtod(his, &e) : 0.0;
+				int hi_f = his && e != his && !*e;
+				if (lo_f && hi_f) {
+					sbuf_addf(out, "[\n%*s%g,\n%*s%g\n%*s]",
+						  (level + 2) * 4, "", dlo,
+						  (level + 2) * 4, "", dhi,
+						  (level + 1) * 4, "");
+				} else {
+					sbuf_addstr(out, "null");
+				}
+			} else {
 				sbuf_addf(out, "[\n%*s%lld,\n%*s%lld\n%*s]",
 					  (level + 2) * 4, "", lv,
 					  (level + 2) * 4, "", hv,
 					  (level + 1) * 4, "");
-			else
-				sbuf_addstr(out, "null");
+			}
 		} else {
 			sbuf_addstr(out, "null");
 		}

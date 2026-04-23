@@ -264,8 +264,100 @@ int cmd_idf_kconfgen(int argc, const char **argv)
 			ctx.idf_version = sbuf_strdup(v);
 	}
 
+	/*
+	 * Seed the `# default:` pragma resolution policy from the env.
+	 * Python's esp_kconfiglib accepts the strings "sdkconfig" (default)
+	 * and "kconfig"; any other value also falls back to the default.
+	 * Check the --env table first so a command-line override wins over
+	 * the real environment, matching how IDF_VERSION is resolved above.
+	 */
+	{
+		const char *policy = NULL;
+		const char prefix[] = "KCONFIG_DEFAULTS_POLICY=";
+		for (size_t i = 0; i < opt_env.nr; i++) {
+			if (!strncmp(opt_env.v[i], prefix,
+				     sizeof(prefix) - 1)) {
+				policy = opt_env.v[i] + sizeof(prefix) - 1;
+				break;
+			}
+		}
+		if (!policy)
+			policy = getenv("KCONFIG_DEFAULTS_POLICY");
+		if (policy && !strcmp(policy, "kconfig"))
+			ctx.defaults_policy = 1;
+	}
+
 	if (opt_dump_ast)
 		kc_ast_dump(&ctx);
+
+	/*
+	 * Seed values for symbols declared with `option env="VAR"`.
+	 * esp_kconfiglib looks up VAR in the caller's environment and
+	 * treats the result as the symbol's value -- not as a default
+	 * that a Kconfig `default` can override.  Mirror that here by
+	 * installing the env value into @c cur_val via the user-set
+	 * path (so subsequent eval preserves it) but flipping back to
+	 * default_seeded afterwards, so the emit writes a `# default:`
+	 * pragma (python marks env-sourced lines the same way).
+	 */
+	{
+		const char *key;
+		void *val;
+		size_t it = 0;
+		while (smap_iter(&ctx.symtab, &it, &key, &val)) {
+			struct ksym *s = val;
+			const char *env_name = NULL;
+			for (const struct kprop *p = s->props; p; p = p->next)
+				if (p->kind == KP_ENV) {
+					env_name = p->text;
+					break;
+				}
+			if (!env_name)
+				continue;
+			const char *env_val = NULL;
+			size_t nlen = strlen(env_name);
+			for (size_t j = 0; j < opt_env.nr; j++) {
+				const char *entry = opt_env.v[j];
+				const char *eq = strchr(entry, '=');
+				if (!eq)
+					continue;
+				if ((size_t)(eq - entry) == nlen &&
+				    !memcmp(entry, env_name, nlen)) {
+					env_val = eq + 1;
+					break;
+				}
+			}
+			if (!env_val)
+				env_val = getenv(env_name);
+			if (!env_val) {
+				/*
+				 * Matches the UndefOptEnv warning
+				 * esp_kconfiglib emits when an `option
+				 * env="VAR"`'s referenced variable is absent
+				 * from the environment; the test suite
+				 * substring-greps this line.
+				 */
+				kc_ctx_notify(
+				    &ctx,
+				    "warning: %s has 'option env=\"%s\"', but "
+				    "the environment variable %s is not set",
+				    s->name, env_name, env_name);
+				env_val = "";
+			}
+			free(s->cur_val);
+			s->cur_val = sbuf_strdup(env_val);
+			/*
+			 * Seed as a sticky default: user_set stays clear so
+			 * the emit prefixes the line with `# default:`
+			 * (python marks env-backed lines with the same
+			 * pragma), while default_seeded makes the fixpoint
+			 * preserve the env value over any `default ...` the
+			 * Kconfig may declare.
+			 */
+			s->user_set = 0;
+			s->default_seeded = 1;
+		}
+	}
 
 	/* Rename tables must be loaded before defaults / config so the
 	 * loader can translate legacy CONFIG_* keys on the fly. */
@@ -326,13 +418,27 @@ int cmd_idf_kconfgen(int argc, const char **argv)
 				kc_write_json(&ctx, path);
 			else if (!strcmp(fmt, "json_menus"))
 				kc_write_json_menus(&ctx, path);
+			else if (!strcmp(fmt, "savedefconfig"))
+				kc_write_min_config(&ctx, path);
 			else
 				die("--output: unsupported format '%s' "
 				    "(expected config, header, cmake, json, "
-				    "or json_menus)",
+				    "json_menus, or savedefconfig)",
 				    fmt);
 		}
 	}
+
+	/*
+	 * Mirror esp_kconfiglib.report's end-of-run summary so tools /
+	 * downstream tests looking for `Status: Finished ...` get the
+	 * same signal from the C implementation.  The wording has to
+	 * match upstream exactly -- the test suite grep-matches these
+	 * lines via substring check against golden `.stderr` fixtures.
+	 */
+	if (ctx.n_notifications == 0)
+		fprintf(stderr, "Status: Finished successfully\n");
+	else
+		fprintf(stderr, "Status: Finished with notifications\n");
 
 	kc_ctx_release(&ctx);
 	svec_clear(&opt_defaults);

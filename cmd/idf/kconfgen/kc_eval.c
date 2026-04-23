@@ -153,20 +153,36 @@ static int str_is_true(const char *s)
 	return 0;
 }
 
-/* Evaluate a comparison of two leaf values.  Uses numeric compare when
- * both sides parse as integers, else string compare. */
+/*
+ * Evaluate a comparison of two leaf values.
+ *
+ * Try integer parse on both sides first; if that succeeds, compare
+ * numerically.  Otherwise try double parse -- if either side looks
+ * like a float (e.g. `5.3`, `10.0`) we want numeric ordering so
+ * `VERSION_2 > 5.3` with @c VERSION_2=10.0 returns true (python
+ * kconfiglib does this to avoid the lexicographic trap where
+ * "10.0" < "5.3").  Only if both paths fail do we fall back to
+ * byte-wise string compare.
+ */
 static int cmp_eval(enum kexpr_op op, const char *a, const char *b)
 {
 	char *ea, *eb;
 	long long va = strtoll(a, &ea, 0);
 	long long vb = strtoll(b, &eb, 0);
-	int numeric = (ea != a && !*ea && eb != b && !*eb);
+	int integer = (ea != a && !*ea && eb != b && !*eb);
 
 	int c;
-	if (numeric)
+	if (integer) {
 		c = (va < vb) ? -1 : (va > vb) ? 1 : 0;
-	else
-		c = strcmp(a, b);
+	} else {
+		double da = strtod(a, &ea);
+		double db = strtod(b, &eb);
+		int floaty = (ea != a && !*ea && eb != b && !*eb);
+		if (floaty)
+			c = (da < db) ? -1 : (da > db) ? 1 : 0;
+		else
+			c = strcmp(a, b);
+	}
 
 	switch (op) {
 	case KE_EQ:
@@ -350,6 +366,31 @@ static void pass_rev_dep(struct kc_ctx *ctx)
 /* Extract a concrete string value from a default-expression given the
  * symbol's type.  For bool symbols the expr is evaluated as a boolean
  * ("y"/"n"); for others we pull the leaf literal. */
+/*
+ * For a hex-type symbol, a bare `default 33` literal is parsed by
+ * esp_kconfiglib as hex digits (value 0x33 = 51), not decimal 33.
+ * Mirror that by prefixing `0x` when the literal lacks one AND
+ * parses as a valid hex string.  Applies only to default/range
+ * literals on hex symbols; plain int/float/string types are left
+ * alone.
+ */
+static char *normalise_hex_literal(const char *raw)
+{
+	if (!raw || !*raw)
+		return sbuf_strdup(raw ? raw : "");
+	if (raw[0] == '0' && (raw[1] == 'x' || raw[1] == 'X'))
+		return sbuf_strdup(raw);
+	/* Accept only pure hex digits; a value like "abc" on a hex
+	 * symbol is unusual but python treats it as hex -- we do too. */
+	for (const char *p = raw; *p; p++) {
+		if (!isxdigit((unsigned char)*p))
+			return sbuf_strdup(raw);
+	}
+	struct sbuf sb = SBUF_INIT;
+	sbuf_addf(&sb, "0x%s", raw);
+	return sbuf_detach(&sb);
+}
+
 static char *default_value(const struct kexpr *expr, enum ksym_type type)
 {
 	if (!expr)
@@ -360,10 +401,18 @@ static char *default_value(const struct kexpr *expr, enum ksym_type type)
 	/* Non-bool: prefer a literal leaf; otherwise fall back to the
 	 * symref's current string.  Complex expressions are rare on
 	 * non-bool defaults in ESP-IDF. */
-	if (expr->op == KE_LITERAL)
-		return sbuf_strdup(expr->str ? expr->str : "");
-	if (expr->op == KE_SYMREF)
-		return sbuf_strdup(sym_str(expr->sym));
+	if (expr->op == KE_LITERAL) {
+		const char *raw = expr->str ? expr->str : "";
+		if (type == KS_HEX)
+			return normalise_hex_literal(raw);
+		return sbuf_strdup(raw);
+	}
+	if (expr->op == KE_SYMREF) {
+		const char *raw = sym_str(expr->sym);
+		if (type == KS_HEX)
+			return normalise_hex_literal(raw);
+		return sbuf_strdup(raw);
+	}
 	/* Fallback. */
 	return sbuf_strdup("");
 }
@@ -612,8 +661,28 @@ static int fixpoint_step(struct kc_ctx *ctx)
 
 		char *new_val = NULL;
 		int default_hit = 0;
-		if (s->user_set && new_visible) {
+		/*
+		 * A symbol "sticks" at its current value (same treatment as
+		 * an explicit user-set) when:
+		 *   - the line in sdkconfig had no `# default:` pragma
+		 *     (s->user_set), OR
+		 *   - the line had the pragma and KCONFIG_DEFAULTS_POLICY is
+		 *     the python default `"sdkconfig"` (ctx->defaults_policy
+		 *     == 0) -- this prevents generation-to-generation drift
+		 *     when the user has not touched the sdkconfig and the
+		 *     Kconfig default later changes.
+		 * Under policy `"kconfig"` (1), pragma'd values are ignored
+		 * and the Kconfig default is re-applied.
+		 */
+		int stick = s->user_set ||
+			    (s->default_seeded && ctx->defaults_policy == 0);
+		if (stick && new_visible) {
 			new_val = sbuf_strdup(s->cur_val ? s->cur_val : "");
+			/* A stuck-default is still a default for emit
+			 * purposes; only a genuine user_set drops the pragma.
+			 * The fixpoint doesn't drive default_applied here
+			 * because we want the emit writer to consult
+			 * default_seeded + user_set directly. */
 		} else if (new_visible) {
 			/*
 			 * Defaults only apply when the symbol is visible.
@@ -667,10 +736,20 @@ static int fixpoint_step(struct kc_ctx *ctx)
 		 * the pointer check -- eval_bool(NULL) returns 1, which
 		 * is the right default for conditions (`if` guards) but
 		 * wrong here where absence means false.
+		 *
+		 * Python's esp_kconfiglib makes `select` override the
+		 * target's `depends on` chain: a selected symbol
+		 * effectively becomes visible with value y even if its
+		 * own depends-chain is false.  Mark the symbol visible
+		 * here so the emit-gate picks it up (SelectImply.out
+		 * expects CONFIG_L=y with `depends on NOT_DEFINED`).
 		 */
 		if (s->type == KS_BOOL && s->rev_dep && eval_bool(s->rev_dep)) {
 			free(new_val);
 			new_val = sbuf_strdup("y");
+			if (!new_visible) {
+				new_visible = 1;
+			}
 		}
 		/* Imply: nudge "n" -> "y" if visible and implier active. */
 		if (s->type == KS_BOOL && new_visible && s->weak_rev_dep &&
@@ -709,6 +788,65 @@ static int fixpoint_step(struct kc_ctx *ctx)
 /*  Entry point                                                       */
 /* ================================================================== */
 
+/*
+ * ESP-IDF `set TARGET=VAL` / `set default TARGET=VAL` propagation.
+ *
+ * Applied after the main fixpoint converges.  Walks all symbols in
+ * declaration order (the order kc_sym_intern recorded in @c symlist)
+ * and, for each source symbol that ended up at bool "y" with its @c if
+ * condition true, overwrites the target's cur_val.
+ *
+ * Per esp_kconfiglib:
+ *   - @c set (KP_SET): strong.  First active source in declaration
+ *     order wins; subsequent strong setters for the same target are
+ *     ignored.  Beats any prior weak setter.
+ *   - @c set default (KP_SET_DEFAULT): weak.  Only applies when the
+ *     target has no strong setter.  First weak setter wins over
+ *     later weak ones.
+ *
+ * After propagation we mark the target @c default_seeded so the
+ * evaluator's stick-on-default behaviour carries the value through
+ * any subsequent passes without requiring an explicit user_set,
+ * while still letting emit mark the line with the @c # default:
+ * pragma (set-propagated values are not user input).
+ */
+static void pass_apply_sets(struct kc_ctx *ctx)
+{
+	for (size_t pass = 0; pass < 2; pass++) {
+		/* Pass 0: strong (KP_SET); Pass 1: weak (KP_SET_DEFAULT). */
+		enum kprop_kind want = pass == 0 ? KP_SET : KP_SET_DEFAULT;
+		int rank = pass == 0 ? 2 : 1;
+		for (size_t i = 0; i < ctx->symlist.nr; i++) {
+			struct ksym *src =
+			    smap_get(&ctx->symtab, ctx->symlist.v[i]);
+			if (!src || src->type != KS_BOOL || !src->cur_val ||
+			    strcmp(src->cur_val, "y") != 0)
+				continue;
+			for (struct kprop *p = src->props; p; p = p->next) {
+				if (p->kind != want)
+					continue;
+				if (p->cond && !eval_bool(p->cond))
+					continue;
+				struct ksym *tgt =
+				    smap_get(&ctx->symtab, p->text);
+				if (!tgt)
+					continue;
+				/* A strong rule overrides a weak one; a weak
+				 * rule defers to any previously-applied rule
+				 * (strong or weak). */
+				if (tgt->set_rank >= rank)
+					continue;
+				char *val = default_value(p->expr, tgt->type);
+				free(tgt->cur_val);
+				tgt->cur_val = val;
+				tgt->default_seeded = 1;
+				tgt->visible = 1;
+				tgt->set_rank = rank;
+			}
+		}
+	}
+}
+
 void kc_eval(struct kc_ctx *ctx)
 {
 	pass_ctx_dep(ctx->root, NULL);
@@ -727,6 +865,8 @@ void kc_eval(struct kc_ctx *ctx)
 			    "iterations",
 			    MAX_FIXPOINT_ITERS);
 	}
+
+	pass_apply_sets(ctx);
 }
 
 /* ================================================================== */
@@ -741,6 +881,10 @@ void kc_sym_set_user(struct kc_ctx *ctx, const char *name, const char *val)
 	free(s->cur_val);
 	s->cur_val = sbuf_strdup(val ? val : "");
 	s->user_set = 1;
+	/* A direct user-set line (CONFIG_X=y without a `# default:` pragma)
+	 * clears any previously-seeded default state: the user has taken
+	 * over this symbol and the pragma no longer applies. */
+	s->default_seeded = 0;
 }
 
 /* ================================================================== */

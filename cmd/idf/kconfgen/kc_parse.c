@@ -114,12 +114,36 @@ void kc_ctx_init(struct kc_ctx *ctx)
 	smap_init(&ctx->symtab);
 	svec_init(&ctx->symlist);
 	svec_init(&ctx->file_names);
+	smap_init(&ctx->vars);
 	ctx->renames = NULL;
 	ctx->n_renames = 0;
 	ctx->alloc_renames = 0;
 	ctx->no_deprecated = 0;
 	ctx->idf_version = NULL;
 	ctx->srctree = NULL;
+	ctx->root_file = NULL;
+	ctx->defaults_policy = 0;
+	ctx->n_notifications = 0;
+}
+
+/*
+ * Print one diagnostic line to stderr and bump the context's
+ * notification counter.  The counter feeds kconfgen.c's end-of-run
+ * `Status: Finished ...` summary (successfully vs with notifications),
+ * which the upstream esp-idf-kconfig test suite matches against in its
+ * golden stderr fixtures.  Callers are responsible for including any
+ * "warning:" / "error:" prefix in @p fmt -- the exact line shape has
+ * to match what Python's esp_kconfiglib emits.
+ */
+void kc_ctx_notify(struct kc_ctx *ctx, const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
+	if (fmt && fmt[0] && fmt[strlen(fmt) - 1] != '\n')
+		fputc('\n', stderr);
+	ctx->n_notifications++;
 }
 
 const char *kc_ctx_intern_file(struct kc_ctx *ctx, const char *path)
@@ -190,6 +214,19 @@ void kc_ctx_release(struct kc_ctx *ctx)
 	svec_clear(&ctx->symlist);
 	svec_clear(&ctx->file_names);
 
+	/*
+	 * Preset-variable map: keys are interned by smap itself, but the
+	 * values are strdup'd strings we own and must release.
+	 */
+	{
+		const char *vkey;
+		void *vval;
+		size_t vit = 0;
+		while (smap_iter(&ctx->vars, &vit, &vkey, &vval))
+			free(vval);
+		smap_release(&ctx->vars);
+	}
+
 	for (size_t i = 0; i < ctx->n_renames; i++) {
 		free(ctx->renames[i].old_name);
 		free(ctx->renames[i].new_name);
@@ -216,6 +253,14 @@ void kc_ctx_release(struct kc_ctx *ctx)
 struct kc_parser {
 	struct kc_ctx *ctx;
 	struct kc_lexer lex;
+	/*
+	 * Non-zero while parsing the body of a @c choice ... @c endchoice
+	 * block; used so @c parse_default_line can emit the
+	 * DefaultInChoice warning when a choice member has its own
+	 * @c default (esp_kconfiglib silently drops those defaults
+	 * because the choice mechanism picks the member).
+	 */
+	int in_choice;
 };
 
 static void p_advance(struct kc_parser *p) { kc_lex_next(&p->lex); }
@@ -411,6 +456,8 @@ static int is_prop_tok(int tok)
 	case KT_OPTIONAL:
 	case KT_MODULES:
 	case KT_VISIBLE:
+	case KT_WARNING:
+	case KT_SET:
 		return 1;
 	}
 	return 0;
@@ -503,6 +550,27 @@ static void parse_prompt_line(struct kc_parser *p, struct ksym *sym)
 	p_advance(p); /* prompt */
 	if (p->lex.tok != KT_STR)
 		kc_lex_die_unexpected(&p->lex, KT_STR);
+	/*
+	 * Warn when a symbol accumulates more than one prompt within the
+	 * same declaration -- python's esp_kconfiglib produces the
+	 * `defined with multiple prompts in single location` diagnostic
+	 * the MultiplePrompts fixture checks for.  Walk the existing
+	 * props looking for a prior KP_PROMPT; the check runs before we
+	 * append the new prop so we only fire on the 2nd (or later)
+	 * prompt encountered.
+	 */
+	for (const struct kprop *prev = sym->props; prev; prev = prev->next) {
+		if (prev->kind != KP_PROMPT)
+			continue;
+		const char *dfile =
+		    sym->decl_file ? sym->decl_file : p->lex.path;
+		int dline = sym->decl_line ? sym->decl_line : line;
+		kc_ctx_notify(p->ctx,
+			      "warning: %s (defined at %s:%d) defined with "
+			      "multiple prompts in single location",
+			      sym->name, dfile, dline);
+		break;
+	}
 	struct kprop *pr = prop_new(KP_PROMPT, p->lex.path, line);
 	pr->text = p_take_val(p);
 	p_advance(p);
@@ -521,6 +589,21 @@ static void parse_default_line(struct kc_parser *p, struct ksym *sym)
 	pr->cond = parse_if_tail(p);
 	sym_append_prop(sym, pr);
 	p_expect(p, KT_NL);
+
+	/*
+	 * A `default` on a symbol that lives directly inside a
+	 * @c choice body has no effect -- the choice itself picks a
+	 * member via its own @c default.  Emit the matching
+	 * DefaultInChoice warning; the AST still carries the property
+	 * so subsequent passes ignore it harmlessly.
+	 */
+	if (p->in_choice && sym && sym->name && !sym->is_choice) {
+		kc_ctx_notify(p->ctx,
+			      "warning: default on the choice symbol %s "
+			      "will have no effect, as defaults do not "
+			      "affect choice symbols",
+			      sym->name);
+	}
 }
 
 /* depends on EXPR NL
@@ -566,6 +649,105 @@ static void parse_select_line(struct kc_parser *p, struct ksym *sym)
 	struct kprop *pr = prop_new(kind, p->lex.path, line);
 	pr->expr = expr_new(KE_SYMREF);
 	pr->expr->sym = kc_sym_intern(p->ctx, p->lex.val);
+	p_advance(p);
+	pr->cond = parse_if_tail(p);
+	sym_append_prop(sym, pr);
+	p_expect(p, KT_NL);
+}
+
+/*
+ * set [default] NAME = EXPR [ if EXPR ] NL
+ *
+ * ESP-IDF extension for indirect value setting.  On the source symbol,
+ * declares that when the source evaluates to bool y (and any optional
+ * @c if condition is true), the given target's value should become
+ * @c EXPR.  Without the @c default modifier the rule is strong: the
+ * first active source in declaration order wins, and the target is
+ * treated as user-set for evaluator purposes.  With @c default the
+ * rule is weak -- applied only when no strong rule has fired for the
+ * same target -- matching python esp_kconfiglib's semantics.
+ */
+static void parse_set_line(struct kc_parser *p, struct ksym *sym)
+{
+	int line = p->lex.line;
+	p_advance(p); /* past 'set' */
+	enum kprop_kind kind = KP_SET;
+	if (p->lex.tok == KT_DEFAULT) {
+		kind = KP_SET_DEFAULT;
+		p_advance(p);
+	}
+	if (p->lex.tok != KT_NAME)
+		kc_lex_die_unexpected(&p->lex, KT_NAME);
+	char *target = p_take_val(p);
+	p_advance(p);
+	p_expect(p, KT_EQ);
+	/*
+	 * RHS is a primary expression (literal or symref), exactly like
+	 * the RHS of @c default, so reuse parse_expr -- it handles
+	 * `true/false/numbers/symbols` uniformly.  Strongly-typed checking
+	 * (e.g. type-compatibility between target and value) happens at
+	 * eval time rather than here.
+	 */
+	struct kprop *pr = prop_new(kind, p->lex.path, line);
+	pr->text = target;
+	pr->expr = parse_expr(p);
+	pr->cond = parse_if_tail(p);
+	sym_append_prop(sym, pr);
+	p_expect(p, KT_NL);
+
+	/*
+	 * `set` and `set default` only make sense on a boolean source:
+	 * a non-bool symbol has no "active" state to trigger propagation.
+	 * esp_kconfiglib warns in this case (IndirectSetNonBool fixture)
+	 * and discards the rule at evaluation time; mirror the warning
+	 * and rely on pass_apply_sets's bool-y check to ignore it.  If
+	 * the type hasn't been declared yet (e.g. an unusual ordering
+	 * that puts @c set before @c bool), skip the warning -- the
+	 * canonical style always declares type first.
+	 */
+	if (sym->type != KS_UNKNOWN && sym->type != KS_BOOL) {
+		const char *t = "";
+		switch (sym->type) {
+		case KS_INT:
+			t = "int";
+			break;
+		case KS_HEX:
+			t = "hex";
+			break;
+		case KS_STRING:
+			t = "string";
+			break;
+		case KS_FLOAT:
+			t = "float";
+			break;
+		default:
+			break;
+		}
+		kc_ctx_notify(p->ctx,
+			      "%s of type %s has '%s' option, which is "
+			      "only supported for boolean symbols.",
+			      sym->name, t,
+			      kind == KP_SET ? "set" : "set default");
+	}
+}
+
+/*
+ * warning "TEXT" [ if EXPR ] NL
+ *
+ * ESP-IDF extension attached to a symbol: when the symbol ends up set
+ * to a non-default value, the associated text is emitted to stderr at
+ * config-generation time.  Recording the property here gives the
+ * evaluator something to scan during its fixpoint pass; the actual
+ * diagnostic is fired by kc_eval.
+ */
+static void parse_warning_line(struct kc_parser *p, struct ksym *sym)
+{
+	int line = p->lex.line;
+	p_advance(p);
+	if (p->lex.tok != KT_STR)
+		kc_lex_die_unexpected(&p->lex, KT_STR);
+	struct kprop *pr = prop_new(KP_WARNING, p->lex.path, line);
+	pr->text = p_take_val(p);
 	p_advance(p);
 	pr->cond = parse_if_tail(p);
 	sym_append_prop(sym, pr);
@@ -669,6 +851,41 @@ static void parse_visible_line(struct kc_parser *p, struct kmenu *m)
 		expr_free(e);
 		return;
 	}
+	/*
+	 * `visible if` on a config or choice is nonsensical in
+	 * esp_kconfiglib and only legal on @c menu.  Emit the warning
+	 * the python parser prints and DROP the expression -- attaching
+	 * it to a non-KM_MENU node risks double-free paths in the AST
+	 * cleanup, and the evaluator would ignore it anyway.
+	 */
+	if (m->kind != KM_MENU) {
+		if (m->kind == KM_SYM && m->sym) {
+			kc_ctx_notify(p->ctx,
+				      "config %s has a \"visible if\" "
+				      "option, which is not supported "
+				      "for configs",
+				      m->sym->name);
+		} else if (m->kind == KM_CHOICE) {
+			/* choice_sym's name carries a reserved
+			 * `__choice:` prefix the parser adds so the
+			 * symbol table can host both `choice FOO` and
+			 * `config FOO` entries; strip it for display. */
+			const char *n =
+			    m->sym && m->sym->name ? m->sym->name : "";
+			const char prefix[] = "__choice:";
+			if (!strncmp(n, prefix, sizeof(prefix) - 1))
+				n += sizeof(prefix) - 1;
+			if (!*n)
+				n = "(unnamed)";
+			kc_ctx_notify(p->ctx,
+				      "choice %s has a \"visible if\" "
+				      "option, which is not supported "
+				      "for choices",
+				      n);
+		}
+		expr_free(e);
+		return;
+	}
 	if (m->visible_if) {
 		struct kexpr *n = expr_new(KE_AND);
 		n->l = m->visible_if;
@@ -746,6 +963,33 @@ static int parse_prop_line(struct kc_parser *p, struct ksym *prop_sym,
 			die("%s:%d: range outside config/choice", p->lex.path,
 			    p->lex.line);
 		return 1;
+	case KT_WARNING:
+		if (prop_sym)
+			parse_warning_line(p, prop_sym);
+		else
+			die("%s:%d: warning outside config/choice", p->lex.path,
+			    p->lex.line);
+		return 1;
+	case KT_SET:
+		if (prop_sym) {
+			parse_set_line(p, prop_sym);
+		} else {
+			/*
+			 * `set` outside a config / menuconfig / choice body
+			 * (typically inside a bare @c menu) is meaningless
+			 * -- there's no source symbol to gate on -- but
+			 * python's esp_kconfiglib accepts the line and
+			 * warns.  Mirror that: eat the tokens through the
+			 * trailing NL and emit the matching stderr line the
+			 * SetOnMenu fixture checks for.
+			 */
+			kc_ctx_notify(p->ctx, "'set' option is only valid for "
+					      "config and menuconfig entries.");
+			while (p->lex.tok != KT_NL && p->lex.tok != KT_EOF)
+				p_advance(p);
+			p_accept(p, KT_NL);
+		}
+		return 1;
 	case KT_HELP:
 		if (prop_sym)
 			parse_help_line(p, prop_sym);
@@ -786,8 +1030,44 @@ static void parse_config_stmt(struct kc_parser *p, struct kmenu *parent)
 	p_advance(p); /* config / menuconfig */
 	if (p->lex.tok != KT_NAME)
 		kc_lex_die_unexpected(&p->lex, KT_NAME);
+	/*
+	 * Track definition count for the Multiple-Definition diagnostic
+	 * and scan the tail of the current line for a
+	 * @c # ignore: @c multiple-definition marker.  The marker sets
+	 * a sticky flag on the symbol; if any of the symbol's
+	 * declarations carries it the warning is suppressed globally.
+	 * The actual warning is emitted from a post-parse pass once we
+	 * know the final n_defs / ignore_multidef state -- otherwise
+	 * ordering would matter (a marker on the second declaration
+	 * wouldn't back-suppress a warning already printed for the
+	 * first).  The lexer strips comments before they reach us, so we
+	 * peek at the raw buffer for the pragma between the NAME token
+	 * and its trailing newline.
+	 */
 	struct ksym *sym = kc_sym_intern(p->ctx, p->lex.val);
+	sym->n_defs++;
+	if (!sym->decl_file) {
+		sym->decl_file = kc_ctx_intern_file(p->ctx, p->lex.path);
+		sym->decl_line = line;
+	}
+	const char *peek_start = p->lex.pos;
 	p_advance(p);
+	for (const char *q = peek_start; *q && *q != '\n'; q++) {
+		if (*q != '#')
+			continue;
+		const char *r = q + 1;
+		while (*r == ' ' || *r == '\t')
+			r++;
+		if (!strncmp(r, "ignore:", 7)) {
+			r += 7;
+			while (*r == ' ' || *r == '\t')
+				r++;
+			if (!strncmp(r, "multiple-definition",
+				     strlen("multiple-definition")))
+				sym->ignore_multidef = 1;
+		}
+		break;
+	}
 	p_expect(p, KT_NL);
 
 	struct kmenu *m = menu_new(KM_SYM, p->lex.path, line);
@@ -868,14 +1148,24 @@ static void parse_choice_stmt(struct kc_parser *p, struct kmenu *parent)
 		choice_sym = kc_sym_intern(p->ctx, buf);
 	}
 	choice_sym->is_choice = 1;
+	if (!choice_sym->decl_file) {
+		choice_sym->decl_file = kc_ctx_intern_file(p->ctx, p->lex.path);
+		choice_sym->decl_line = line;
+	}
 	p_expect(p, KT_NL);
 
 	struct kmenu *m = menu_new(KM_CHOICE, p->lex.path, line);
 	m->sym = choice_sym;
 	menu_append(parent, m);
 
-	/* Loose props that precede members attach to the choice sym. */
+	/*
+	 * Loose props that precede members attach to the choice sym.
+	 * Flip @c in_choice while the body runs so nested @c default
+	 * properties can emit the DefaultInChoice warning.
+	 */
+	p->in_choice++;
 	parse_block_body(p, m, choice_sym, KT_ENDCHOICE);
+	p->in_choice--;
 	p_expect(p, KT_ENDCHOICE);
 	p_eat_nl(p);
 }
@@ -1066,9 +1356,83 @@ static void parse_block_body(struct kc_parser *p, struct kmenu *menu,
 			continue;
 		}
 
-		/* Loose prop line (choice bodies only). */
-		if (prop_sym && parse_prop_line(p, prop_sym, NULL))
+		/*
+		 * Preset-variable assignment at statement position:
+		 * `NAME = VALUE` or `NAME := VALUE`.  Only valid outside a
+		 * choice body (choice bodies allow loose prop lines, which
+		 * take priority below).  A bareword-followed-by-equals that
+		 * isn't a variable assignment is a syntax error, consistent
+		 * with Python.
+		 */
+		/*
+		 * A bareword at statement position outside a choice body
+		 * can only start a preset-variable assignment:
+		 *   NAME = VALUE      (recursive form)
+		 *   NAME := VALUE     (immediate form)
+		 * esp_kconfiglib supports only literal VALUEs here, so the
+		 * two forms behave identically.  Take ownership of the NAME
+		 * before advancing so we can still name it in any error.
+		 */
+		if (tok == KT_NAME && !prop_sym) {
+			char *name = p_take_val(p);
+			p_advance(p);
+			int nxt = p->lex.tok;
+			if (nxt != KT_EQ && nxt != KT_COLON_EQ) {
+				die("%s:%d: unexpected %s (bareword at "
+				    "statement position -- did you mean "
+				    "a preset-variable assignment `%s "
+				    "= VALUE`?)",
+				    p->lex.path, p->lex.line, kc_tok_name(nxt),
+				    name);
+			}
+			p_advance(p); /* past '=' / ':=' */
+			char *value;
+			if (p->lex.tok == KT_STR || p->lex.tok == KT_NAME) {
+				value = p_take_val(p);
+				p_advance(p);
+			} else if (p->lex.tok == KT_NL) {
+				value = sbuf_strdup("");
+			} else {
+				die("%s:%d: expected value after '%s =', "
+				    "got %s",
+				    p->lex.path, p->lex.line, name,
+				    kc_tok_name(p->lex.tok));
+			}
+			p_expect(p, KT_NL);
+			/* Repeat-assignment replaces the earlier value;
+			 * free the old one so we don't leak. */
+			char *old = smap_get(&p->ctx->vars, name);
+			free(old);
+			smap_put(&p->ctx->vars, name, value);
+			free(name);
 			continue;
+		}
+
+		/* Loose prop line (choice bodies only).  Pass the enclosing
+		 * menu (the KM_CHOICE node in practice) as prop_menu so
+		 * `visible if` lands on the right node and its warning
+		 * hook sees the KM_CHOICE kind. */
+		if (prop_sym && parse_prop_line(p, prop_sym, menu))
+			continue;
+
+		/*
+		 * `set` directly inside a menu body (no surrounding
+		 * config / menuconfig / choice) is nonsensical -- there
+		 * is no source symbol to gate on -- but esp_kconfiglib
+		 * accepts and warns rather than failing hard so downstream
+		 * Kconfig authors can spot the mistake without breaking
+		 * the build.  Swallow the tokens up through the trailing
+		 * newline and emit the SetOnMenu diagnostic the fixture
+		 * grep-matches.
+		 */
+		if (tok == KT_SET) {
+			kc_ctx_notify(p->ctx, "'set' option is only valid for "
+					      "config and menuconfig entries.");
+			while (p->lex.tok != KT_NL && p->lex.tok != KT_EOF)
+				p_advance(p);
+			p_accept(p, KT_NL);
+			continue;
+		}
 
 		die("%s:%d: unexpected %s", p->lex.path, p->lex.line,
 		    kc_tok_name(tok));
@@ -1232,6 +1596,7 @@ void kc_parse_file(struct kc_ctx *ctx, const char *path, const char *const *env)
 		ctx->root_file = sbuf_strdup(path);
 	struct kc_parser p = {.ctx = ctx};
 	kc_lex_open(&p.lex, sb.buf, interned, env);
+	p.lex.vars = &ctx->vars;
 	p_advance(&p); /* prime first token */
 
 	parse_block_body(&p, ctx->root, NULL, KT_EOF);
@@ -1241,6 +1606,20 @@ void kc_parse_file(struct kc_ctx *ctx, const char *path, const char *const *env)
 
 	kc_lex_close(&p.lex);
 	sbuf_release(&sb);
+
+	/*
+	 * esp_kconfiglib (v2 parser) rejects a root Kconfig that has
+	 * content but no `mainmenu "..."` declaration.  A truly-empty
+	 * file still passes -- Empty.in exercises that path -- so only
+	 * fire when ctx->root accumulated children.  The @c prompt
+	 * field is set by parse_mainmenu_stmt; its absence alongside
+	 * child menus means we parsed real statements without seeing
+	 * the required mainmenu header.
+	 */
+	if (ctx->root_file && !strcmp(path, ctx->root_file) &&
+	    ctx->root->children && !ctx->root->prompt) {
+		die("%s: missing mainmenu", path);
+	}
 
 	/*
 	 * Record the source-tree root used for file-path relativization
@@ -1274,6 +1653,26 @@ void kc_parse_file(struct kc_ctx *ctx, const char *path, const char *const *env)
 	 * see the final tree shape.
 	 */
 	finalize_node(ctx->root);
+
+	/*
+	 * Multiple-Definition diagnostic: emit one notification per symbol
+	 * that was declared more than once and does not carry a
+	 * `# ignore: multiple-definition` pragma on any of its
+	 * declarations.  Deferring the emit until here means an ignore
+	 * marker on a LATER declaration retroactively suppresses the
+	 * warning for an earlier duplicate, matching esp_kconfiglib's
+	 * behaviour in IgnorePragma.in (pragma on the first definition
+	 * suppresses the warning for the duplicate).
+	 */
+	const char *key;
+	void *val;
+	size_t it = 0;
+	while (smap_iter(&ctx->symtab, &it, &key, &val)) {
+		struct ksym *s = val;
+		if (s->n_defs > 1 && !s->ignore_multidef && !s->is_choice)
+			kc_ctx_notify(ctx, "Multiple definitions of %s",
+				      s->name);
+	}
 }
 
 /* ================================================================== */
@@ -1391,6 +1790,12 @@ static const char *kprop_kind_name(enum kprop_kind k)
 		return "depends";
 	case KP_VISIBLE:
 		return "visible";
+	case KP_WARNING:
+		return "warning";
+	case KP_SET:
+		return "set";
+	case KP_SET_DEFAULT:
+		return "set default";
 	}
 	return "?";
 }

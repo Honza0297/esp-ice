@@ -93,6 +93,8 @@ static const struct kw kws[] = {
     {"visible", KT_VISIBLE},
     {"optional", KT_OPTIONAL},
     {"modules", KT_MODULES},
+    {"warning", KT_WARNING},
+    {"set", KT_SET},
     {"bool", KT_BOOL},
     {"boolean", KT_BOOL},
     {"int", KT_INT},
@@ -140,6 +142,8 @@ const char *kc_tok_name(int tok)
 		return "'!'";
 	case KT_EQ:
 		return "'='";
+	case KT_COLON_EQ:
+		return "':='";
 	case KT_NE:
 		return "'!='";
 	case KT_LT:
@@ -168,10 +172,31 @@ void kc_lex_die_unexpected(struct kc_lexer *l, int want)
 /*  Environment interpolation                                         */
 /* ================================================================== */
 
+/*
+ * Look up @p name (length @p n) for variable interpolation.
+ *
+ * Python's esp_kconfiglib distinguishes two forms: @c $(VAR) consults
+ * preset variables (declared in the Kconfig input via @c NAME=VAL /
+ * @c NAME:=VAL) before falling back to environment variables, while
+ * @c ${VAR} is environment-only.  @p skip_preset selects the strict
+ * env-only path so the lexer can honour that distinction at the call
+ * site.
+ */
 static const char *env_lookup(const struct kc_lexer *l, const char *name,
-			      size_t n)
+			      size_t n, int skip_preset)
 {
-	/* First, caller-supplied --env table. */
+	char buf[256];
+	if (n >= sizeof(buf))
+		return NULL;
+	memcpy(buf, name, n);
+	buf[n] = '\0';
+
+	if (!skip_preset && l->vars) {
+		const char *v = smap_get((struct smap *)l->vars, buf);
+		if (v)
+			return v;
+	}
+	/* Caller-supplied --env table. */
 	if (l->env) {
 		for (const char *const *p = l->env; *p; p++) {
 			const char *eq = strchr(*p, '=');
@@ -182,13 +207,8 @@ static const char *env_lookup(const struct kc_lexer *l, const char *name,
 				return eq + 1;
 		}
 	}
-	/* Then the real environment. */
+	/* Real environment. */
 	{
-		char buf[256];
-		if (n >= sizeof(buf))
-			return NULL;
-		memcpy(buf, name, n);
-		buf[n] = '\0';
 		const char *v = getenv(buf);
 		if (v)
 			return v;
@@ -217,7 +237,10 @@ char *kc_lex_expand_bare_vars(struct kc_lexer *l, const char *raw)
 			while (is_name_cont((unsigned char)*end))
 				end++;
 			size_t n = (size_t)(end - name);
-			const char *val = env_lookup(l, name, n);
+			/* Source-path bare `$VAR` is env-only in python
+			 * (`expandvars()` semantics) -- preset vars don't
+			 * participate here. */
+			const char *val = env_lookup(l, name, n, 1);
 			if (val)
 				sbuf_addstr(&sb, val);
 			p = end;
@@ -283,7 +306,9 @@ static void lex_quoted(struct kc_lexer *l)
 			const char *name;
 			size_t n;
 			int bare = 0;
+			int skip_preset = 0;
 			if (l->pos[1] == '(') {
+				/* `$(VAR)` -- preset vars first, then env. */
 				name = l->pos + 2;
 				const char *end = strchr(name, ')');
 				if (!end || memchr(name, '\n', end - name)) {
@@ -295,6 +320,7 @@ static void lex_quoted(struct kc_lexer *l)
 				n = (size_t)(end - name);
 				l->pos = end + 1;
 			} else if (l->pos[1] == '{') {
+				/* `${VAR}` -- env-only, per esp_kconfiglib. */
 				name = l->pos + 2;
 				const char *end = strchr(name, '}');
 				if (!end || memchr(name, '\n', end - name)) {
@@ -305,7 +331,12 @@ static void lex_quoted(struct kc_lexer *l)
 				}
 				n = (size_t)(end - name);
 				l->pos = end + 1;
+				skip_preset = 1;
 			} else if (is_name_start((unsigned char)l->pos[1])) {
+				/* Bare `$VAR` inside a quoted string --
+				 * env-only so a preset variable of the same
+				 * name does NOT shadow an unset env var (python
+				 * keeps the literal `$VAR` in that case). */
 				name = l->pos + 1;
 				const char *end = name;
 				while (is_name_cont((unsigned char)*end))
@@ -313,13 +344,14 @@ static void lex_quoted(struct kc_lexer *l)
 				n = (size_t)(end - name);
 				l->pos = end;
 				bare = 1;
+				skip_preset = 1;
 			} else {
 				/* Bare '$' with nothing recognisable --
 				 * keep literal. */
 				sbuf_addch(&sb, *l->pos++);
 				continue;
 			}
-			const char *val = env_lookup(l, name, n);
+			const char *val = env_lookup(l, name, n, skip_preset);
 			if (val) {
 				sbuf_addstr(&sb, val);
 			} else if (bare) {
@@ -389,6 +421,7 @@ void kc_lex_open(struct kc_lexer *l, const char *src, const char *path,
 	l->tok = 0;
 	l->val = NULL;
 	l->env = env;
+	l->vars = NULL;
 	l->n_frames = 0;
 	l->active_buf = NULL; /* root frame's buffer is caller-owned */
 	l->eof = 0;
@@ -552,6 +585,10 @@ top:
 		l->pos += 2;
 		return l->tok = KT_GE;
 	}
+	if (l->pos[0] == ':' && l->pos[1] == '=') {
+		l->pos += 2;
+		return l->tok = KT_COLON_EQ;
+	}
 
 	/* Single-character operators. */
 	switch (*l->pos) {
@@ -579,6 +616,76 @@ top:
 	if (*l->pos == '"' || *l->pos == '\'') {
 		lex_quoted(l);
 		return l->tok = KT_STR;
+	}
+
+	/*
+	 * Bare variable interpolation at bareword position, e.g.
+	 * `default $(MAX_NUMBER_OF_MOTORS)` or `range $(MIN) $(MAX)`.
+	 * esp_kconfiglib expands these inline at the character stream
+	 * level -- the expanded text is substituted into the input and
+	 * re-tokenised.  For the simple literal-only values we support
+	 * here, the expansion always lexes as a single bareword, so we
+	 * can take a shortcut: extract the name, look it up, and emit
+	 * the expansion as a KT_NAME whose payload is the literal value.
+	 * Unknown variables expand to empty (one-shot warning mirrors
+	 * the quoted-string path's behaviour).
+	 */
+	if (*l->pos == '$') {
+		const char *name;
+		size_t nlen;
+		int skip_preset = 0;
+		if (l->pos[1] == '(') {
+			name = l->pos + 2;
+			const char *end = strchr(name, ')');
+			if (!end || memchr(name, '\n', end - name))
+				die("%s:%d: unterminated $( ) reference",
+				    l->path, l->line);
+			nlen = (size_t)(end - name);
+			l->pos = end + 1;
+		} else if (l->pos[1] == '{') {
+			name = l->pos + 2;
+			const char *end = strchr(name, '}');
+			if (!end || memchr(name, '\n', end - name))
+				die("%s:%d: unterminated ${ } reference",
+				    l->path, l->line);
+			nlen = (size_t)(end - name);
+			l->pos = end + 1;
+			skip_preset = 1;
+		} else if (is_name_start((unsigned char)l->pos[1])) {
+			name = l->pos + 1;
+			const char *end = name;
+			while (is_name_cont((unsigned char)*end))
+				end++;
+			nlen = (size_t)(end - name);
+			l->pos = end;
+			skip_preset = 1;
+		} else {
+			die("%s:%d: unexpected character '$'", l->path,
+			    l->line);
+		}
+		const char *val = env_lookup(l, name, nlen, skip_preset);
+		if (!val || !*val) {
+			/*
+			 * An undefined `$(VAR)` / `${VAR}` at bareword
+			 * position has no sensible fallback: the parser
+			 * needs a concrete literal (e.g. `default 8`)
+			 * and substituting the empty string would yield
+			 * nonsense.  esp_kconfiglib calls this out as
+			 * `macro expanded to blank string` and aborts;
+			 * mirror that so UndefinedMacro.stderr matches
+			 * and the test-suite substring check passes.
+			 *
+			 * The quoted-string path (lex_quoted) intentionally
+			 * tolerates the same condition -- python's
+			 * UndefinedQuotedMacro fixture exercises that -- so
+			 * keep this fatal check here, outside quotes.
+			 */
+			die("%s:%d: macro expanded to blank string", l->path,
+			    l->line);
+		}
+		free(l->val);
+		l->val = sbuf_strdup(val);
+		return l->tok = KT_NAME;
 	}
 
 	/* Identifier / keyword (alpha-start). */

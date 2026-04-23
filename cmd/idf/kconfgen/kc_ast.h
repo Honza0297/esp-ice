@@ -58,15 +58,26 @@ struct kexpr {
 /* ------------------------------------------------------------------ */
 
 enum kprop_kind {
-	KP_PROMPT,  /**< prompt "TEXT" [if EXPR]  (or inline on a type). */
-	KP_DEFAULT, /**< default EXPR [if EXPR]. */
-	KP_SELECT,  /**< select NAME [if EXPR]. */
-	KP_IMPLY,   /**< imply NAME [if EXPR]. */
-	KP_RANGE,   /**< range EXPR EXPR [if EXPR]. */
-	KP_HELP,    /**< help text block. */
-	KP_ENV,	    /**< option env="NAME". */
-	KP_DEPENDS, /**< depends on EXPR (symbol/menu/choice/comment). */
-	KP_VISIBLE, /**< visible if EXPR (menu only). */
+	KP_PROMPT,	/**< prompt "TEXT" [if EXPR]  (or inline on a type). */
+	KP_DEFAULT,	/**< default EXPR [if EXPR]. */
+	KP_SELECT,	/**< select NAME [if EXPR]. */
+	KP_IMPLY,	/**< imply NAME [if EXPR]. */
+	KP_RANGE,	/**< range EXPR EXPR [if EXPR]. */
+	KP_HELP,	/**< help text block. */
+	KP_ENV,		/**< option env="NAME". */
+	KP_DEPENDS,	/**< depends on EXPR (symbol/menu/choice/comment). */
+	KP_VISIBLE,	/**< visible if EXPR (menu only). */
+	KP_WARNING,	/**< ESP-IDF extension: `warning "TEXT"` on a symbol --
+			 *   emit the given text to stderr when the symbol is
+			 *   selected/non-default.  Stored for completeness;
+			 *   stderr emission is wired into kc_eval's fixpoint. */
+	KP_SET,		/**< ESP-IDF extension: `set TARGET=VAL [if COND]` --
+			 *   strong indirect value assignment.  Only fires when
+			 *   the source symbol is bool-y and @c cond is true;
+			 *   first active source in declaration order wins. */
+	KP_SET_DEFAULT, /**< ESP-IDF extension: `set default TARGET=VAL
+			 *   [if COND]` -- weak variant of KP_SET.  Applies
+			 *   only to targets with no active strong setter.  */
 };
 
 struct kprop {
@@ -103,6 +114,17 @@ struct ksym {
 	int is_choice;		    /**< This symbol is a choice group. */
 	struct ksym *choice_parent; /**< For choice members; NULL otherwise. */
 
+	/*
+	 * Diagnostic-only location of the first @c config / @c menuconfig
+	 * / @c choice declaration, recorded so messages that want to
+	 * cite the symbol's origin (e.g. `A (defined at file:line)
+	 * defined with multiple prompts...`) can match python's exact
+	 * wording.  Interned file pointer; line is 1-based.  Zero/NULL
+	 * when the symbol hasn't been seen in a declaration yet.
+	 */
+	const char *decl_file;
+	int decl_line;
+
 	/* ---- Evaluation state (populated by kc_eval) ---- */
 	struct kexpr *effective_dep; /**< Ancestor menu dep AND
 				      *   every KP_DEPENDS on this sym. */
@@ -116,6 +138,18 @@ struct ksym {
 	int user_set;		     /**< Value came from --config or
 				      *   --defaults (not a built-in
 				      *   default). */
+	int default_seeded;	     /**< Value came from an sdkconfig line
+				      *   preceded by `# default:` pragma --
+				      *   i.e. a previously-computed Kconfig
+				      *   default round-tripped through the
+				      *   sdkconfig.  Under
+				      *   @c KCONFIG_DEFAULTS_POLICY=sdkconfig
+				      *   (the python default) these values
+				      *   "stick" like user_set ones so the
+				      *   next generation doesn't drift; under
+				      *   @c KCONFIG_DEFAULTS_POLICY=kconfig
+				      *   they are re-evaluated from the
+				      *   Kconfig default properties. */
 	int default_applied;	     /**< Current cur_val came from a
 				      *   matched @c default property (used
 				      *   by emit filters to distinguish an
@@ -131,6 +165,26 @@ struct ksym {
 				      *   @c # ignore: multiple-definition).
 				      *   Writers reset this across all
 				      *   symbols at the start of the walk. */
+	int n_defs;		     /**< Number of @c config / @c menuconfig
+				      *   declarations in the source that
+				      *   produced this symbol.  Any value > 1
+				      *   is eligible for the
+				      *   Multiple-Definition diagnostic, which
+				      *   is gated by @c ignore_multidef. */
+	int ignore_multidef;	     /**< At least one of the symbol's
+				      *   declarations carried a
+				      *   @c # ignore: @c multiple-definition
+				      *   comment, which disables the
+				      *   corresponding warning for the whole
+				      *   symbol regardless of which of its
+				      *   declarations owns the pragma. */
+	int set_rank;		     /**< ESP-IDF `set` / `set default`
+				      *   propagation rank.  0 = no indirect
+				      *   setter has fired yet; 1 = a
+				      *   `set default` rule landed (weak);
+				      *   2 = a `set` rule landed (strong).
+				      *   Later weaker rules are ignored;
+				      *   stronger rules overwrite weaker. */
 };
 
 /* ------------------------------------------------------------------ */
@@ -197,6 +251,17 @@ struct kc_ctx {
 	struct svec symlist;	/**< First-sight order for stable iteration. */
 	struct svec file_names; /**< Owned source-file path strings. */
 
+	/*
+	 * Preset variables declared in the Kconfig input itself via
+	 * `NAME = VALUE` (recursive form) or `NAME := VALUE` (immediate
+	 * form).  ESP-IDF's esp_kconfiglib only supports literal values
+	 * here (no recursive function-call macros), so the two forms
+	 * behave identically -- the value is stored verbatim and
+	 * substituted at every @c $(NAME) / @c ${NAME} / bare-@c $NAME
+	 * site.  Consulted before the --env table during interpolation.
+	 */
+	struct smap vars;
+
 	/* ---- sdkconfig.rename state (populated by kc_load_rename) ---- */
 	struct kc_rename *renames;
 	size_t n_renames;
@@ -212,6 +277,31 @@ struct kc_ctx {
 	 * python does when the var is unset.
 	 */
 	char *idf_version;
+
+	/*
+	 * Resolution policy for the `# default:` pragma that esp_kconfiglib
+	 * writes into sdkconfig.  Controlled by the @c KCONFIG_DEFAULTS_POLICY
+	 * environment variable:
+	 *   - @c "sdkconfig" (0; python default): a pragma'd sdkconfig value
+	 *     wins over the symbol's Kconfig @c default property, preventing
+	 *     generation-to-generation drift when the user has not changed
+	 *     anything and the Kconfig default later changes.
+	 *   - @c "kconfig" (1): pragma'd values are discarded; the Kconfig
+	 *     default is re-applied on every run.
+	 * Seeded from the env at parse-setup time; defaults to 0 when unset.
+	 */
+	int defaults_policy;
+
+	/*
+	 * Notification counter.  Incremented by every non-fatal diagnostic
+	 * the parser / evaluator / I/O layer emits via kc_ctx_notify().
+	 * Used by kconfgen.c to decide between the `Status: Finished
+	 * successfully` and `Status: Finished with notifications` end-of-
+	 * run summary lines that esp_kconfiglib.report prints, so the
+	 * upstream test suite can diff our diagnostics against its
+	 * golden `.stderr` fixtures.
+	 */
+	int n_notifications;
 
 	/*
 	 * Source-tree root used to relativize file paths in the menu id
@@ -239,6 +329,21 @@ void kc_ctx_init(struct kc_ctx *ctx);
 
 /** Release the context: menus, symbols, props, exprs, and the symtab. */
 void kc_ctx_release(struct kc_ctx *ctx);
+
+/**
+ * @brief Emit a parser/evaluator notification to stderr, bumping
+ * @c ctx->n_notifications.
+ *
+ * Intended for non-fatal diagnostics the upstream python tools would
+ * surface via @c esp_kconfiglib.report (multiple-definition warnings,
+ * non-bool select / imply targets, unset env-backed options, etc.).
+ * The exact wording matters -- the drop-in test shim redirects
+ * esp-idf-kconfig's test suite at us and grep-checks the stderr
+ * against its golden fixtures.  Do not prefix with "warning:" from
+ * the caller; embed any prefix the fixture expects literally in the
+ * format string.
+ */
+void kc_ctx_notify(struct kc_ctx *ctx, const char *fmt, ...);
 
 /**
  * @brief Intern a file-path string in the context.

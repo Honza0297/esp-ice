@@ -32,6 +32,8 @@
 
 #include <stddef.h>
 
+struct smap;
+
 /* ------------------------------------------------------------------ */
 /*  Tokens                                                            */
 /* ------------------------------------------------------------------ */
@@ -74,6 +76,9 @@ enum kc_tok {
 	KT_VISIBLE,
 	KT_OPTIONAL,
 	KT_MODULES, /**< Accepted for parity; ESP-IDF never has modules. */
+	KT_WARNING, /**< ESP-IDF extension: `warning "TEXT"` on a symbol. */
+	KT_SET,	    /**< ESP-IDF extension: `set NAME=VAL` /
+		     *   `set default NAME=VAL` indirect value setter. */
 
 	/* Types. */
 	KT_BOOL,
@@ -89,17 +94,18 @@ enum kc_tok {
 	KT_HELPTEXT, /**< Help body (synthetic; only after KT_HELP). */
 
 	/* Operators. */
-	KT_LPAREN, /**< '(' */
-	KT_RPAREN, /**< ')' */
-	KT_AND,	   /**< '&&' */
-	KT_OR,	   /**< '||' */
-	KT_NOT,	   /**< '!' */
-	KT_EQ,	   /**< '=' (comparison / option value binding) */
-	KT_NE,	   /**< '!=' */
-	KT_LT,	   /**< '<' */
-	KT_LE,	   /**< '<=' */
-	KT_GT,	   /**< '>' */
-	KT_GE,	   /**< '>=' */
+	KT_LPAREN,   /**< '(' */
+	KT_RPAREN,   /**< ')' */
+	KT_AND,	     /**< '&&' */
+	KT_OR,	     /**< '||' */
+	KT_NOT,	     /**< '!' */
+	KT_EQ,	     /**< '=' (comparison / option value binding) */
+	KT_COLON_EQ, /**< ':=' (preset-variable immediate-assignment form). */
+	KT_NE,	     /**< '!=' */
+	KT_LT,	     /**< '<' */
+	KT_LE,	     /**< '<=' */
+	KT_GT,	     /**< '>' */
+	KT_GE,	     /**< '>=' */
 };
 
 /* ------------------------------------------------------------------ */
@@ -146,6 +152,14 @@ struct kc_lexer {
 	/* Environment lookup table (NAME=VAL, NULL-terminated).  May be
 	 * NULL.  Consulted before getenv() during $VAR interpolation. */
 	const char *const *env;
+
+	/* Preset-variable table (owned by the parser context).  Preset
+	 * variables declared via `NAME = VALUE` / `NAME := VALUE` at the
+	 * top of a Kconfig file take precedence over @p env and the real
+	 * environment during $(VAR) / ${VAR} / bare-$VAR interpolation.
+	 * May be NULL during early parsing or when the caller hasn't
+	 * wired one in. */
+	const struct smap *vars;
 
 	/* Include-stack saved-frames.  The "active" frame is the lexer's
 	 * top-level fields; @c frames[] stores the parents to restore on

@@ -113,4 +113,19 @@ void kc_write_json(const struct kc_ctx *ctx, const char *path);
  */
 void kc_write_json_menus(const struct kc_ctx *ctx, const char *path);
 
+/**
+ * @brief Write a minimal ("savedefconfig") sdkconfig.
+ *
+ * Only symbols whose current value differs from what the Kconfig
+ * @c default properties would compute are emitted.  Bool-n values are
+ * written as @c CONFIG_X=n (rather than the @c # CONFIG_X @c is @c not @c set
+ * form the full config uses), matching python kconfgen's @c normalize_unset
+ * path.  When @c ESP_IDF_KCONFIG_MIN_LABELS=1 is set in the environment,
+ * @c # Menu @c Name / @c # end @c of @c Menu @c Name markers bracket groups of
+ * non-default symbols.  If the current @c IDF_TARGET differs from the
+ * default "esp32" its assignment is prepended to the body so the file
+ * round-trips through @c kc_load_config cleanly.
+ */
+void kc_write_min_config(const struct kc_ctx *ctx, const char *path);
+
 #endif /* KC_IO_H */
