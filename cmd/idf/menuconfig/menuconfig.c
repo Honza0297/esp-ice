@@ -529,6 +529,91 @@ static void get_active_range(const struct ksym *s, const char **lo,
 }
 
 /*
+ * Concatenate the help text from every @c KP_HELP property on @p s
+ * into a single block, joined by blank lines.  Symbols with more
+ * than one help prop are rare but legal; we preserve them in source
+ * order so the reader sees the same sequencing as kconfiglib.
+ */
+static char *build_help_body(const struct ksym *s)
+{
+	struct sbuf sb = SBUF_INIT;
+
+	const char *prompt = sym_prompt(s);
+	sbuf_addf(&sb, "Symbol:  CONFIG_%s\n", s->name);
+	if (prompt)
+		sbuf_addf(&sb, "Prompt:  %s\n", prompt);
+	sbuf_addf(&sb, "Type:    %s\n", type_label(s->type));
+	if (s->cur_val && *s->cur_val)
+		sbuf_addf(&sb, "Value:   %s\n", s->cur_val);
+	const char *lo = NULL, *hi = NULL;
+	if (s->type == KS_INT || s->type == KS_HEX || s->type == KS_FLOAT)
+		get_active_range(s, &lo, &hi);
+	if (lo && hi)
+		sbuf_addf(&sb, "Range:   %s..%s\n", lo, hi);
+	if (s->decl_file && s->decl_line)
+		sbuf_addf(&sb, "Defined: %s:%d\n", s->decl_file, s->decl_line);
+
+	int had_help = 0;
+	for (struct kprop *p = s->props; p; p = p->next) {
+		if (p->kind != KP_HELP)
+			continue;
+		if (!had_help)
+			sbuf_addstr(&sb, "\nDescription:\n");
+		else
+			sbuf_addch(&sb, '\n');
+		sbuf_addstr(&sb, p->text ? p->text : "");
+		had_help = 1;
+	}
+	if (!had_help)
+		sbuf_addstr(&sb, "\n(no help text available)");
+
+	return sbuf_detach(&sb);
+}
+
+/*
+ * Open a read-only help modal for @p s and block until the user
+ * dismisses it (Esc / q / Enter).  Background list is redrawn on
+ * close so the modal's box is painted over.
+ */
+static void show_help(struct view *v, struct ksym *s)
+{
+	int cols, rows;
+	term_size(&cols, &rows);
+
+	char *body = build_help_body(s);
+	char title[160];
+	const char *prompt = sym_prompt(s);
+	snprintf(title, sizeof(title), "Help -- %s", prompt ? prompt : s->name);
+
+	struct tui_info info;
+	tui_info_init(&info, title, body);
+	tui_info_resize(&info, cols, rows);
+	tui_info_render(&info);
+
+	for (;;) {
+		struct term_event ev;
+		int rc = term_read_event(&ev, 1000);
+		if (rc < 0)
+			break;
+		if (rc == 0)
+			continue;
+		if (ev.key == TK_RESIZE) {
+			tui_info_resize(&info, ev.cols, ev.rows);
+			redraw(v);
+			tui_info_render(&info);
+			continue;
+		}
+		if (tui_info_on_event(&info, &ev))
+			break;
+		tui_info_render(&info);
+	}
+
+	tui_info_release(&info);
+	free(body);
+	redraw(v);
+}
+
+/*
  * Modal editor for int / hex / float / string symbols.  Opens a
  * prompt pre-filled with the current value; confirms on Enter when
  * the input passes value_is_valid, discards on Esc, and rejects
@@ -799,6 +884,18 @@ static int run_loop(struct view *v)
 		case 'S':
 			save_config(v);
 			break;
+		case '?':
+		case 'h':
+		case 'H': {
+			const struct tui_list_item *it =
+			    tui_list_current(&v->list);
+			if (!it)
+				break;
+			struct kmenu *m = it->userdata;
+			if (m && m->sym)
+				show_help(v, m->sym);
+			break;
+		}
 		case TK_CTRL('c'):
 			/* Raw mode suppressed SIGINT; emulate the classic
 			 * "Ctrl-C means abort without saving" here. */
@@ -836,7 +933,8 @@ int cmd_idf_menuconfig(int argc, const char **argv)
 	v.cur = kc.root;
 	tui_list_init(&v.list);
 	tui_list_set_footer(
-	    &v.list, "  Space=toggle  Enter=open  Esc=back  s=save  q=quit");
+	    &v.list,
+	    "  Space=toggle  Enter=open  ?=help  Esc=back  s=save  q=quit");
 
 	int rc = term_raw_enter();
 	if (rc)

@@ -548,3 +548,254 @@ void tui_prompt_render(const struct tui_prompt *P)
 	fflush(stdout);
 	sbuf_release(&sb);
 }
+
+/* ================================================================== */
+/*  Read-only scrollable info box                                     */
+/* ================================================================== */
+
+/*
+ * Split @p body into lines on @c \n and populate I->lines / line_lens
+ * / n_lines.  Lines point into @p body without copying; callers keep
+ * the buffer alive for the widget's lifetime.  Trailing @c \n on the
+ * last line is fine -- it just yields an empty final line, rendered
+ * as blank, which keeps paragraph spacing the caller wrote.
+ */
+static void info_split_lines(struct tui_info *I)
+{
+	int capacity = 16;
+	I->lines = malloc((size_t)capacity * sizeof(*I->lines));
+	I->line_lens = malloc((size_t)capacity * sizeof(*I->line_lens));
+	if (!I->lines || !I->line_lens)
+		die_errno("malloc");
+	I->n_lines = 0;
+
+	const char *p = I->body;
+	while (*p || I->n_lines == 0) {
+		const char *eol = strchr(p, '\n');
+		int len = eol ? (int)(eol - p) : (int)strlen(p);
+		if (I->n_lines == capacity) {
+			capacity *= 2;
+			I->lines = realloc(I->lines, (size_t)capacity *
+							 sizeof(*I->lines));
+			I->line_lens =
+			    realloc(I->line_lens,
+				    (size_t)capacity * sizeof(*I->line_lens));
+			if (!I->lines || !I->line_lens)
+				die_errno("realloc");
+		}
+		I->lines[I->n_lines] = p;
+		I->line_lens[I->n_lines] = len;
+		I->n_lines++;
+		if (!eol)
+			break;
+		p = eol + 1;
+	}
+}
+
+void tui_info_init(struct tui_info *I, const char *title, const char *body)
+{
+	memset(I, 0, sizeof(*I));
+	I->title = title;
+	I->body = body ? body : "";
+	info_split_lines(I);
+}
+
+void tui_info_release(struct tui_info *I)
+{
+	free(I->lines);
+	free(I->line_lens);
+	I->lines = NULL;
+	I->line_lens = NULL;
+	I->n_lines = 0;
+}
+
+void tui_info_resize(struct tui_info *I, int width, int height)
+{
+	I->width = width;
+	I->height = height;
+}
+
+/*
+ * Body rows visible inside the modal box, given the box geometry below
+ * (top + title + separator + bottom = 4 rows of chrome; a 1-row hint
+ * below the box is outside it and doesn't subtract).
+ */
+static int info_body_rows(const struct tui_info *I)
+{
+	/* Box takes ~85% of terminal height; reserve 4 rows of chrome. */
+	int box_rows = I->height - (I->height / 8) - 1;
+	if (box_rows < 7)
+		box_rows = I->height > 7 ? I->height - 2 : I->height;
+	int rows = box_rows - 4;
+	return rows > 0 ? rows : 0;
+}
+
+static void info_clamp_scroll(struct tui_info *I)
+{
+	int rows = info_body_rows(I);
+	if (I->top_line < 0)
+		I->top_line = 0;
+	if (I->n_lines > rows && I->top_line > I->n_lines - rows)
+		I->top_line = I->n_lines - rows;
+	if (I->n_lines <= rows)
+		I->top_line = 0;
+}
+
+int tui_info_on_event(struct tui_info *I, const struct term_event *ev)
+{
+	int rows = info_body_rows(I);
+	switch (ev->key) {
+	case TK_ESC:
+	case TK_ENTER:
+	case 'q':
+	case 'Q':
+		return 1;
+	case TK_UP:
+		I->top_line--;
+		info_clamp_scroll(I);
+		return 0;
+	case TK_DOWN:
+		I->top_line++;
+		info_clamp_scroll(I);
+		return 0;
+	case TK_PGUP:
+		I->top_line -= rows;
+		info_clamp_scroll(I);
+		return 0;
+	case TK_PGDN:
+		I->top_line += rows;
+		info_clamp_scroll(I);
+		return 0;
+	case TK_HOME:
+		I->top_line = 0;
+		return 0;
+	case TK_END:
+		I->top_line = I->n_lines;
+		info_clamp_scroll(I);
+		return 0;
+	default:
+		return 0;
+	}
+}
+
+void tui_info_render(const struct tui_info *I)
+{
+	struct sbuf sb = SBUF_INIT;
+
+	/*
+	 * Modal palette re-used from tui_prompt so help boxes look like
+	 * peers of the input prompt.
+	 */
+#define INFO_BORDER "\x1b[36m"
+#define INFO_TITLE "\x1b[0;1m"
+#define INFO_BODY "\x1b[0m"
+#define INFO_HINT "\x1b[0;2m"
+#define INFO_RESET "\x1b[0m"
+
+	/* Box geometry: 90% width, 85% height, centred, min 40x10. */
+	int cols = I->width * 9 / 10;
+	if (cols < 40)
+		cols = I->width > 40 ? 40 : I->width - 2;
+	if (cols > I->width - 2)
+		cols = I->width - 2;
+	int box_rows = I->height - (I->height / 8) - 1;
+	if (box_rows < 10)
+		box_rows = I->height > 10 ? 10 : I->height - 2;
+	if (box_rows > I->height - 1)
+		box_rows = I->height - 1;
+	int left = (I->width - cols) / 2 + 1;
+	int top = (I->height - box_rows) / 2 + 1;
+	int inner = cols - 2;
+	int body_rows = box_rows - 4;
+
+	sbuf_addstr(&sb, "\x1b[?25l");
+
+	/* Top border. */
+	sbuf_addf(&sb, "\x1b[%d;%dH%s", top, left, INFO_BORDER);
+	sbuf_addstr(&sb, "\xe2\x94\x8c");
+	for (int i = 0; i < inner; i++)
+		sbuf_addstr(&sb, HL);
+	sbuf_addstr(&sb, "\xe2\x94\x90");
+
+	/* Title row. */
+	sbuf_addf(&sb, "\x1b[%d;%dH%s", top + 1, left, INFO_BORDER);
+	sbuf_addstr(&sb, VL);
+	sbuf_addstr(&sb, INFO_TITLE);
+	sbuf_addch(&sb, ' ');
+	sbuf_pad(&sb, I->title, inner - 1);
+	sbuf_addstr(&sb, INFO_BORDER);
+	sbuf_addstr(&sb, VL);
+
+	/* Separator. */
+	sbuf_addf(&sb, "\x1b[%d;%dH%s", top + 2, left, INFO_BORDER);
+	sbuf_addstr(&sb, "\xe2\x94\x9c");
+	for (int i = 0; i < inner; i++)
+		sbuf_addstr(&sb, HL);
+	sbuf_addstr(&sb, "\xe2\x94\xa4");
+
+	/* Body rows. */
+	for (int r = 0; r < body_rows; r++) {
+		int line_idx = I->top_line + r;
+		sbuf_addf(&sb, "\x1b[%d;%dH%s", top + 3 + r, left, INFO_BORDER);
+		sbuf_addstr(&sb, VL);
+		sbuf_addstr(&sb, INFO_BODY);
+		sbuf_addch(&sb, ' ');
+		if (line_idx < I->n_lines) {
+			int len = I->line_lens[line_idx];
+			if (len > inner - 1)
+				len = inner - 1;
+			sbuf_add(&sb, I->lines[line_idx], (size_t)len);
+			for (int i = len; i < inner - 1; i++)
+				sbuf_addch(&sb, ' ');
+		} else {
+			for (int i = 0; i < inner - 1; i++)
+				sbuf_addch(&sb, ' ');
+		}
+		sbuf_addstr(&sb, INFO_BORDER);
+		sbuf_addstr(&sb, VL);
+	}
+
+	/* Bottom border. */
+	sbuf_addf(&sb, "\x1b[%d;%dH%s", top + box_rows - 1, left, INFO_BORDER);
+	sbuf_addstr(&sb, "\xe2\x94\x94");
+	for (int i = 0; i < inner; i++)
+		sbuf_addstr(&sb, HL);
+	sbuf_addstr(&sb, "\xe2\x94\x98");
+	sbuf_addstr(&sb, INFO_RESET);
+
+	/* Hint line below the box.  Scroll indicator when there's more
+	 * content than fits. */
+	if (top + box_rows <= I->height) {
+		const char *more = "";
+		if (I->n_lines > body_rows) {
+			if (I->top_line == 0)
+				more = "  \xe2\x96\xbc more below";
+			else if (I->top_line + body_rows >= I->n_lines)
+				more = "  \xe2\x96\xb2 more above";
+			else
+				more = "  \xe2\x96\xb2\xe2\x96\xbc more "
+				       "above/below";
+		}
+		sbuf_addf(&sb, "\x1b[%d;%dH%s", top + box_rows, left,
+			  INFO_HINT);
+		sbuf_addch(&sb, ' ');
+		struct sbuf hint = SBUF_INIT;
+		sbuf_addstr(&hint,
+			    "\xe2\x86\x91\xe2\x86\x93 scroll  \xe2\x80\xa2"
+			    "  Esc / q / Enter close");
+		sbuf_addstr(&hint, more);
+		sbuf_pad(&sb, hint.buf, cols - 1);
+		sbuf_release(&hint);
+		sbuf_addstr(&sb, INFO_RESET);
+	}
+
+#undef INFO_BORDER
+#undef INFO_TITLE
+#undef INFO_BODY
+#undef INFO_HINT
+#undef INFO_RESET
+
+	fputs(sb.buf, stdout);
+	fflush(stdout);
+	sbuf_release(&sb);
+}
