@@ -237,6 +237,7 @@ static const struct cmd_desc *const ice_subs[] = {
     &cmd_status_desc,
     &cmd_target_desc,
     &cmd_tools_desc,
+    &cmd_update_desc,
     /* Hidden plumbing (names start with '_'); help/completion skip. */
     &cmd___complete_desc,
     &cmd___flash_desc,

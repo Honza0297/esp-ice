@@ -171,6 +171,7 @@ LIB_SRCS := \
 	cmd/tools/install/install.c \
 	cmd/tools/list/list.c \
 	cmd/tools/info/info.c \
+	cmd/update/update.c \
 	config.c \
 	csv.c \
 	fs.c \

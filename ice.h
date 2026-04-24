@@ -190,6 +190,7 @@ extern const struct cmd_desc cmd_size_desc;
 extern const struct cmd_desc cmd_status_desc;
 extern const struct cmd_desc cmd_target_desc;
 extern const struct cmd_desc cmd_tools_desc;
+extern const struct cmd_desc cmd_update_desc;
 extern const struct cmd_desc cmd___complete_desc;
 extern const struct cmd_desc cmd___flash_desc;
 
