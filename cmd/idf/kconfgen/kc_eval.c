@@ -27,8 +27,36 @@
 #include "kc_eval.h"
 #include "ice.h"
 #include "kc_ast.h"
+#include <locale.h>
 
 #define MAX_FIXPOINT_ITERS 50
+
+double kc_strtod_c(const char *nptr, char **endptr)
+{
+	/*
+	 * setlocale() is process-global, so the save/restore trick below
+	 * only works in single-threaded contexts; see the note in
+	 * kc_eval.h.  Capture the current LC_NUMERIC into a local buffer
+	 * (setlocale's returned pointer is only valid until the next call)
+	 * before swapping to "C" for the actual parse.
+	 */
+	char *prev = setlocale(LC_NUMERIC, NULL);
+	char saved[64];
+	double val;
+
+	if (prev)
+		snprintf(saved, sizeof(saved), "%s", prev);
+	else
+		saved[0] = '\0';
+
+	setlocale(LC_NUMERIC, "C");
+	val = strtod(nptr, endptr);
+
+	if (saved[0])
+		setlocale(LC_NUMERIC, saved);
+
+	return val;
+}
 
 /* ================================================================== */
 /*  Expression utilities                                              */
@@ -176,8 +204,8 @@ static int cmp_eval(enum kexpr_op op, const char *a, const char *b)
 	if (integer) {
 		c = (va < vb) ? -1 : (va > vb) ? 1 : 0;
 	} else {
-		double da = strtod(a, &ea);
-		double db = strtod(b, &eb);
+		double da = kc_strtod_c(a, &ea);
+		double db = kc_strtod_c(b, &eb);
 		int floaty = (ea != a && !*ea && eb != b && !*eb);
 		if (floaty)
 			c = (da < db) ? -1 : (da > db) ? 1 : 0;
