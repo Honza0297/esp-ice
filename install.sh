@@ -99,21 +99,43 @@ cat <<EOF
 Next steps:
 EOF
 
+step=1
 case ":$PATH:" in
 	*":$ICE_INSTALL_DIR:"*) ;;
 	*)
 		cat <<EOF
 
-  # Add to PATH ($ICE_INSTALL_DIR is not currently in \$PATH)
-  export PATH="$ICE_INSTALL_DIR:\$PATH"
+  $step. Add ice to your PATH ($ICE_INSTALL_DIR is not in \$PATH):
+
+       export PATH="$ICE_INSTALL_DIR:\$PATH"
+
+     Add the same line to ~/.bashrc, ~/.zshrc, or ~/.profile to
+     make it permanent.
 EOF
+		step=$((step + 1))
 		;;
 esac
 
-cat <<'EOF'
+cat <<EOF
 
-  # Get started -- see the GETTING STARTED section for tab completion
-  # setup and the rest of the onboarding walk-through.
-  ice
+  $step. Enable tab completion.  Every TAB re-invokes ice to list
+     subcommands, flags, chip targets, and config keys, so every step
+     below is discoverable by pressing TAB:
+
+       eval "\$(ice completion bash)"   # or zsh, fish, powershell
+
+     To persist it across sessions, append the same line to your
+     shell rc file -- for example, for bash:
+
+       echo 'eval "\$(ice completion bash)"' >> ~/.bashrc
+
 EOF
-echo
+step=$((step + 1))
+
+cat <<EOF
+  $step. Run the built-in getting-started guide -- it walks you
+     from zero to a flashed hello_world:
+
+       ice docs getting-started
+
+EOF

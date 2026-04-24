@@ -126,6 +126,8 @@ LIB_SRCS := \
 	cmd/clean/clean.c \
 	cmd/completion/completion.c \
 	cmd/config/config.c \
+	cmd/docs/docs.c \
+	cmd/docs/getting-started/getting-started.c \
 	cmd/flash/flash.c \
 	cmd/help/help.c \
 	cmd/idf/idf.c \
@@ -151,7 +153,6 @@ LIB_SRCS := \
 	cmd/image/merge/merge.c \
 	cmd/init/init.c \
 	cmd/log/log.c \
-	cmd/menuconfig/menuconfig.c \
 	cmd/repo/repo.c \
 	cmd/repo/clone/clone.c \
 	cmd/repo/pull/pull.c \

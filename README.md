@@ -2,8 +2,28 @@
 
 *Ice ice baby. Too cold -- slice like a ninja, cut like a razor blade.*
 
-> **Experimental PoC** -- this project is a proof of concept and is not
-> intended for production use.
+## What is ice?
+
+`ice` is a single-binary frontend for ESP-IDF projects.  It replaces
+`idf.py`, `export.sh`, and the per-project Python virtual environment
+with one self-contained executable that fetches its own ESP-IDF source
+tree and toolchains on demand.
+
+Highlights:
+
+- Single self-contained static binary.  Python is still used at build
+  time for a handful of IDF tools that haven't been reimplemented in
+  C yet; ice manages a minimal Python environment internally so you
+  don't source `export.sh` or run `pip install` yourself.
+- Built-in commands for building, flashing, monitoring, configuring,
+  and analysing firmware size -- one tool, one help system.
+- Per-project profiles in `.ice/config` so the same checkout can build
+  for multiple chips or sdkconfigs without conflict.
+- Managed ESP-IDF reference under `~/.ice/` with cheap named checkouts
+  that share git objects across versions.
+
+> **Experimental PoC** -- this project is a proof of concept and is
+> not intended for production use.
 
 ## Install
 
@@ -36,6 +56,9 @@ irm https://raw.githubusercontent.com/fhrbata/esp-ice/main/install.ps1 | iex
 Default install location is `%LOCALAPPDATA%\Programs\ice\bin\ice.exe`
 and is added to your user `PATH` automatically.  Override with
 `$env:ICE_INSTALL_DIR` or `$env:ICE_VERSION`.
+
+Once installed, run `ice docs getting-started` for the guided
+walkthrough -- from fresh install to a flashed `hello_world`.
 
 ### From source
 
@@ -137,39 +160,6 @@ catalogue of available cross-compilation toolchains.
 | `make clean` | Remove build artifacts for the current triple |
 | `make mrproper` | Remove all build artifacts and vendored deps |
 | `make help` | Show all build variables and targets |
-
-## Shell completion
-
-`ice` ships with completion support for bash, zsh, fish, and
-PowerShell.  The install scripts print the matching line for your
-shell; you can also add it manually:
-
-```bash
-# ~/.bashrc
-eval "$(ice completion bash)"
-```
-
-```zsh
-# ~/.zshrc
-eval "$(ice completion zsh)"
-```
-
-```fish
-# ~/.config/fish/config.fish
-ice completion fish | source
-```
-
-```powershell
-# $PROFILE
-ice completion powershell | Out-String | Invoke-Expression
-```
-
-Each `ice completion <shell>` invocation prints a tiny init snippet on
-stdout; evaluating it binds a dispatch function to the `ice` command.
-Every `TAB` then re-invokes `ice` itself to list candidates —
-subcommands, long / short flags, aliases, chip targets, known config
-keys — so completion stays in sync with the binary automatically and
-there is nothing to regenerate after an upgrade.
 
 ## Contributing
 

@@ -48,12 +48,6 @@ static const struct cmd_manual idf_configdep_manual = {
 
 	.examples =
 	H_EXAMPLE("ice idf configdep cc -c foo.c -o foo.o -MF foo.d"),
-
-	.extras =
-	H_SECTION("SEE ALSO")
-	H_ITEM("ice menuconfig",
-	       "Edit @b{sdkconfig} interactively; subsequent builds "
-	       "pick up only the actually-affected sources."),
 };
 /* clang-format on */
 
