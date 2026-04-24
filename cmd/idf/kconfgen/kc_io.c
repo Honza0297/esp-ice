@@ -254,6 +254,60 @@ static char *unquote_value(const char *s)
 }
 
 /*
+ * Verify @p val is a syntactically valid payload for a symbol of
+ * @p type.  Returns 1 on match; 0 and leaves @c errno untouched on
+ * mismatch so the caller can drop the line with a notification.
+ * A typeless (KS_UNKNOWN) symbol accepts anything -- the evaluator
+ * will sort it out downstream.
+ */
+static int value_matches_type(const char *val, enum ksym_type type)
+{
+	char *end;
+	int saved_errno;
+
+	switch (type) {
+	case KS_BOOL:
+		return !strcmp(val, "y") || !strcmp(val, "n");
+	case KS_INT:
+		saved_errno = errno;
+		errno = 0;
+		(void)strtol(val, &end, 10);
+		if (errno == ERANGE) {
+			errno = saved_errno;
+			return 0;
+		}
+		errno = saved_errno;
+		return end != val && *end == '\0';
+	case KS_HEX:
+		if (val[0] != '0' || (val[1] != 'x' && val[1] != 'X'))
+			return 0;
+		saved_errno = errno;
+		errno = 0;
+		(void)strtoul(val, &end, 16);
+		if (errno == ERANGE) {
+			errno = saved_errno;
+			return 0;
+		}
+		errno = saved_errno;
+		return end != val && *end == '\0';
+	case KS_FLOAT:
+		saved_errno = errno;
+		errno = 0;
+		(void)kc_strtod_c(val, &end);
+		if (errno == ERANGE) {
+			errno = saved_errno;
+			return 0;
+		}
+		errno = saved_errno;
+		return end != val && *end == '\0';
+	case KS_STRING:
+	case KS_UNKNOWN:
+		return 1;
+	}
+	return 1;
+}
+
+/*
  * Set @p name's value but keep @c user_set clear -- treat the line as
  * a built-in default rather than user input.  This is the sink for
  * sdkconfig lines that follow a `# default:` pragma (python kconfgen's
@@ -377,6 +431,33 @@ static void process_config_line(struct kc_ctx *ctx, char *line,
 		val = sbuf_strdup(rhs);
 
 	rename_translate(ctx, &name, &val);
+
+	/*
+	 * Reject malformed CONFIG_* lines here rather than letting a
+	 * typo round-trip through the writer.  Unknown symbols are
+	 * still silently dropped downstream (python parity); we only
+	 * validate once we know the target's declared type.
+	 */
+	{
+		struct ksym *s = smap_get(&ctx->symtab, name);
+		if (s && !value_matches_type(val, s->type)) {
+			kc_ctx_notify(ctx,
+				      "warning: value '%s' is not a valid %s "
+				      "for CONFIG_%s; ignoring",
+				      val,
+				      s->type == KS_INT	    ? "int"
+				      : s->type == KS_HEX   ? "hex"
+				      : s->type == KS_FLOAT ? "float"
+				      : s->type == KS_BOOL  ? "bool"
+							    : "value",
+				      name);
+			*default_pending = 0;
+			free(name);
+			free(val);
+			return;
+		}
+	}
+
 	if (*default_pending) {
 		set_default_seeded(ctx, name, val);
 	} else {
