@@ -1,3 +1,32 @@
+## v0.7.0 (2026-04-24)
+
+### ✨ New Features
+
+- **menuconfig**: add `ice menuconfig` porcelain + project-env plumbing *(Frantisek Hrbata - 599b7ce)*
+- **menuconfig**: dirty indicator in title + F1 key help *(Frantisek Hrbata - ca832ed)*
+- **menuconfig**: `/` opens a global symbol search + jump *(Frantisek Hrbata - 5c9f59b)*
+- **menuconfig**: `?` opens a help modal for the current symbol *(Frantisek Hrbata - 2a8f225)*
+- **menuconfig**: int/string/hex editing + modal theme *(Frantisek Hrbata - 9a48366)*
+- **idf**: add `ice idf menuconfig` plumbing *(Frantisek Hrbata - 10d2467)*
+- **tui**: add list and prompt widgets *(Frantisek Hrbata - 17b3404)*
+- **term**: add ANSI output helpers *(Frantisek Hrbata - daedebb)*
+- **term**: TUI primitives, input decoder, and Windows shims *(Frantisek Hrbata - 96d8210)*
+- **kconfgen**: make kc_eval re-entrant via kc_resolve *(Frantisek Hrbata - fa867cb)*
+- **update**: add ice update command for self-update *(Frantisek Hrbata - 97c19db)*
+
+### 🐛 Bug Fixes
+
+- **win**: setenv shim + drop ineffective DWORD casts *(Frantisek Hrbata - c95326c)*
+- **menuconfig,tui**: address clang-tidy warnings *(Frantisek Hrbata - 7aa73d0)*
+- **tui**: rapid input, cursor memory, choice exclusivity, blink *(Frantisek Hrbata - 6bdc439)*
+- **mbedtls**: enable RSASSA-PSS so TLS 1.3 works with RSA-cert servers *(Frantisek Hrbata - b2373e2)*
+
+### 🔧 Code Refactoring
+
+- **ldgen**: switch .lf conditional evaluator to kconfgen *(Frantisek Hrbata - 72464e7)*
+- standardize on setenv, drop putenv *(Frantisek Hrbata - 7e66664)*
+
+
 ## v0.6.0 (2026-04-24)
 
 ### ✨ New Features
