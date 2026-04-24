@@ -1,3 +1,10 @@
+## v0.6.0 (2026-04-24)
+
+### ✨ New Features
+
+- **http**: bundle Mozilla CA store for TLS verification *(Frantisek Hrbata - ae75df2)*
+
+
 ## v0.5.0 (2026-04-24)
 
 ### ✨ New Features
