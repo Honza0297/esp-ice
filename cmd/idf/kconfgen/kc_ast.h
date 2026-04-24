@@ -22,6 +22,7 @@
 
 #include <stddef.h>
 
+#include "kc_report.h"
 #include "smap.h"
 #include "svec.h"
 
@@ -324,15 +325,16 @@ struct kc_ctx {
 	int defaults_policy;
 
 	/*
-	 * Notification counter.  Incremented by every non-fatal diagnostic
-	 * the parser / evaluator / I/O layer emits via kc_ctx_notify().
-	 * Used by kconfgen.c to decide between the `Status: Finished
-	 * successfully` and `Status: Finished with notifications` end-of-
-	 * run summary lines that esp_kconfiglib.report prints, so the
-	 * upstream test suite can diff our diagnostics against its
-	 * golden `.stderr` fixtures.
+	 * Deferred diagnostic collector.  Every non-fatal diagnostic the
+	 * parser / evaluator / I/O layer emits via kc_ctx_notify() lands
+	 * here; kc_report_flush() prints them at end of run, sorted by
+	 * source location.  The accumulated count also drives the
+	 * `Status: Finished ...` summary line that matches python
+	 * esp_kconfiglib.report's output -- the upstream test suite
+	 * grep-checks that substring against its golden `.stderr`
+	 * fixtures.
 	 */
-	int n_notifications;
+	struct kc_report report;
 
 	/*
 	 * Source-tree root used to relativize file paths in the menu id
@@ -362,17 +364,15 @@ void kc_ctx_init(struct kc_ctx *ctx);
 void kc_ctx_release(struct kc_ctx *ctx);
 
 /**
- * @brief Emit a parser/evaluator notification to stderr, bumping
- * @c ctx->n_notifications.
+ * @brief Append a non-fatal warning to @c ctx->report.
  *
- * Intended for non-fatal diagnostics the upstream python tools would
- * surface via @c esp_kconfiglib.report (multiple-definition warnings,
- * non-bool select / imply targets, unset env-backed options, etc.).
- * The exact wording matters -- the drop-in test shim redirects
- * esp-idf-kconfig's test suite at us and grep-checks the stderr
- * against its golden fixtures.  Do not prefix with "warning:" from
- * the caller; embed any prefix the fixture expects literally in the
- * format string.
+ * Thin wrapper around @c kc_report_warning with no source location
+ * -- use @c kc_report_warning directly when you know the offending
+ * file:line.  Kept for source compatibility with the original
+ * kconfgen callsites and because the upstream python test suite
+ * grep-checks the message text verbatim, so the format string must
+ * still spell out any "warning:" prefix literally.  Nothing prints
+ * until @c kc_report_flush runs.
  */
 void kc_ctx_notify(struct kc_ctx *ctx, const char *fmt, ...);
 

@@ -136,6 +136,7 @@ LIB_SRCS := \
 	cmd/idf/kconfgen/kc_io.c \
 	cmd/idf/kconfgen/kc_lex.c \
 	cmd/idf/kconfgen/kc_parse.c \
+	cmd/idf/kconfgen/kc_report.c \
 	cmd/idf/kconfgen/kconfgen.c \
 	cmd/idf/ldgen/gen.c \
 	cmd/idf/ldgen/ldgen.c \
