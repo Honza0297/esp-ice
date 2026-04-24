@@ -50,6 +50,8 @@ static void expr_free(struct kexpr *e)
 	free(e);
 }
 
+void kc_expr_free(struct kexpr *e) { expr_free(e); }
+
 /* @c prop_new (defined below, after @c struct kc_parser is declared) stamps
  * the parser's current declaration menu onto each fresh kprop so the
  * evaluator can fold the declaring node's ctx_dep into prop activation
@@ -437,6 +439,38 @@ static struct kexpr *parse_or_expr(struct kc_parser *p)
 static struct kexpr *parse_expr(struct kc_parser *p)
 {
 	return parse_or_expr(p);
+}
+
+/*
+ * Parse a standalone boolean expression from a NUL-terminated string.
+ *
+ * Used by callers (e.g. ice idf ldgen's .lf conditional evaluator) that
+ * need Python kconfiglib's @c eval_string semantics without pulling in a
+ * parser-internal @c kc_parser.  Identifiers in @p src resolve against
+ * @p ctx's symbol table exactly as if they had appeared inside a Kconfig
+ * @c depends-on clause -- so the caller should have already run
+ * @ref kc_parse_file and @ref kc_eval on @p ctx before invoking this.
+ *
+ * The returned tree is owned by the caller and must be released with
+ * @ref kc_expr_free.  @p src_name is recorded in diagnostic messages
+ * (pass the originating .lf path or "<expr>").  Dies on parse error.
+ */
+struct kexpr *kc_expr_parse_string(struct kc_ctx *ctx, const char *src,
+				   const char *src_name)
+{
+	struct kc_parser p = {.ctx = ctx};
+	kc_lex_open(&p.lex, src, src_name ? src_name : "<expr>", NULL);
+	p.lex.vars = &ctx->vars;
+	p_advance(&p);
+
+	struct kexpr *e = parse_expr(&p);
+	if (p.lex.tok != KT_EOF && p.lex.tok != KT_NL)
+		die("%s: trailing input after expression '%s' (tok=%s)",
+		    src_name ? src_name : "<expr>", src,
+		    kc_tok_name(p.lex.tok));
+
+	kc_lex_close(&p.lex);
+	return e;
 }
 
 /* Optional `if EXPR` tail. */

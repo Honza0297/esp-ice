@@ -42,6 +42,27 @@ struct kexpr;
 int kc_expr_bool(const struct kexpr *e);
 
 /**
+ * @brief Parse a boolean expression from a NUL-terminated string.
+ *
+ * Returns a heap-owned @ref kexpr tree equivalent to the expression
+ * python kconfiglib's @c eval_string would produce.  Caller frees
+ * with @ref kc_expr_free.
+ *
+ * @p ctx must already be through @ref kc_eval so identifier references
+ * resolve against populated symbol values.  @p src_name appears in
+ * diagnostic output; pass the source path or @c "<expr>".
+ */
+struct kexpr *kc_expr_parse_string(struct kc_ctx *ctx, const char *src,
+				   const char *src_name);
+
+/**
+ * @brief Free a @ref kexpr tree returned from @ref kc_expr_parse_string.
+ *
+ * No-op on NULL.
+ */
+void kc_expr_free(struct kexpr *e);
+
+/**
  * @brief Run the full evaluation pipeline on @p ctx.
  *
  * Builds the structural dep / rev-dep / choice-link state (one-shot)

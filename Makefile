@@ -143,7 +143,6 @@ LIB_SRCS := \
 	cmd/idf/ldgen/gen.c \
 	cmd/idf/ldgen/ldgen.c \
 	cmd/idf/ldgen/lf.c \
-	cmd/idf/ldgen/sdkconfig.c \
 	cmd/idf/ldgen/sinfo.c \
 	cmd/idf/partition-table/partition-table.c \
 	cmd/idf/size/mem.c \

@@ -12,8 +12,14 @@
 
 #include "gen.h"
 #include "lf.h"
-#include "sdkconfig.h"
 #include "sinfo.h"
+
+#include "cmd/idf/kconfgen/kc_ast.h"
+#include "cmd/idf/kconfgen/kc_eval.h"
+#include "cmd/idf/kconfgen/kc_io.h"
+
+void kc_parse_file(struct kc_ctx *ctx, const char *path,
+		   const char *const *env);
 
 /* clang-format off */
 static const struct cmd_manual idf_ldgen_manual = {
@@ -59,12 +65,12 @@ static const char *opt_info;
 static const char *opt_libraries_file;
 static const char *opt_fragments_list;
 static const char *opt_config;
+static const char *opt_kconfig;
 static const char *opt_input;
 static const char *opt_output;
 /* Python-ldgen compatibility shims -- accepted and ignored so that a
  * patched build.ninja COMMAND line produced by replacing `python .../
  * ldgen.py` with `ice idf ldgen` parses without modification. */
-static const char *opt_kconfig_unused;
 static const char *opt_env_file_unused;
 static const char *opt_objdump_unused;
 
@@ -78,6 +84,8 @@ static const struct option cmd_idf_ldgen_opts[] = {
 	       "semicolon-separated fragment file paths", NULL),
     OPT_STRING('c', "config", &opt_config, "path",
 	       "sdkconfig file for conditional evaluation", NULL),
+    OPT_STRING(0, "kconfig", &opt_kconfig, "path",
+	       "root Kconfig file (required with --config)", NULL),
     OPT_STRING(0, "input", &opt_input, "path",
 	       "linker script template (with [target] markers)", NULL),
     OPT_STRING('o', "output", &opt_output, "path",
@@ -85,8 +93,6 @@ static const struct option cmd_idf_ldgen_opts[] = {
     OPT_BOOL(0, "canonical", &opt_canonical,
 	     "emit canonical (archive|object|section|target) dump"),
     /* Absorb Python ldgen flags we don't need. */
-    OPT_STRING(0, "kconfig", &opt_kconfig_unused, "path",
-	       "[compatibility] ignored -- flat sdkconfig is sufficient", NULL),
     OPT_STRING(0, "env-file", &opt_env_file_unused, "path",
 	       "[compatibility] ignored -- env vars not consulted", NULL),
     OPT_STRING(0, "objdump", &opt_objdump_unused, "path",
@@ -201,11 +207,22 @@ static void resolve_mode(int argc, const char **argv)
 			lf_file_dump(files[i]);
 	}
 
-	/* Load sdkconfig (optional). */
-	struct sdkconfig cfg = {0};
-	const struct sdkconfig *cfgp = NULL;
+	/*
+	 * Load Kconfig + sdkconfig into a fresh kc_ctx.  The ctx feeds
+	 * gen_compile's conditional evaluator (kc_expr_parse_string +
+	 * kc_expr_bool), matching upstream python ldgen which runs every
+	 * .lf `if` expression through esp_kconfiglib.
+	 */
+	struct kc_ctx cfg = {0};
+	const struct kc_ctx *cfgp = NULL;
 	if (opt_config) {
-		sdkconfig_load(&cfg, opt_config);
+		if (!opt_kconfig)
+			die("--config requires --kconfig to evaluate "
+			    ".lf conditionals against the Kconfig tree");
+		kc_ctx_init(&cfg);
+		kc_parse_file(&cfg, opt_kconfig, NULL);
+		kc_load_config(&cfg, opt_config);
+		kc_eval(&cfg);
 		cfgp = &cfg;
 	}
 
@@ -245,7 +262,7 @@ static void resolve_mode(int argc, const char **argv)
 	gen_free(&ctx);
 	sinfo_free(&db);
 	if (cfgp)
-		sdkconfig_free(&cfg);
+		kc_ctx_release(&cfg);
 	for (size_t i = 0; i < frags.nr; i++) {
 		lf_file_free(files[i]);
 		sbuf_release(&bufs[i]);
