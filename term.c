@@ -381,11 +381,58 @@ static const struct {
     {"OS", TK_F4},
 };
 
+/*
+ * Pending-byte buffer for the event decoder.
+ *
+ * A single kernel read can return multiple escape sequences when the
+ * user holds an arrow key (terminal repeats `ESC[B ESC[B ESC[B ...`
+ * faster than we consume them).  The previous implementation fed the
+ * whole blob to one table lookup and fell through to a bare TK_ESC
+ * on no match -- which, at the root menu, quits the TUI.  Buffer the
+ * bytes here and parse exactly one sequence per call instead, so the
+ * event stream mirrors keystrokes 1:1 regardless of how the terminal
+ * chunked its output.
+ */
+#define TERM_PBUF_CAP 64
+static unsigned char term_pbuf[TERM_PBUF_CAP];
+static size_t term_phead;
+static size_t term_ptail;
+
+/*
+ * Ensure at least one byte is queued, reading from term_read if the
+ * current buffer is empty.  @p timeout_ms applies only on the read --
+ * draining already-buffered bytes is instant.
+ */
+static ssize_t term_fill(unsigned timeout_ms)
+{
+	if (term_phead < term_ptail)
+		return (ssize_t)(term_ptail - term_phead);
+	term_phead = term_ptail = 0;
+	ssize_t n = term_read(term_pbuf, sizeof(term_pbuf), timeout_ms);
+	if (n < 0)
+		return -1;
+	term_ptail = (size_t)n;
+	return n;
+}
+
+/*
+ * Match the bytes @p buf[0..len) (the payload after ESC) against the
+ * keyseq table.  Returns the mapped @ref term_key value or 0 when
+ * nothing matches.
+ */
+static int match_keyseq(const unsigned char *buf, size_t len)
+{
+	for (size_t i = 0; i < sizeof(term_keyseq) / sizeof(term_keyseq[0]);
+	     i++) {
+		size_t tlen = strlen(term_keyseq[i].seq);
+		if (tlen == len && memcmp(buf, term_keyseq[i].seq, tlen) == 0)
+			return term_keyseq[i].key;
+	}
+	return 0;
+}
+
 int term_read_event(struct term_event *ev, unsigned timeout_ms)
 {
-	unsigned char buf[16];
-	ssize_t n;
-
 	ev->key = TK_NONE;
 	ev->cols = 0;
 	ev->rows = 0;
@@ -396,39 +443,88 @@ int term_read_event(struct term_event *ev, unsigned timeout_ms)
 		return 1;
 	}
 
-	n = term_read(buf, 1, timeout_ms);
+	ssize_t n = term_fill(timeout_ms);
 	if (n < 0)
 		return -1;
 	if (n == 0)
 		return 0;
 
-	if (buf[0] != 0x1b) {
-		ev->key = buf[0];
+	unsigned char first = term_pbuf[term_phead++];
+	if (first != 0x1b) {
+		ev->key = first;
 		return 1;
 	}
 
-	/* ESC seen: drain the rest of the sequence with a short timeout.
-	 * A lone ESC (no follow-up) resolves to TK_ESC so the caller can
-	 * e.g. close a modal. */
-	n = term_read(buf + 1, sizeof(buf) - 1, TERM_ESC_TIMEOUT_MS);
-	if (n <= 0) {
+	/*
+	 * ESC seen.  Peek at the next byte to classify the sequence; if
+	 * the buffer is empty, wait a short window for the terminal to
+	 * deliver the tail.  No tail -> bare ESC (e.g. user closed a
+	 * modal).
+	 */
+	if (term_phead >= term_ptail) {
+		ssize_t m = term_fill(TERM_ESC_TIMEOUT_MS);
+		if (m <= 0) {
+			ev->key = TK_ESC;
+			return m < 0 ? -1 : 1;
+		}
+	}
+
+	unsigned char second = term_pbuf[term_phead];
+
+	/*
+	 * CSI: ESC [ [params] final-byte.  Final is any byte in
+	 * 0x40..0x7E.  Scan one byte at a time so a partial sequence
+	 * that straddles a read boundary resumes cleanly via term_fill.
+	 *
+	 * SS3: ESC O final-byte -- exactly three bytes total.
+	 */
+	if (second == '[' || second == 'O') {
+		size_t seq_start = term_phead;
+		term_phead++; /* consume '[' / 'O' */
+		int got_final = 0;
+		if (second == 'O') {
+			if (term_phead >= term_ptail)
+				term_fill(TERM_ESC_TIMEOUT_MS);
+			if (term_phead < term_ptail) {
+				term_phead++; /* final byte */
+				got_final = 1;
+			}
+		} else {
+			for (;;) {
+				if (term_phead >= term_ptail) {
+					ssize_t m =
+					    term_fill(TERM_ESC_TIMEOUT_MS);
+					if (m <= 0)
+						break;
+				}
+				unsigned char c = term_pbuf[term_phead++];
+				if (c >= 0x40 && c <= 0x7E) {
+					got_final = 1;
+					break;
+				}
+			}
+		}
+
+		if (got_final) {
+			size_t seq_len = term_phead - seq_start;
+			int key = match_keyseq(&term_pbuf[seq_start], seq_len);
+			if (key) {
+				ev->key = key;
+				return 1;
+			}
+		}
+		/* Unrecognised or truncated -- deliver bare ESC so callers
+		 * can at least close a modal.  Bytes already consumed stay
+		 * consumed; the next event starts after them. */
 		ev->key = TK_ESC;
 		return 1;
 	}
 
-	for (size_t i = 0; i < sizeof(term_keyseq) / sizeof(term_keyseq[0]);
-	     i++) {
-		size_t len = strlen(term_keyseq[i].seq);
-		if ((size_t)n == len &&
-		    memcmp(buf + 1, term_keyseq[i].seq, len) == 0) {
-			ev->key = term_keyseq[i].key;
-			return 1;
-		}
-	}
-
-	/* Unrecognised escape sequence -- deliver bare ESC, drop the rest.
-	 * Menuconfig doesn't use modifier-encoded or mouse sequences, so
-	 * accurate recovery isn't needed. */
+	/*
+	 * Alt-key (ESC + char) or unknown prefix.  Menuconfig doesn't
+	 * use Alt combos; drop the follow-up and deliver bare ESC.
+	 */
+	term_phead++;
 	ev->key = TK_ESC;
 	return 1;
 }

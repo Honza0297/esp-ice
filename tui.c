@@ -277,13 +277,15 @@ void tui_list_render(const struct tui_list *L)
 {
 	struct sbuf sb = SBUF_INIT;
 
-	/* Full repaint: rather than track dirty regions, clear and redraw.
-	 * With sbuf batching the cost is one write per frame -- dwarfed
-	 * by the user's keystroke cadence.  Hide the cursor for the
-	 * duration: without it, every ESC[r;cH between rows briefly
-	 * flashes a visible cursor across the screen.  A modal prompt
-	 * layered on top re-enables the cursor at its input position. */
-	sbuf_addstr(&sb, "\x1b[?25l\x1b[2J\x1b[H");
+	/*
+	 * Full repaint.  Every row rewrites its full width, so we don't
+	 * need a screen clear -- which was the source of the visible
+	 * flash users saw on each redraw.  Just hide the cursor for the
+	 * duration (so ESC[r;cH moves don't flick a visible caret across
+	 * the screen); a modal prompt layered on top re-enables it at
+	 * its input position.
+	 */
+	sbuf_addstr(&sb, "\x1b[?25l");
 
 	/* Title bar: bold white on blue (classic menuconfig palette).
 	 * Includes a one-space left margin so the text doesn't crowd

@@ -92,6 +92,17 @@ struct row {
 	char *owned_value;
 };
 
+/*
+ * One cursor position saved while descending into a submenu.  On
+ * ascent we pop the top entry and restore the caret so the user
+ * returns to where they were, rather than snapping to the first
+ * selectable row.
+ */
+struct saved_pos {
+	int cursor;
+	int top;
+};
+
 struct view {
 	struct kc_ctx *kc;
 	struct kmenu *cur; /* Menu currently being displayed. */
@@ -100,8 +111,39 @@ struct view {
 	struct row *rows;
 	size_t n;
 	size_t cap;
+	struct saved_pos *stack;
+	size_t stack_n;
+	size_t stack_cap;
 	int modified; /* Set by any kc_sym_set_user the UI performs. */
 };
+
+static void push_position(struct view *v)
+{
+	if (v->stack_n == v->stack_cap) {
+		size_t next = v->stack_cap ? v->stack_cap * 2 : 8;
+		v->stack = realloc(v->stack, next * sizeof(*v->stack));
+		if (!v->stack)
+			die_errno("realloc");
+		v->stack_cap = next;
+	}
+	v->stack[v->stack_n].cursor = v->list.cursor;
+	v->stack[v->stack_n].top = v->list.top;
+	v->stack_n++;
+}
+
+static void pop_position(struct view *v)
+{
+	if (v->stack_n == 0)
+		return;
+	v->stack_n--;
+	int c = v->stack[v->stack_n].cursor;
+	int t = v->stack[v->stack_n].top;
+	if (c < v->list.n_items) {
+		v->list.cursor = c;
+		v->list.top = t;
+		tui_list_resize(&v->list, v->list.width, v->list.height);
+	}
+}
 
 static void row_free(struct row *r)
 {
@@ -318,6 +360,40 @@ static void resync_size(struct view *v)
 static void redraw(struct view *v) { tui_list_render(&v->list); }
 
 /*
+ * Clear user_set on every member of the choice @p s belongs to,
+ * except @p s itself.  Called before picking a new choice winner so
+ * enforce_choice's "last user-set y" rule resolves unambiguously --
+ * otherwise, a sibling from a previous interaction keeps winning by
+ * declaration-order tie-break even when the user just picked another
+ * entry.
+ */
+static void clear_choice_siblings(struct view *v, struct ksym *s)
+{
+	struct ksym *choice = s->choice_parent;
+	if (!choice || !choice->choice_menu)
+		return;
+	/* Walk the choice_menu's subtree -- members may be nested under
+	 * KM_IF blocks, so a linear scan of direct children isn't enough. */
+	struct kmenu *stack[32];
+	int sp = 0;
+	stack[sp++] = choice->choice_menu;
+	while (sp > 0 && sp < (int)(sizeof(stack) / sizeof(stack[0]))) {
+		struct kmenu *m = stack[--sp];
+		for (struct kmenu *c = m->children; c; c = c->next) {
+			if (c->kind == KM_SYM && c->sym &&
+			    c->sym->choice_parent == choice && c->sym != s) {
+				c->sym->user_set = 0;
+				c->sym->user_default_seeded = 0;
+			}
+			if (c->kind == KM_IF &&
+			    sp < (int)(sizeof(stack) / sizeof(stack[0])))
+				stack[sp++] = c;
+		}
+	}
+	(void)v;
+}
+
+/*
  * Toggle @p sym between "y" and "n".  For choice members, any toggle
  * is treated as a "set this one" -- kc_resolve's enforce_choice
  * forces the other members to "n".
@@ -325,7 +401,11 @@ static void redraw(struct view *v) { tui_list_render(&v->list); }
 static void toggle_bool(struct view *v, struct ksym *s)
 {
 	const char *next = "y";
-	if (!s->choice_parent) {
+	if (s->choice_parent) {
+		/* Exclusive pick: scrub stale user_set flags on siblings
+		 * first so the new winner is unambiguous. */
+		clear_choice_siblings(v, s);
+	} else {
 		/* Regular bool: flip current value. */
 		int on = s->cur_val && strcmp(s->cur_val, "y") == 0;
 		next = on ? "n" : "y";
@@ -353,6 +433,9 @@ static void activate(struct view *v)
 		return;
 	}
 	if (m->kind == KM_MENU || m->kind == KM_CHOICE) {
+		/* Remember where we were before descending so Esc lands
+		 * the caret back on this row rather than at the top. */
+		push_position(v);
 		v->cur = m;
 		refresh_list(v, 0);
 	}
@@ -366,6 +449,7 @@ static int ascend(struct view *v)
 		return 0;
 	v->cur = v->cur->parent;
 	refresh_list(v, 0);
+	pop_position(v);
 	return 1;
 }
 
@@ -559,6 +643,7 @@ int cmd_idf_menuconfig(int argc, const char **argv)
 	view_reset(&v);
 	free(v.items);
 	free(v.rows);
+	free(v.stack);
 	kc_ctx_release(&kc);
 	return status;
 }
