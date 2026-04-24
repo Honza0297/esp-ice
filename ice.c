@@ -42,8 +42,13 @@ static int try_expand_alias(int *argcp, const char ***argvp)
 		return 0;
 
 	if (value[0] == '!') {
-		int rc = run_shell(value + 1);
+		const char *argv[] = {value + 1, NULL};
+		struct process proc = PROCESS_INIT;
+		int rc;
 
+		proc.argv = argv;
+		proc.use_shell = 1;
+		rc = process_run(&proc);
 		exit(rc < 0 ? EXIT_FAILURE : rc);
 	}
 
@@ -105,6 +110,7 @@ static int argv_wants_help(int argc, const char **argv)
  * declarations in ice.h.
  */
 int global_no_color;
+int global_no_hints;
 int global_no_pager;
 int global_version;
 int global_verbose;
@@ -201,6 +207,8 @@ int ice_dispatch(int argc, const char **argv, const struct cmd_desc *desc)
 
 const struct option ice_global_opts[] = {
     OPT_BOOL(0, "no-color", &global_no_color, "disable colored output"),
+    OPT_BOOL_CFG(0, "no-hints", &global_no_hints, "core.no-hints", NULL,
+		 "disable auto-hint scan after a failed child process", NULL),
     OPT_BOOL(0, "no-pager", &global_no_pager, "disable the pager"),
     OPT_BOOL_CFG('v', "verbose", &global_verbose, "core.verbose", NULL,
 		 "show full command output", NULL),
@@ -225,6 +233,7 @@ static const struct cmd_desc *const ice_subs[] = {
     &cmd_log_desc,
     &cmd_menuconfig_desc,
     &cmd_repo_desc,
+    &cmd_size_desc,
     &cmd_status_desc,
     &cmd_target_desc,
     &cmd_tools_desc,

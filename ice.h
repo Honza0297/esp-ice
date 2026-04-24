@@ -33,6 +33,7 @@
 #include "error.h"
 #include "fs.h"
 #include "help.h"
+#include "hints.h"
 #include "http.h"
 #include "json.h"
 #include "map.h"
@@ -41,8 +42,10 @@
 #include "platform.h"
 #include "progress.h"
 #include "sbuf.h"
+#include "smap.h"
 #include "svec.h"
 #include "term.h"
+#include "yaml.h"
 
 /* Subcommands -- cmake wrappers (see cmake.h) */
 int cmd_build(int argc, const char **argv);
@@ -183,6 +186,7 @@ extern const struct cmd_desc cmd_log_desc;
 extern const struct cmd_desc cmd_menuconfig_desc;
 extern const struct cmd_desc cmd_monitor_desc;
 extern const struct cmd_desc cmd_repo_desc;
+extern const struct cmd_desc cmd_size_desc;
 extern const struct cmd_desc cmd_status_desc;
 extern const struct cmd_desc cmd_target_desc;
 extern const struct cmd_desc cmd_tools_desc;
@@ -195,6 +199,7 @@ extern const struct cmd_manual ice_root_manual;
 
 /** Global option values populated by parse_options() on ice_global_opts. */
 extern int global_no_color;
+extern int global_no_hints;
 extern int global_no_pager;
 extern int global_version;
 extern int global_verbose;

@@ -139,8 +139,21 @@ LIB_SRCS := \
 	cmd/help/help.c \
 	cmd/idf/idf.c \
 	cmd/idf/configdep/configdep.c \
+	cmd/idf/crt-bundle/crt-bundle.c \
+	cmd/idf/hints/hints.c \
+	cmd/idf/kconfgen/kc_confread.c \
+	cmd/idf/kconfgen/kc_eval.c \
+	cmd/idf/kconfgen/kc_io.c \
+	cmd/idf/kconfgen/kc_lex.c \
+	cmd/idf/kconfgen/kc_parse.c \
+	cmd/idf/kconfgen/kc_rename.c \
+	cmd/idf/kconfgen/kc_report.c \
+	cmd/idf/kconfgen/kconfgen.c \
+	cmd/idf/ldgen/gen.c \
 	cmd/idf/ldgen/ldgen.c \
 	cmd/idf/ldgen/lf.c \
+	cmd/idf/ldgen/sdkconfig.c \
+	cmd/idf/ldgen/sinfo.c \
 	cmd/idf/partition-table/partition-table.c \
 	cmd/idf/size/mem.c \
 	cmd/idf/size/size.c \
@@ -157,6 +170,7 @@ LIB_SRCS := \
 	cmd/repo/list/list.c \
 	cmd/repo/checkout/checkout.c \
 	cmd/repo/info/info.c \
+	cmd/size/size.c \
 	cmd/status/status.c \
 	cmd/target/target.c \
 	cmd/monitor/monitor.c \
@@ -186,6 +200,7 @@ LIB_SRCS := \
 	progress.c \
 	sbuf.c \
 	slip.c \
+	smap.c \
 	svec.c \
 	http.c \
 	gzip.c \
@@ -196,7 +211,9 @@ LIB_SRCS := \
 	vendor/sha256/sha256.c \
 	chip.c \
 	color_rules.c \
-	esf_port.c
+	esf_port.c \
+	hints.c \
+	yaml.c
 
 # MAIN_SRCS provide the program entry point.  Excluded from libice.a
 # so that unit tests (and any future external libice consumer) can
@@ -213,7 +230,7 @@ SRCS := $(MAIN_SRCS) $(LIB_SRCS)
 ifdef STATIC
 DEPS_PREFIX := $(CURDIR)/deps/install/$(TRIPLE)
 DEPS_STAMP := $(DEPS_PREFIX)/.stamp
-BUILD_CFLAGS += -I$(DEPS_PREFIX)/include -DCURL_STATICLIB
+BUILD_CFLAGS += -isystem $(DEPS_PREFIX)/include -DCURL_STATICLIB
 LIBS := -L$(DEPS_PREFIX)/lib -L$(DEPS_PREFIX)/lib64 -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -ltfpsacrypto -lz -llzma
 ifeq ($(S),linux)
 ifeq ($(findstring musl,$(TRIPLE)),)
@@ -240,8 +257,13 @@ endif
 # only needed for static/release builds).
 VENDOR_PREFIX := $(CURDIR)/vendor/install/$(TRIPLE)
 VENDOR_STAMP := $(VENDOR_PREFIX)/.stamp
-BUILD_CFLAGS += -I$(VENDOR_PREFIX)/include
-LIBS += -L$(VENDOR_PREFIX)/lib -lflasher
+BUILD_CFLAGS += -isystem $(VENDOR_PREFIX)/include
+# PCRE2_STATIC tells the pcre2 headers to drop the default
+# __declspec(dllimport) decoration on function prototypes, which on
+# Windows would otherwise demand a DLL even though we link the
+# static libpcre2-8.a from vendor/.  Harmless on Linux / macOS.
+BUILD_CFLAGS += -DPCRE2_STATIC
+LIBS += -L$(VENDOR_PREFIX)/lib -lflasher -lpcre2-8
 
 ifeq ($(S), win)
 
@@ -355,6 +377,7 @@ $(BINARY): $(MAIN_OBJS) $(LIBICE) | $(O)
 	zip-pkg \
 	clang-format \
 	clang-tidy \
+	lint-platform \
 	test \
 	cscope \
 	ctags \
@@ -413,6 +436,46 @@ clang-tidy: | $(VENDOR_STAMP)
 		-- \
 		$(BUILD_DEFINES) \
 		$(BUILD_CFLAGS)
+
+# Enforce the platform-abstraction rules from CONTRIBUTING.md against
+# ice-authored code (repo root + cmd/).  Three grep checks, all of
+# which must be empty:
+#   - no #ifdef _WIN32/__linux__/__APPLE__/... (OS-conditional code
+#     belongs in platform/ behind platform.h);
+#   - no POSIX-only <dirent.h>/<sys/select.h>/... includes
+#     (platform.h should expose the primitive);
+#   - no popen()/pclose() calls (use struct process with pipe_in +
+#     use_shell instead).
+# platform/ and platform.h itself are the only places allowed to have
+# the above; vendor/ and deps/ are third-party imports and excluded
+# from the scan entirely.  Wired into pre-commit via
+# .pre-commit-config.yaml so it runs locally and in CI.
+LINT_PLATFORM_FILES = $(shell \
+	find . -maxdepth 1 -type f \( -name '*.c' -o -name '*.h' \) \
+		-not -name 'platform.h' ; \
+	find cmd -type f \( -name '*.c' -o -name '*.h' \))
+
+lint-platform:
+	@rc=0 ; \
+	if grep -HnE \
+	    '^[[:space:]]*#[[:space:]]*(if|ifdef|ifndef|elif)[[:space:]].*(_WIN32|__linux__|__APPLE__|__MACH__|__unix__|__CYGWIN__|__MINGW32__|_MSC_VER)([^A-Za-z0-9_]|$$)' \
+	    $(LINT_PLATFORM_FILES) ; then \
+		echo >&2 "error: platform #ifdef outside platform/ -- see CONTRIBUTING.md 'Platform abstraction'" ; \
+		rc=1 ; \
+	fi ; \
+	if grep -HnE \
+	    '^[[:space:]]*#[[:space:]]*include[[:space:]]*<(dirent|sys/select|sys/wait|sys/ioctl|sys/mman|termios|netinet/in|arpa/inet|netdb|poll|pwd|grp|syslog)\.h>' \
+	    $(LINT_PLATFORM_FILES) ; then \
+		echo >&2 "error: POSIX-only include outside platform/ -- see CONTRIBUTING.md 'Platform abstraction'" ; \
+		rc=1 ; \
+	fi ; \
+	if grep -HnE '(^|[^A-Za-z0-9_])(popen|pclose)[[:space:]]*\(' \
+	    $(LINT_PLATFORM_FILES) ; then \
+		echo >&2 "error: popen/pclose -- use struct process with pipe_in + use_shell" ; \
+		rc=1 ; \
+	fi ; \
+	if [ $$rc -eq 0 ]; then echo "lint-platform: OK" ; fi ; \
+	exit $$rc
 
 BINARY_ABS := $(abspath $(BINARY))
 
@@ -478,10 +541,11 @@ help:
 	@echo 'lint targets:'
 	@echo ' clang-format     - run clang formatter'
 	@echo ' clang-tidy       - run clang tidy'
+	@echo ' lint-platform    - enforce CONTRIBUTING.md platform-abstraction rules'
 	@echo ''
 	@echo 'dependency targets:'
-	@echo ' deps             - build external deps (zlib, mbedTLS, curl, libyaml, xz)'
-	@echo ' vendor           - build vendor libs (esp-serial-flasher)'
+	@echo ' deps             - build external deps (zlib, mbedTLS, curl, xz)'
+	@echo ' vendor           - build vendor libs (esp-serial-flasher, pcre2)'
 	@echo ''
 	@echo 'misc targets:'
 	@echo ' clean            - remove: $(O) $(DIST) $(STAGE) $(T_OUT)'
