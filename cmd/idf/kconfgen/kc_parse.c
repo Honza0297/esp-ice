@@ -1742,33 +1742,34 @@ static void dump_indent(int n)
 		fputs("  ", stdout);
 }
 
-static void dump_expr(const struct kexpr *e)
+void kc_expr_to_sbuf(const struct kexpr *e, struct sbuf *sb)
 {
 	if (!e) {
-		fputs("(null)", stdout);
+		sbuf_addstr(sb, "(null)");
 		return;
 	}
 	switch (e->op) {
 	case KE_LITERAL:
-		printf("\"%s\"", e->str ? e->str : "");
+		sbuf_addch(sb, '"');
+		if (e->str)
+			sbuf_addstr(sb, e->str);
+		sbuf_addch(sb, '"');
 		return;
 	case KE_SYMREF:
-		printf("%s", e->sym ? e->sym->name : "?");
+		sbuf_addstr(sb, e->sym && e->sym->name ? e->sym->name : "?");
 		return;
 	case KE_NOT:
-		fputs("!", stdout);
-		dump_expr(e->l);
+		sbuf_addch(sb, '!');
+		kc_expr_to_sbuf(e->l, sb);
 		return;
 	case KE_AND:
-	case KE_OR: {
-		const char *op = (e->op == KE_AND) ? " && " : " || ";
-		fputs("(", stdout);
-		dump_expr(e->l);
-		fputs(op, stdout);
-		dump_expr(e->r);
-		fputs(")", stdout);
+	case KE_OR:
+		sbuf_addch(sb, '(');
+		kc_expr_to_sbuf(e->l, sb);
+		sbuf_addstr(sb, (e->op == KE_AND) ? " && " : " || ");
+		kc_expr_to_sbuf(e->r, sb);
+		sbuf_addch(sb, ')');
 		return;
-	}
 	case KE_EQ:
 	case KE_NE:
 	case KE_LT:
@@ -1799,12 +1800,20 @@ static void dump_expr(const struct kexpr *e)
 			op = " ? ";
 			break;
 		}
-		dump_expr(e->l);
-		fputs(op, stdout);
-		dump_expr(e->r);
+		kc_expr_to_sbuf(e->l, sb);
+		sbuf_addstr(sb, op);
+		kc_expr_to_sbuf(e->r, sb);
 		return;
 	}
 	}
+}
+
+static void dump_expr(const struct kexpr *e)
+{
+	struct sbuf sb = SBUF_INIT;
+	kc_expr_to_sbuf(e, &sb);
+	fwrite(sb.buf, 1, sb.len, stdout);
+	sbuf_release(&sb);
 }
 
 static const char *ksym_type_name(enum ksym_type t)

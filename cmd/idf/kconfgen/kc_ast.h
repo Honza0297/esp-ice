@@ -398,6 +398,21 @@ struct ksym *kc_sym_intern(struct kc_ctx *ctx, const char *name);
 /*  Debug                                                             */
 /* ------------------------------------------------------------------ */
 
+struct sbuf;
+
+/**
+ * @brief Append a pretty-printed expression to @p sb.
+ *
+ * Writes the expression tree in roughly its source form: @c y for
+ * KE_SYMREF, quoted for KE_LITERAL, parenthesised binary operators
+ * with spaces around the operator, and @c ! prefixing unary-not.
+ *
+ * Format is not stable -- intended for debug dumps, diagnostics, and
+ * JSON-menus output.  Callers compose the result into any @p sbuf,
+ * so it's usable from error messages, not just stdout.
+ */
+void kc_expr_to_sbuf(const struct kexpr *e, struct sbuf *sb);
+
 /**
  * @brief Dump the parsed AST to stdout in a human-readable form.
  *
