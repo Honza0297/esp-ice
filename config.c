@@ -541,7 +541,7 @@ static const struct {
     {"core.generator", "Ninja", "default cmake generator"},
     {"core.pager", "less -R", "pager for long output (empty to disable)"},
     {"core.verbose", "false", "default verbose mode"},
-    {"core.build-always", "false",
+    {"core.build-always", "true",
      "auto-run ninja before commands that need a built project"},
     {"completion.descriptions", "true",
      "show descriptions in shell completion"},

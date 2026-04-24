@@ -83,20 +83,39 @@ if (-not $userPath -or ($userPath -split ';' -notcontains $installDir)) {
 Next steps:
 "@ | Write-Host
 
+$step = 1
 if ($pathUpdated) {
     @"
 
-  # $installDir was added to your user PATH.
-  # Restart your shell, or update this session:
-  `$env:Path += ';$installDir'
+  $step. $installDir was added to your user PATH.
+     Restart your shell, or refresh this session:
+
+       `$env:Path += ';$installDir'
 "@ | Write-Host
+    $step++
 }
 
 @"
 
-  # Get started -- see the GETTING STARTED section for tab completion
-  # setup and the rest of the onboarding walk-through.
-  ice
+  $step. Enable tab completion.  Every TAB re-invokes ice to list
+     subcommands, flags, chip targets, and config keys, so every step
+     below is discoverable by pressing TAB:
+
+       ice completion powershell | Out-String | Invoke-Expression
+
+     To persist it across sessions, append the same line to your
+     PowerShell profile:
+
+       Add-Content -Path `$PROFILE -Value 'ice completion powershell | Out-String | Invoke-Expression'
+"@ | Write-Host
+$step++
+
+@"
+
+  $step. Run ice for the built-in getting-started guide -- it walks
+     you from zero to a flashed hello_world:
+
+       ice
 
 Note: the binary is currently unsigned (PoC).  On first launch,
 Windows SmartScreen may warn "Windows protected your PC" -- click

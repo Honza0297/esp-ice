@@ -230,13 +230,14 @@ void setup_project(enum project_need needs)
 	}
 
 	/*
-	 * PROJECT_BUILT: @c core.build-always = true opts into the
-	 * idf.py-style coupled flow -- always run ninja, regardless of
-	 * the @c .ice/built marker.  Ninja's own up-to-date check keeps
-	 * no-op rebuilds cheap, and the marker reflects a fresh build
-	 * rather than whatever stale state was on disk.  Default-false
-	 * keeps the decoupled shape where @b{ice flash} / @b{ice size}
-	 * / ... refuse to act on an unbuilt project.
+	 * PROJECT_BUILT: @c core.build-always = true (the default)
+	 * gives the idf.py-style coupled flow -- always run ninja,
+	 * regardless of the @c .ice/built marker.  Ninja's own
+	 * up-to-date check keeps no-op rebuilds cheap, and the marker
+	 * reflects a fresh build rather than whatever stale state was
+	 * on disk.  Power users can flip the key to @c false to get the
+	 * decoupled shape where @b{ice flash} / @b{ice size} / ... refuse
+	 * to act on an unbuilt project.
 	 */
 	if (needs >= PROJECT_BUILT) {
 		int build_always = 0;
@@ -253,8 +254,8 @@ void setup_project(enum project_need needs)
 			sbuf_reset(&marker);
 			sbuf_addf(&marker, "%s/.ice/built", build_dir);
 			if (access(marker.buf, F_OK) != 0) {
-				hint("run @b{ice build} first, or set "
-				     "@b{core.build-always = true}");
+				hint("run @b{ice build} first, or re-enable "
+				     "@b{core.build-always} (default: true)");
 				sbuf_release(&marker);
 				die("project not built");
 			}

@@ -341,24 +341,33 @@ const struct cmd_manual ice_root_manual = {
 	.getting_started =
 	H_PARA("Enable tab completion for your shell (see "
 	       "@b{ice completion --help} for bash, zsh, fish, powershell):")
-	H_LINE("@y{$} @b{eval \"$(ice completion bash)\"}          add to ~/.bashrc")
+	H_LINE("@y{$} @b{eval \"$(ice completion bash)\"}")
 	H_RAW("")
-	H_PARA("Set up the ice-managed ESP-IDF reference:")
+	H_PARA("To persist it, append the same line to your shell rc file:")
+	H_LINE("@y{$} @b{echo 'eval \"$(ice completion bash)\"' >> ~/.bashrc}")
+	H_RAW("")
+	H_PARA("Fetch ESP-IDF (managed by @b{ice}; cached under @b{~/.ice/}):")
 	H_LINE("@y{$} @b{ice repo clone}                         clone ESP-IDF into ~/.ice/esp-idf")
-	H_RAW("")
-	H_PARA("Create a working checkout for a release:")
 	H_LINE("@y{$} @b{ice repo checkout v5.4}                 creates ~/.ice/checkouts/v5.4")
 	H_RAW("")
-	H_PARA("Bind the project to a chip + IDF (installs tools, runs cmake):")
-	H_LINE("@y{$} @b{ice init esp32s3 v5.4}                  default profile")
-	H_LINE("@y{$} @b{ice init esp32 v5.4 production}         named profile")
+	H_PARA("Cd into your project -- ESP-IDF ships a @b{hello_world} example "
+	       "you can use to verify everything is wired up:")
+	H_LINE("@y{$} @b{cd ~/.ice/checkouts/v5.4/examples/get-started/hello_world}")
 	H_RAW("")
-	H_PARA("Build and flash:")
+	H_PARA("Bind the project to a chip + IDF (installs tools, runs cmake):")
+	H_LINE("@y{$} @b{ice init esp32 v5.4}                    default profile")
+	H_LINE("@y{$} @b{ice init esp32s3 v5.4 production}       named profile")
+	H_RAW("")
+	H_PARA("Build, flash, and watch the serial output (Ctrl-] exits):")
 	H_LINE("@y{$} @b{ice build}")
 	H_LINE("@y{$} @b{ice flash}")
+	H_LINE("@y{$} @b{ice monitor}")
 	H_RAW("")
+	H_PARA("@b{ice flash} rebuilds first if anything has changed (matches "
+	       "@b{idf.py} behaviour; toggle via @b{core.build-always}).")
 	H_PARA("No @b{export.sh} or environment setup needed -- @b{ice} "
-	       "finds the tools automatically."),
+	       "finds the tools automatically.  Run @b{ice help <command>} for "
+	       "details on any subcommand."),
 
 	.extras =
 	H_SECTION("MANAGING ESP-IDF VERSIONS")

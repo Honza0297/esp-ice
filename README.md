@@ -2,8 +2,28 @@
 
 *Ice ice baby. Too cold -- slice like a ninja, cut like a razor blade.*
 
-> **Experimental PoC** -- this project is a proof of concept and is not
-> intended for production use.
+## What is ice?
+
+`ice` is a single-binary frontend for ESP-IDF projects.  It replaces
+`idf.py`, `export.sh`, and the per-project Python virtual environment
+with one self-contained executable that fetches its own ESP-IDF source
+tree and toolchains on demand.
+
+Highlights:
+
+- Single self-contained static binary.  Python is still used at build
+  time for a handful of IDF tools that haven't been reimplemented in
+  C yet; ice manages a minimal Python environment internally so you
+  don't source `export.sh` or run `pip install` yourself.
+- Built-in commands for building, flashing, monitoring, configuring,
+  and analysing firmware size -- one tool, one help system.
+- Per-project profiles in `.ice/config` so the same checkout can build
+  for multiple chips or sdkconfigs without conflict.
+- Managed ESP-IDF reference under `~/.ice/` with cheap named checkouts
+  that share git objects across versions.
+
+> **Experimental PoC** -- this project is a proof of concept and is
+> not intended for production use.
 
 ## Install
 
@@ -137,6 +157,54 @@ catalogue of available cross-compilation toolchains.
 | `make clean` | Remove build artifacts for the current triple |
 | `make mrproper` | Remove all build artifacts and vendored deps |
 | `make help` | Show all build variables and targets |
+
+## Quick start
+
+First, enable tab completion for your shell -- it makes every
+subcommand and flag below (and everything else) discoverable by
+pressing `TAB`:
+
+```bash
+eval "$(ice completion bash)"   # or zsh, fish, powershell
+```
+
+Add the same line to your shell rc file (`~/.bashrc`, `~/.zshrc`,
+...) to make it permanent.  See [Shell completion](#shell-completion)
+below for other shells.
+
+Then, from a fresh install to a running ESP32:
+
+```bash
+# 1. Fetch ESP-IDF (managed by ice; lands in ~/.ice/).
+ice repo clone
+ice repo checkout v5.4
+# (pass an explicit path to drop the checkout anywhere else:
+#  `ice repo checkout v5.4 ~/work/esp-idf-5.4`)
+
+# 2. Cd into a project.  ESP-IDF ships a hello_world example you can
+#    use to verify your install.
+cd ~/.ice/checkouts/v5.4/examples/get-started/hello_world
+
+# 3. Bind the project to a chip + IDF version (installs tools, runs cmake).
+ice init esp32 v5.4
+
+# 4. Build, flash, and watch serial output.  Press Ctrl-] to exit monitor.
+ice build
+ice flash
+ice monitor
+```
+
+`ice flash` rebuilds first if anything has changed (matching `idf.py`
+behaviour); `ice build` above is shown for clarity but isn't strictly
+required.  Set `core.build-always = false` to opt out.
+
+Already have an ESP-IDF checkout you'd rather use?
+`ice init esp32 ~/path/to/esp-idf` -- ice accepts any ESP-IDF tree as
+the `<idf>` argument, so you don't have to re-clone.
+
+For the full walkthrough -- including the three ways to provide
+ESP-IDF, profile setup, and troubleshooting -- see
+[docs/getting-started.md](docs/getting-started.md).
 
 ## Shell completion
 
