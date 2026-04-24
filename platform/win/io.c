@@ -86,60 +86,400 @@ static WORD ansi_to_attr(WORD attr, int code, WORD defattr)
 	return attr; /* unknown code: ignore */
 }
 
-/**
- * @brief Skip sub-parameters of an extended color sequence.
+/* ================================================================== */
+/*  ANSI -> Console API shim (legacy-conhost output path)             */
+/* ================================================================== */
+
+/*
+ * Module state for alt-screen emulation.  Kept at file scope because
+ * the ANSI stream enters / leaves alt-screen mid-write and the caller
+ * can issue a plain fprintf afterwards expecting to hit the same
+ * buffer.
  *
- * Called when the SGR parser sees code 38 (fg) or 48 (bg).
- * Peeks at the next parameter: if 5, skips 1 more (256-color);
- * if 2, skips 3 more (RGB).  Returns the updated pointer.
+ * When @c alt_active is set, every @c console_write_legacy call writes
+ * to @c alt_buffer instead of the inherited stdout handle, which lets
+ * primary-screen output that happens concurrently (e.g. from a
+ * background thread) stay on the primary buffer while the TUI owns
+ * the alt one.  We never leak the alt buffer past process exit:
+ * @c SetConsoleActiveScreenBuffer is restored by @c restore_alt_screen
+ * when @c ESC[?1049l is seen or at atexit via term_screen_leave.
  */
-static const char *skip_extended_color(const char *p)
+static HANDLE alt_buffer = INVALID_HANDLE_VALUE;
+static HANDLE saved_primary; /* output handle active before enter */
+static int alt_active;
+
+/*
+ * Saved-cursor state for ESC[s / ESC[u.  Only one nesting level --
+ * matches DEC VT100 behaviour.
+ */
+static COORD saved_cursor;
+static int saved_cursor_valid;
+
+static void enter_alt_screen(HANDLE primary)
 {
-	int sub, skip, i;
+	CONSOLE_SCREEN_BUFFER_INFO info;
 
-	if (*p != ';')
-		return p;
-	p++;
+	if (alt_active)
+		return;
+	if (alt_buffer == INVALID_HANDLE_VALUE) {
+		alt_buffer = CreateConsoleScreenBuffer(
+		    GENERIC_READ | GENERIC_WRITE,
+		    FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+		    CONSOLE_TEXTMODE_BUFFER, NULL);
+		if (alt_buffer == INVALID_HANDLE_VALUE)
+			return;
+	}
+	/* Match the primary buffer's visible window size so cursor-
+	 * addressing math lines up. */
+	if (GetConsoleScreenBufferInfo(primary, &info))
+		SetConsoleScreenBufferSize(alt_buffer, info.dwSize);
 
-	/* Parse the sub-command: 5 = 256-color, 2 = RGB */
-	sub = 0;
-	while (*p >= '0' && *p <= '9')
-		sub = sub * 10 + (*p++ - '0');
+	saved_primary = primary;
+	SetConsoleActiveScreenBuffer(alt_buffer);
+	alt_active = 1;
+}
 
-	if (sub == 5)
-		skip = 1; /* 38;5;N */
-	else if (sub == 2)
-		skip = 3; /* 38;2;R;G;B */
-	else
-		return p;
+static void leave_alt_screen(void)
+{
+	if (!alt_active)
+		return;
+	SetConsoleActiveScreenBuffer(saved_primary);
+	alt_active = 0;
+	/* Keep @c alt_buffer around: re-entering alt-screen is common in
+	 * TUI sessions (menuconfig -> shell escape -> back). */
+}
 
-	for (i = 0; i < skip; i++) {
-		if (*p != ';')
+/*
+ * CSI dispatch helpers.  Each takes the active output handle and the
+ * parsed numeric parameters (0-filled; @p n_params counts how many the
+ * sequence actually carried).  Sequences with no parameters fall back
+ * to the VT100 default value encoded by the caller via @p *_default.
+ */
+
+static void csi_cursor_position(HANDLE h, const int *params, int n_params)
+{
+	CONSOLE_SCREEN_BUFFER_INFO info;
+	int row = n_params >= 1 && params[0] > 0 ? params[0] : 1;
+	int col = n_params >= 2 && params[1] > 0 ? params[1] : 1;
+	COORD pos;
+
+	if (!GetConsoleScreenBufferInfo(h, &info))
+		return;
+	/* VT100 positions are 1-based in the visible window; translate to
+	 * the absolute buffer coordinates Console API wants. */
+	pos.X = (SHORT)(info.srWindow.Left + col - 1);
+	pos.Y = (SHORT)(info.srWindow.Top + row - 1);
+	SetConsoleCursorPosition(h, pos);
+}
+
+static void csi_cursor_move(HANDLE h, char final, const int *params,
+			    int n_params)
+{
+	CONSOLE_SCREEN_BUFFER_INFO info;
+	int n = n_params >= 1 && params[0] > 0 ? params[0] : 1;
+	COORD pos;
+
+	if (!GetConsoleScreenBufferInfo(h, &info))
+		return;
+	pos = info.dwCursorPosition;
+	switch (final) {
+	case 'A':
+		pos.Y = (SHORT)(pos.Y - n);
+		break;
+	case 'B':
+		pos.Y = (SHORT)(pos.Y + n);
+		break;
+	case 'C':
+		pos.X = (SHORT)(pos.X + n);
+		break;
+	case 'D':
+		pos.X = (SHORT)(pos.X - n);
+		break;
+	}
+	/* Clamp to window bounds -- terminals wrap-clip, not wrap-advance. */
+	if (pos.X < info.srWindow.Left)
+		pos.X = info.srWindow.Left;
+	if (pos.X > info.srWindow.Right)
+		pos.X = info.srWindow.Right;
+	if (pos.Y < info.srWindow.Top)
+		pos.Y = info.srWindow.Top;
+	if (pos.Y > info.srWindow.Bottom)
+		pos.Y = info.srWindow.Bottom;
+	SetConsoleCursorPosition(h, pos);
+}
+
+/* Erase @p len cells starting at @p from using the default attribute. */
+static void fill_cells(HANDLE h, COORD from, DWORD len, WORD attr)
+{
+	DWORD wrote;
+	FillConsoleOutputCharacterW(h, L' ', len, from, &wrote);
+	FillConsoleOutputAttribute(h, attr, len, from, &wrote);
+}
+
+static void csi_erase_in_line(HANDLE h, const int *params, int n_params)
+{
+	CONSOLE_SCREEN_BUFFER_INFO info;
+	int mode = n_params >= 1 ? params[0] : 0;
+	COORD from;
+	DWORD len;
+
+	if (!GetConsoleScreenBufferInfo(h, &info))
+		return;
+	switch (mode) {
+	case 0: /* cursor -> end of line */
+		from = info.dwCursorPosition;
+		len =
+		    (DWORD)(info.srWindow.Right - info.dwCursorPosition.X + 1);
+		break;
+	case 1: /* start of line -> cursor */
+		from.X = info.srWindow.Left;
+		from.Y = info.dwCursorPosition.Y;
+		len = (DWORD)(info.dwCursorPosition.X - info.srWindow.Left + 1);
+		break;
+	case 2: /* entire line */
+		from.X = info.srWindow.Left;
+		from.Y = info.dwCursorPosition.Y;
+		len = (DWORD)(info.srWindow.Right - info.srWindow.Left + 1);
+		break;
+	default:
+		return;
+	}
+	fill_cells(h, from, len, info.wAttributes);
+}
+
+static void csi_erase_in_display(HANDLE h, const int *params, int n_params)
+{
+	CONSOLE_SCREEN_BUFFER_INFO info;
+	int mode = n_params >= 1 ? params[0] : 0;
+	COORD from;
+	DWORD len;
+	int w, rows_to_bottom;
+
+	if (!GetConsoleScreenBufferInfo(h, &info))
+		return;
+	w = info.srWindow.Right - info.srWindow.Left + 1;
+	switch (mode) {
+	case 0: /* cursor -> end of screen */
+		/* Rest of current line... */
+		from = info.dwCursorPosition;
+		fill_cells(
+		    h, from,
+		    (DWORD)(info.srWindow.Right - info.dwCursorPosition.X + 1),
+		    info.wAttributes);
+		/* ...then all following lines. */
+		from.X = info.srWindow.Left;
+		from.Y = (SHORT)(info.dwCursorPosition.Y + 1);
+		rows_to_bottom = info.srWindow.Bottom - info.dwCursorPosition.Y;
+		if (rows_to_bottom > 0)
+			fill_cells(h, from, (DWORD)w * (DWORD)rows_to_bottom,
+				   info.wAttributes);
+		break;
+	case 1: /* start -> cursor */
+		from.X = info.srWindow.Left;
+		from.Y = info.srWindow.Top;
+		rows_to_bottom = info.dwCursorPosition.Y - info.srWindow.Top;
+		if (rows_to_bottom > 0)
+			fill_cells(h, from, (DWORD)w * (DWORD)rows_to_bottom,
+				   info.wAttributes);
+		from.Y = info.dwCursorPosition.Y;
+		fill_cells(
+		    h, from,
+		    (DWORD)(info.dwCursorPosition.X - info.srWindow.Left + 1),
+		    info.wAttributes);
+		break;
+	case 2: /* entire screen */
+	case 3: /* screen + scrollback -- we just do screen */
+		from.X = info.srWindow.Left;
+		from.Y = info.srWindow.Top;
+		len = (DWORD)w *
+		      (DWORD)(info.srWindow.Bottom - info.srWindow.Top + 1);
+		fill_cells(h, from, len, info.wAttributes);
+		break;
+	default:
+		return;
+	}
+}
+
+static void csi_cursor_visible(HANDLE h, int visible)
+{
+	CONSOLE_CURSOR_INFO ci;
+	if (!GetConsoleCursorInfo(h, &ci))
+		return;
+	ci.bVisible = visible ? TRUE : FALSE;
+	SetConsoleCursorInfo(h, &ci);
+}
+
+static void csi_save_cursor(HANDLE h)
+{
+	CONSOLE_SCREEN_BUFFER_INFO info;
+	if (!GetConsoleScreenBufferInfo(h, &info))
+		return;
+	saved_cursor = info.dwCursorPosition;
+	saved_cursor_valid = 1;
+}
+
+static void csi_restore_cursor(HANDLE h)
+{
+	if (!saved_cursor_valid)
+		return;
+	SetConsoleCursorPosition(h, saved_cursor);
+}
+
+static void csi_apply_sgr(HANDLE h, WORD *attr, WORD defattr, const int *params,
+			  int n_params)
+{
+	/* No params -> SGR 0 (reset). */
+	if (n_params == 0) {
+		*attr = defattr;
+		SetConsoleTextAttribute(h, *attr);
+		return;
+	}
+	/* We walk raw tokens here rather than the params[] array because
+	 * extended color sub-sequences (38;5;N or 38;2;R;G;B) consume an
+	 * unpredictable number of following numbers that the generic
+	 * parser already treated as separate params.  Skipping them is
+	 * easier than reconstructing the grouping, and no ice caller emits
+	 * extended colors today. */
+	for (int i = 0; i < n_params; i++) {
+		int code = params[i];
+		if (code == 38 || code == 48) {
+			/* Next param is either 5 (256-color) or 2 (RGB);
+			 * skip it plus its payload.  Default to 1-skip if
+			 * we don't recognise the sub-command. */
+			if (i + 1 < n_params && params[i + 1] == 5)
+				i += 2;
+			else if (i + 1 < n_params && params[i + 1] == 2)
+				i += 4;
+			else if (i + 1 < n_params)
+				i += 1;
+			continue;
+		}
+		*attr = ansi_to_attr(*attr, code, defattr);
+	}
+	SetConsoleTextAttribute(h, *attr);
+}
+
+/*
+ * Private-mode set/reset: @c ESC[?<N>h and @c ESC[?<N>l.
+ *
+ * Handles the two modes the ice TUI actually emits:
+ *   - @c 25  cursor visibility
+ *   - @c 1049 alt-screen buffer
+ *
+ * Returns the new output handle (alt or primary) so the caller can
+ * switch where subsequent text writes go.  @p h is the "current"
+ * handle on entry; @p primary is the original stdout handle, used as
+ * the destination when leaving alt-screen.
+ */
+static HANDLE csi_private_mode(HANDLE h, HANDLE primary, int set,
+			       const int *params, int n_params)
+{
+	for (int i = 0; i < n_params; i++) {
+		switch (params[i]) {
+		case 25:
+			csi_cursor_visible(h, set);
 			break;
+		case 1049:
+			if (set) {
+				enter_alt_screen(primary);
+				h = alt_active ? alt_buffer : primary;
+			} else {
+				leave_alt_screen();
+				h = primary;
+			}
+			break;
+		default:
+			/* Unknown private mode: ignore silently. */
+			break;
+		}
+	}
+	return h;
+}
+
+/*
+ * Parse one CSI sequence starting at @p p (which points at the byte
+ * after @c ESC[).  Fills @p params / @p n_params, records the
+ * private-marker flag in @p *private, and returns a pointer to the
+ * byte after the final char along with the final char itself.
+ */
+static const char *parse_csi(const char *p, int *private_marker, int *params,
+			     int *n_params, int cap, char *final)
+{
+	*private_marker = 0;
+	*n_params = 0;
+	*final = 0;
+
+	if (*p == '?') {
+		*private_marker = 1;
 		p++;
-		while (*p >= '0' && *p <= '9')
+	}
+
+	int have_digit = 0;
+	int value = 0;
+	while (*p) {
+		if (*p >= '0' && *p <= '9') {
+			value = value * 10 + (*p - '0');
+			have_digit = 1;
 			p++;
+		} else if (*p == ';') {
+			if (*n_params < cap)
+				params[(*n_params)++] = have_digit ? value : 0;
+			value = 0;
+			have_digit = 0;
+			p++;
+		} else {
+			break;
+		}
+	}
+	if (have_digit && *n_params < cap)
+		params[(*n_params)++] = value;
+
+	if (*p) {
+		*final = *p;
+		p++;
 	}
 	return p;
+}
+
+static void flush_text(HANDLE h, const char *text, size_t len, int *total)
+{
+	if (len == 0)
+		return;
+	wchar_t *ws = mbs_to_wcs_n(text, len);
+	if (ws) {
+		WriteConsoleW(h, ws, (DWORD)wcslen(ws), NULL, NULL);
+		*total += (int)len;
+		free(ws);
+	}
 }
 
 /**
  * @brief Write a UTF-8 string to a console, translating ANSI escape
  * codes to Console API calls.
  *
- * Used on legacy Windows where VT processing is not available.
- * Text is converted to wide-char and written with WriteConsoleW;
- * ESC[...m sequences are translated to SetConsoleTextAttribute.
+ * Used on legacy Windows where VT processing is not available.  Plain
+ * text runs are forwarded to @c WriteConsoleW; CSI sequences are
+ * parsed into @c (private?, params, final) triples and dispatched:
+ *
+ *   m           -> SGR (colour / attributes)
+ *   H, f        -> cursor position
+ *   A/B/C/D     -> cursor up / down / right / left
+ *   K           -> erase in line
+ *   J           -> erase in display
+ *   s, u        -> save / restore cursor
+ *   ?25h, ?25l  -> cursor visibility
+ *   ?1049h, l   -> alt-screen enter / leave
  */
 static int console_write_legacy(HANDLE h, const char *buf)
 {
 	CONSOLE_SCREEN_BUFFER_INFO csbi;
 	WORD defattr, attr;
+	HANDLE active = alt_active ? alt_buffer : h;
 	const char *p = buf;
 	const char *text_start = buf;
 	int total = 0;
 
-	if (!GetConsoleScreenBufferInfo(h, &csbi))
+	if (!GetConsoleScreenBufferInfo(active, &csbi))
 		return -1;
 
 	defattr = csbi.wAttributes;
@@ -147,52 +487,75 @@ static int console_write_legacy(HANDLE h, const char *buf)
 
 	while (*p) {
 		if (p[0] == '\033' && p[1] == '[') {
-			/* Flush text before the escape sequence. */
-			if (p > text_start) {
-				wchar_t *ws =
-				    mbs_to_wcs_n(text_start, p - text_start);
-				if (ws) {
-					WriteConsoleW(h, ws, (DWORD)wcslen(ws),
-						      NULL, NULL);
-					total += (int)(p - text_start);
-					free(ws);
+			flush_text(active, text_start, (size_t)(p - text_start),
+				   &total);
+
+			int params[16];
+			int n_params;
+			int private_marker;
+			char final;
+			p = parse_csi(p + 2, &private_marker, params, &n_params,
+				      16, &final);
+
+			if (private_marker) {
+				if (final == 'h') {
+					active = csi_private_mode(
+					    active, h, 1, params, n_params);
+				} else if (final == 'l') {
+					active = csi_private_mode(
+					    active, h, 0, params, n_params);
+				}
+				/* Private final chars other than h/l are
+				 * ignored. */
+			} else {
+				switch (final) {
+				case 'm':
+					csi_apply_sgr(active, &attr, defattr,
+						      params, n_params);
+					break;
+				case 'H':
+				case 'f':
+					csi_cursor_position(active, params,
+							    n_params);
+					break;
+				case 'A':
+				case 'B':
+				case 'C':
+				case 'D':
+					csi_cursor_move(active, final, params,
+							n_params);
+					break;
+				case 'K':
+					csi_erase_in_line(active, params,
+							  n_params);
+					break;
+				case 'J':
+					csi_erase_in_display(active, params,
+							     n_params);
+					break;
+				case 's':
+					csi_save_cursor(active);
+					break;
+				case 'u':
+					csi_restore_cursor(active);
+					break;
+				default:
+					/* Unrecognised final byte -- drop it.
+					 * Menuconfig doesn't emit anything
+					 * exotic; this includes e.g. DECSCUSR
+					 * cursor-style, which has no Console
+					 * API equivalent anyway. */
+					break;
 				}
 			}
 
-			/* Parse SGR parameters: ESC[ n1;n2;...m */
-			p += 2;
-			while (*p && *p != 'm') {
-				int code = 0;
-				while (*p >= '0' && *p <= '9')
-					code = code * 10 + (*p++ - '0');
-				if (code == 38 || code == 48)
-					p = skip_extended_color(p);
-				else
-					attr =
-					    ansi_to_attr(attr, code, defattr);
-				if (*p == ';')
-					p++;
-			}
-			if (*p == 'm')
-				p++;
-
-			SetConsoleTextAttribute(h, attr);
 			text_start = p;
 			continue;
 		}
 		p++;
 	}
 
-	/* Flush remaining text. */
-	if (p > text_start) {
-		wchar_t *ws = mbs_to_wcs_n(text_start, p - text_start);
-		if (ws) {
-			WriteConsoleW(h, ws, (DWORD)wcslen(ws), NULL, NULL);
-			total += (int)(p - text_start);
-			free(ws);
-		}
-	}
-
+	flush_text(active, text_start, (size_t)(p - text_start), &total);
 	return total;
 }
 

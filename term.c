@@ -324,3 +324,111 @@ void expand_colors(struct sbuf *out, const char *fmt, int colorize)
 		sbuf_addch(out, *fmt++);
 	}
 }
+
+/* ================================================================== */
+/*  Input event decoder                                               */
+/* ================================================================== */
+
+/*
+ * Timeout (ms) used to drain the tail of an escape sequence after the
+ * initial @c ESC byte has been observed.  Modern terminals flush the
+ * full CSI / SS3 sequence in well under a millisecond; 50 ms is the
+ * classical value used by termbox / ncurses to distinguish a bare ESC
+ * press from a prefix and leaves plenty of slack for laggy SSH links.
+ */
+#define TERM_ESC_TIMEOUT_MS 50
+
+static const struct {
+	const char *seq; /* bytes AFTER the initial ESC */
+	int key;
+} term_keyseq[] = {
+    /* CSI (ESC [ ...) sequences. */
+    {"[A", TK_UP},
+    {"[B", TK_DOWN},
+    {"[C", TK_RIGHT},
+    {"[D", TK_LEFT},
+    {"[H", TK_HOME},
+    {"[F", TK_END},
+    {"[1~", TK_HOME},
+    {"[4~", TK_END},
+    {"[5~", TK_PGUP},
+    {"[6~", TK_PGDN},
+    {"[2~", TK_INS},
+    {"[3~", TK_DEL},
+    {"[11~", TK_F1},
+    {"[12~", TK_F2},
+    {"[13~", TK_F3},
+    {"[14~", TK_F4},
+    {"[15~", TK_F5},
+    {"[17~", TK_F6},
+    {"[18~", TK_F7},
+    {"[19~", TK_F8},
+    {"[20~", TK_F9},
+    {"[21~", TK_F10},
+    {"[23~", TK_F11},
+    {"[24~", TK_F12},
+    /* SS3 (ESC O ...) sequences used by xterm application-keypad
+     * mode and by rxvt for the arrow keys. */
+    {"OA", TK_UP},
+    {"OB", TK_DOWN},
+    {"OC", TK_RIGHT},
+    {"OD", TK_LEFT},
+    {"OH", TK_HOME},
+    {"OF", TK_END},
+    {"OP", TK_F1},
+    {"OQ", TK_F2},
+    {"OR", TK_F3},
+    {"OS", TK_F4},
+};
+
+int term_read_event(struct term_event *ev, unsigned timeout_ms)
+{
+	unsigned char buf[16];
+	ssize_t n;
+
+	ev->key = TK_NONE;
+	ev->cols = 0;
+	ev->rows = 0;
+
+	if (term_resize_pending()) {
+		ev->key = TK_RESIZE;
+		term_size(&ev->cols, &ev->rows);
+		return 1;
+	}
+
+	n = term_read(buf, 1, timeout_ms);
+	if (n < 0)
+		return -1;
+	if (n == 0)
+		return 0;
+
+	if (buf[0] != 0x1b) {
+		ev->key = buf[0];
+		return 1;
+	}
+
+	/* ESC seen: drain the rest of the sequence with a short timeout.
+	 * A lone ESC (no follow-up) resolves to TK_ESC so the caller can
+	 * e.g. close a modal. */
+	n = term_read(buf + 1, sizeof(buf) - 1, TERM_ESC_TIMEOUT_MS);
+	if (n <= 0) {
+		ev->key = TK_ESC;
+		return 1;
+	}
+
+	for (size_t i = 0; i < sizeof(term_keyseq) / sizeof(term_keyseq[0]);
+	     i++) {
+		size_t len = strlen(term_keyseq[i].seq);
+		if ((size_t)n == len &&
+		    memcmp(buf + 1, term_keyseq[i].seq, len) == 0) {
+			ev->key = term_keyseq[i].key;
+			return 1;
+		}
+	}
+
+	/* Unrecognised escape sequence -- deliver bare ESC, drop the rest.
+	 * Menuconfig doesn't use modifier-encoded or mouse sequences, so
+	 * accurate recovery isn't needed. */
+	ev->key = TK_ESC;
+	return 1;
+}

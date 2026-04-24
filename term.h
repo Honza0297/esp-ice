@@ -38,6 +38,10 @@
 #include <stddef.h>
 #include <stdio.h>
 
+/* platform.h is included for the ssize_t typedef on Windows; on POSIX
+ * it pulls in <sys/types.h> which provides the native declaration. */
+#include "platform.h"
+
 struct sbuf;
 
 /** Global color flag. Set by color_init(), cleared by --no-color. */
@@ -118,6 +122,159 @@ struct color_rule {
  */
 void color_text(struct sbuf *out, const char *text, size_t len,
 		const struct color_rule *rules);
+
+/* ------------------------------------------------------------------ */
+/*  Raw terminal input                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Enter raw terminal mode on stdin.
+ *
+ * Character-at-a-time, no-echo, no signal generation.  Control
+ * characters (Ctrl-C, Ctrl-], ...) arrive as regular bytes / key
+ * events.  Output processing is left enabled so '\n' still produces
+ * a carriage return.  Registers an atexit handler on first call to
+ * restore the original mode.
+ *
+ * @return 0 on success, -errno on failure (-ENOTTY when stdin is
+ *         not a terminal).
+ */
+int term_raw_enter(void);
+
+/**
+ * @brief Leave raw terminal mode.  Safe when not in raw mode (no-op).
+ */
+void term_raw_leave(void);
+
+/**
+ * @brief Read bytes from stdin with a timeout.
+ *
+ * Returns immediately if @p timeout_ms is 0 and no input is
+ * available.  Only meaningful after term_raw_enter().
+ *
+ * @return bytes read (> 0), 0 on timeout, -1 on error.
+ */
+ssize_t term_read(void *buf, size_t n, unsigned timeout_ms);
+
+/* ------------------------------------------------------------------ */
+/*  Terminal size + resize notification                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Query the current terminal size.
+ *
+ * @param cols  Out: column count (width).
+ * @param rows  Out: row count (height).
+ * @return 0 on success, -errno on failure.
+ */
+int term_size(int *cols, int *rows);
+
+/**
+ * @brief Return 1 if a resize has occurred since the last call,
+ *        clearing the flag; 0 otherwise.
+ *
+ * POSIX: the flag is set by a SIGWINCH handler installed on the first
+ * call to term_raw_enter().  Windows: the flag is set when
+ * term_read() observes a WINDOW_BUFFER_SIZE_EVENT on the console
+ * input handle.
+ */
+int term_resize_pending(void);
+
+/* ------------------------------------------------------------------ */
+/*  Input events                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Decoded input event delivered by @ref term_read_event.
+ *
+ * Printable keys and C0 controls ride in @p key as their byte value
+ * (so @c 'y' is @c 'y', Ctrl-C is @c 0x03, bare ESC is @c 0x1b).
+ * Named keys use sentinel values in @ref term_key above the byte
+ * range.  For @c TK_RESIZE, @p cols / @p rows carry the new size.
+ */
+struct term_event {
+	int key;
+	int cols;
+	int rows;
+};
+
+/**
+ * @brief Key codes for non-literal keys.
+ *
+ * Literal ASCII (printable or C0 control) is delivered as its byte
+ * value and does not appear in this enum.  @c TK_CTRL(c) maps a
+ * printable letter to its C0 control code so callers can write
+ * @c ev.key @c == @c TK_CTRL('c') for Ctrl-C.
+ */
+enum term_key {
+	TK_NONE = 0,
+	TK_ENTER = '\r',
+	TK_TAB = '\t',
+	TK_ESC = 0x1b,
+	TK_BACKSPACE = 0x7f,
+
+	TK_UP = 0x100,
+	TK_DOWN,
+	TK_LEFT,
+	TK_RIGHT,
+	TK_HOME,
+	TK_END,
+	TK_PGUP,
+	TK_PGDN,
+	TK_INS,
+	TK_DEL,
+	TK_F1,
+	TK_F2,
+	TK_F3,
+	TK_F4,
+	TK_F5,
+	TK_F6,
+	TK_F7,
+	TK_F8,
+	TK_F9,
+	TK_F10,
+	TK_F11,
+	TK_F12,
+
+	TK_RESIZE,
+};
+
+#define TK_CTRL(c) ((c) & 0x1f)
+
+/**
+ * @brief Read one input event.
+ *
+ * Must be called after @ref term_raw_enter.  Resize notifications
+ * take priority: if @ref term_resize_pending is set, returns a
+ * @c TK_RESIZE event immediately with the new size.  Otherwise reads
+ * one byte with @p timeout_ms; on @c ESC drains the rest of the
+ * sequence with a short internal timeout and exact-matches against an
+ * xterm/VT220 key table.  Unknown escape sequences deliver a bare
+ * @c TK_ESC (trailing bytes are dropped).
+ *
+ * @return 1 when @p ev is populated, 0 on timeout (@c key set to
+ *         @c TK_NONE), or -1 on error.
+ */
+int term_read_event(struct term_event *ev, unsigned timeout_ms);
+
+/* ------------------------------------------------------------------ */
+/*  Alternate screen                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Switch to the alternate screen buffer and hide the cursor.
+ *
+ * For full-screen TUIs.  Pairs with term_screen_leave().  Registers
+ * an atexit handler on first call to restore state on exit.  Safe to
+ * call while already on the alt screen (no-op).
+ */
+void term_screen_enter(void);
+
+/**
+ * @brief Restore the primary screen and show the cursor.  Safe when
+ *        not on the alt screen (no-op).
+ */
+void term_screen_leave(void);
 
 /* Box-drawing characters (UTF-8) matching Rich's heavy-head style. */
 #define TL "\xe2\x94\x8f" /* ┏ */
