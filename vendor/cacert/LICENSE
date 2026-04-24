@@ -1,0 +1,17 @@
+The bundled certificate data in `cacert.pem` is extracted from
+Mozilla's NSS root certificate store and is licensed under the
+Mozilla Public License, version 2.0.
+
+The full license text is available at:
+
+    https://www.mozilla.org/MPL/2.0/
+
+Source bundle (extracted by the curl project):
+
+    https://curl.se/docs/caextract.html
+    https://curl.se/ca/cacert.pem
+
+The extraction tool (`mk-ca-bundle.pl`) is part of the curl project
+and is licensed under curl's MIT/X derivative license; it generates
+`cacert.pem` from Mozilla's `certdata.txt`.  Only the generated PEM
+file is redistributed here, not the extraction tool itself.

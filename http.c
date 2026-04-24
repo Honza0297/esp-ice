@@ -8,13 +8,14 @@
  * @file http.c
  * @brief HTTP/HTTPS client implementation using libcurl.
  *
- * libcurl handles platform differences at link time:
- *  - Linux: OpenSSL (statically linked)
- *  - macOS: SecureTransport
- *  - Windows: Schannel (via MinGW/MSYS2)
+ * TLS verification uses the bundled Mozilla CA store (see ca_certs.c
+ * and vendor/cacert/) rather than the host system's trust store, so
+ * downloads behave identically regardless of the user's
+ * ca-certificates package state.
  */
 #include <curl/curl.h>
 
+#include "ca_certs.h"
 #include "ice.h"
 
 /**
@@ -65,6 +66,7 @@ static void curl_set_defaults(CURL *curl, const char *url)
 	curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
 	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "esp-ice/" VERSION);
+	ca_certs_apply(curl);
 }
 
 void http_default_progress(size_t total, size_t now, void *ctx)
