@@ -143,8 +143,8 @@ LIB_SRCS := \
 	cmd/idf/ldgen/gen.c \
 	cmd/idf/ldgen/ldgen.c \
 	cmd/idf/ldgen/lf.c \
-	cmd/idf/ldgen/sdkconfig.c \
 	cmd/idf/ldgen/sinfo.c \
+	cmd/idf/menuconfig/menuconfig.c \
 	cmd/idf/partition-table/partition-table.c \
 	cmd/idf/size/mem.c \
 	cmd/idf/size/size.c \
@@ -154,6 +154,7 @@ LIB_SRCS := \
 	cmd/image/merge/merge.c \
 	cmd/init/init.c \
 	cmd/log/log.c \
+	cmd/menuconfig/menuconfig.c \
 	cmd/repo/repo.c \
 	cmd/repo/clone/clone.c \
 	cmd/repo/pull/pull.c \
@@ -199,6 +200,7 @@ LIB_SRCS := \
 	reader.c \
 	tar.c \
 	toolenv.c \
+	tui.c \
 	vendor/cacert/ca_bundle.c \
 	vendor/sha256/sha256.c \
 	chip.c \
@@ -262,7 +264,7 @@ ifeq ($(S), win)
 # wmain.c provides the Windows wide-char entry point that calls into
 # main() from ice.c, so it lives with MAIN_SRCS.  io / process / wconv
 # are reusable platform glue and go into libice.a.
-LIB_SRCS  += platform/win/console.c platform/win/io.c platform/win/process.c platform/win/serial.c platform/win/wconv.c
+LIB_SRCS  += platform/win/io.c platform/win/process.c platform/win/serial.c platform/win/term.c platform/win/wconv.c
 MAIN_SRCS += platform/win/wmain.c
 SRCS      := $(MAIN_SRCS) $(LIB_SRCS)
 CFLAGS += -municode
@@ -272,7 +274,7 @@ BINARY := $(O)/$(NAME).exe
 
 else
 
-LIB_SRCS += platform/posix/console.c platform/posix/io.c platform/posix/process.c platform/posix/serial.c
+LIB_SRCS += platform/posix/io.c platform/posix/process.c platform/posix/serial.c platform/posix/term.c
 SRCS     := $(MAIN_SRCS) $(LIB_SRCS)
 BINARY := $(O)/$(NAME)
 # glibc hides POSIX symbols (readlink, popen, …) under -std=c99

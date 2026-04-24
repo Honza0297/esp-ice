@@ -878,12 +878,29 @@ static void pass_apply_sets(struct kc_ctx *ctx)
 	}
 }
 
-void kc_eval(struct kc_ctx *ctx)
+/*
+ * Reset the per-resolve scratch state so the fixpoint + apply_sets
+ * passes can run from a clean slate.  Interactive callers (menuconfig)
+ * toggle a symbol via kc_sym_set_user() and then re-resolve; setters
+ * that fired in a previous resolve must be able to re-fire (or not)
+ * based on the new inputs, which means set_rank has to start at 0 and
+ * default_seeded has to go back to whatever the sdkconfig loader set.
+ */
+static void reset_resolve_scratch(struct kc_ctx *ctx)
 {
-	pass_ctx_dep(ctx->root, NULL);
-	pass_sym_dep(ctx);
-	pass_rev_dep(ctx);
-	pass_link_choices(ctx);
+	for (size_t i = 0; i < ctx->symlist.nr; i++) {
+		struct ksym *s = smap_get(&ctx->symtab, ctx->symlist.v[i]);
+		if (!s)
+			continue;
+		s->set_rank = 0;
+		s->default_applied = 0;
+		s->default_seeded = s->user_default_seeded;
+	}
+}
+
+void kc_resolve(struct kc_ctx *ctx)
+{
+	reset_resolve_scratch(ctx);
 
 	int iter = 0;
 	for (;;) {
@@ -892,12 +909,21 @@ void kc_eval(struct kc_ctx *ctx)
 		if (!changed)
 			break;
 		if (++iter >= MAX_FIXPOINT_ITERS)
-			die("kc_eval: fixpoint did not converge after %d "
+			die("kc_resolve: fixpoint did not converge after %d "
 			    "iterations",
 			    MAX_FIXPOINT_ITERS);
 	}
 
 	pass_apply_sets(ctx);
+}
+
+void kc_eval(struct kc_ctx *ctx)
+{
+	pass_ctx_dep(ctx->root, NULL);
+	pass_sym_dep(ctx);
+	pass_rev_dep(ctx);
+	pass_link_choices(ctx);
+	kc_resolve(ctx);
 }
 
 /* ================================================================== */
@@ -914,8 +940,11 @@ void kc_sym_set_user(struct kc_ctx *ctx, const char *name, const char *val)
 	s->user_set = 1;
 	/* A direct user-set line (CONFIG_X=y without a `# default:` pragma)
 	 * clears any previously-seeded default state: the user has taken
-	 * over this symbol and the pragma no longer applies. */
+	 * over this symbol and the pragma no longer applies.  Clear the
+	 * input-side copy too so subsequent @c kc_resolve calls don't
+	 * re-seed the flag. */
 	s->default_seeded = 0;
+	s->user_default_seeded = 0;
 }
 
 /* ================================================================== */

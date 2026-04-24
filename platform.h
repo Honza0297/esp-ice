@@ -108,6 +108,16 @@ int symlink_w(const char *target, const char *linkpath);
 int link_w(const char *target, const char *linkpath);
 
 /*
+ * UTF-8-aware setenv() replacement.  The narrow _putenv_s interprets
+ * its arguments through the current ANSI code page, which mangles
+ * non-ASCII bytes in UTF-8 paths / values.  setenv_w converts to wide
+ * char first and calls _wputenv_s so the environment block (stored as
+ * UTF-16 by Windows) keeps the original content intact.  Copies both
+ * inputs -- caller is free to release source buffers.
+ */
+int setenv_w(const char *name, const char *value, int overwrite);
+
+/*
  * X_OK is not a meaningful mode for the Win32 _access() CRT call, but
  * it is the semantic POSIX callers want ("can I spawn this?").  We
  * define the POSIX bit here and let access_w() interpret it by trying
@@ -127,7 +137,7 @@ int link_w(const char *target, const char *linkpath);
 #define chdir chdir_w
 #define chmod chmod_w
 #define isatty _isatty
-#define putenv _putenv
+#define setenv setenv_w
 #define fileno _fileno
 #define dup _dup
 #define dup2 _dup2
@@ -183,8 +193,10 @@ int link_w(const char *target, const char *linkpath);
 
 #include <unistd.h>
 
-/* putenv exists in libc but is not declared in C99 <stdlib.h>. */
-int putenv(char *);
+/* setenv exists in libc but is hidden from C99 <stdlib.h> without
+ * _POSIX_C_SOURCE; the main build defines it but test drivers compile
+ * individual files with plain -std=c99, so the prototype lives here. */
+int setenv(const char *name, const char *value, int overwrite);
 
 /* fileno exists in libc but is hidden from C99 <stdio.h> without
  * _POSIX_C_SOURCE; platform.h maps it to _fileno on Windows. */
@@ -250,44 +262,6 @@ int dir_foreach(const char *path, int (*cb)(const char *name, void *ud),
  *   failure should fall back to "ice" and rely on PATH lookup.
  */
 const char *process_exe(void);
-
-/* ------------------------------------------------------------------ */
-/*  Raw console API                                                   */
-/* ------------------------------------------------------------------ */
-
-/**
- * @brief Enter raw console mode.
- *
- * Puts stdin into character-at-a-time, no-echo mode with signal
- * generation disabled.  Control characters (Ctrl-C, Ctrl-], ...)
- * arrive as regular bytes / key events.  Output processing is left
- * enabled so that '\n' still produces a carriage return.
- *
- * Registers an atexit handler on the first call to restore the
- * original mode when the process exits.
- *
- * @return 0 on success, -errno on failure (-ENOTTY when stdin is
- *         not a terminal).
- */
-int console_raw_enter(void);
-
-/**
- * @brief Leave raw console mode.
- *
- * Restores the terminal settings saved by console_raw_enter().
- * Safe to call when raw mode is not active (no-op).
- */
-void console_raw_leave(void);
-
-/**
- * @brief Read from the console (stdin) with a timeout.
- *
- * Returns immediately if @p timeout_ms is 0 and no input is
- * available.  Only meaningful after console_raw_enter().
- *
- * @return bytes read (> 0), 0 on timeout, -1 on error.
- */
-ssize_t console_read(void *buf, size_t n, unsigned timeout_ms);
 
 /* ------------------------------------------------------------------ */
 /*  Child process API                                                 */

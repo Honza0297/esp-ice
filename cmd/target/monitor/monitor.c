@@ -115,7 +115,7 @@ int cmd_target_monitor(int argc, const char **argv)
 		baud);
 	fprintf(stderr, "--- Quit: Ctrl-] ---" EOL);
 
-	rc = console_raw_enter();
+	rc = term_raw_enter();
 	if (rc) {
 		serial_close(s);
 		die("cannot set terminal to raw mode: %s", strerror(-rc));
@@ -134,7 +134,7 @@ int cmd_target_monitor(int argc, const char **argv)
 		if (n < 0)
 			break;
 
-		n = console_read(buf, sizeof(buf), 0);
+		n = term_read(buf, sizeof(buf), 0);
 		if (n < 0)
 			break;
 		for (i = 0; i < n; i++) {
@@ -149,7 +149,7 @@ int cmd_target_monitor(int argc, const char **argv)
 	}
 
 done:
-	console_raw_leave();
+	term_raw_leave();
 	serial_close(s);
 	fprintf(stderr, EOL "--- exit ---" EOL);
 	return 0;

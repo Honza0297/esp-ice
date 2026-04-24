@@ -324,3 +324,253 @@ void expand_colors(struct sbuf *out, const char *fmt, int colorize)
 		sbuf_addch(out, *fmt++);
 	}
 }
+
+/* ================================================================== */
+/*  Input event decoder                                               */
+/* ================================================================== */
+
+/*
+ * Timeout (ms) used to drain the tail of an escape sequence after the
+ * initial @c ESC byte has been observed.  Modern terminals flush the
+ * full CSI / SS3 sequence in well under a millisecond; 50 ms is the
+ * classical value used by termbox / ncurses to distinguish a bare ESC
+ * press from a prefix and leaves plenty of slack for laggy SSH links.
+ */
+#define TERM_ESC_TIMEOUT_MS 50
+
+static const struct {
+	const char *seq; /* bytes AFTER the initial ESC */
+	int key;
+} term_keyseq[] = {
+    /* CSI (ESC [ ...) sequences. */
+    {"[A", TK_UP},
+    {"[B", TK_DOWN},
+    {"[C", TK_RIGHT},
+    {"[D", TK_LEFT},
+    {"[H", TK_HOME},
+    {"[F", TK_END},
+    {"[1~", TK_HOME},
+    {"[4~", TK_END},
+    {"[5~", TK_PGUP},
+    {"[6~", TK_PGDN},
+    {"[2~", TK_INS},
+    {"[3~", TK_DEL},
+    {"[11~", TK_F1},
+    {"[12~", TK_F2},
+    {"[13~", TK_F3},
+    {"[14~", TK_F4},
+    {"[15~", TK_F5},
+    {"[17~", TK_F6},
+    {"[18~", TK_F7},
+    {"[19~", TK_F8},
+    {"[20~", TK_F9},
+    {"[21~", TK_F10},
+    {"[23~", TK_F11},
+    {"[24~", TK_F12},
+    /* SS3 (ESC O ...) sequences used by xterm application-keypad
+     * mode and by rxvt for the arrow keys. */
+    {"OA", TK_UP},
+    {"OB", TK_DOWN},
+    {"OC", TK_RIGHT},
+    {"OD", TK_LEFT},
+    {"OH", TK_HOME},
+    {"OF", TK_END},
+    {"OP", TK_F1},
+    {"OQ", TK_F2},
+    {"OR", TK_F3},
+    {"OS", TK_F4},
+};
+
+/*
+ * Pending-byte buffer for the event decoder.
+ *
+ * A single kernel read can return multiple escape sequences when the
+ * user holds an arrow key (terminal repeats `ESC[B ESC[B ESC[B ...`
+ * faster than we consume them).  The previous implementation fed the
+ * whole blob to one table lookup and fell through to a bare TK_ESC
+ * on no match -- which, at the root menu, quits the TUI.  Buffer the
+ * bytes here and parse exactly one sequence per call instead, so the
+ * event stream mirrors keystrokes 1:1 regardless of how the terminal
+ * chunked its output.
+ */
+#define TERM_PBUF_CAP 64
+static unsigned char term_pbuf[TERM_PBUF_CAP];
+static size_t term_phead;
+static size_t term_ptail;
+
+/*
+ * Ensure at least one byte is queued, reading from term_read if the
+ * current buffer is empty.  @p timeout_ms applies only on the read --
+ * draining already-buffered bytes is instant.
+ */
+static ssize_t term_fill(unsigned timeout_ms)
+{
+	if (term_phead < term_ptail)
+		return (ssize_t)(term_ptail - term_phead);
+	term_phead = term_ptail = 0;
+	ssize_t n = term_read(term_pbuf, sizeof(term_pbuf), timeout_ms);
+	if (n < 0)
+		return -1;
+	term_ptail = (size_t)n;
+	return n;
+}
+
+/*
+ * Match the bytes @p buf[0..len) (the payload after ESC) against the
+ * keyseq table.  Returns the mapped @ref term_key value or 0 when
+ * nothing matches.
+ */
+static int match_keyseq(const unsigned char *buf, size_t len)
+{
+	for (size_t i = 0; i < sizeof(term_keyseq) / sizeof(term_keyseq[0]);
+	     i++) {
+		size_t tlen = strlen(term_keyseq[i].seq);
+		if (tlen == len && memcmp(buf, term_keyseq[i].seq, tlen) == 0)
+			return term_keyseq[i].key;
+	}
+	return 0;
+}
+
+int term_read_event(struct term_event *ev, unsigned timeout_ms)
+{
+	ev->key = TK_NONE;
+	ev->cols = 0;
+	ev->rows = 0;
+
+	if (term_resize_pending()) {
+		ev->key = TK_RESIZE;
+		term_size(&ev->cols, &ev->rows);
+		return 1;
+	}
+
+	ssize_t n = term_fill(timeout_ms);
+	if (n < 0)
+		return -1;
+	if (n == 0)
+		return 0;
+
+	unsigned char first = term_pbuf[term_phead++];
+	if (first != 0x1b) {
+		ev->key = first;
+		return 1;
+	}
+
+	/*
+	 * ESC seen.  Peek at the next byte to classify the sequence; if
+	 * the buffer is empty, wait a short window for the terminal to
+	 * deliver the tail.  No tail -> bare ESC (e.g. user closed a
+	 * modal).
+	 */
+	if (term_phead >= term_ptail) {
+		ssize_t m = term_fill(TERM_ESC_TIMEOUT_MS);
+		if (m <= 0) {
+			ev->key = TK_ESC;
+			return m < 0 ? -1 : 1;
+		}
+	}
+
+	unsigned char second = term_pbuf[term_phead];
+
+	/*
+	 * CSI: ESC [ [params] final-byte.  Final is any byte in
+	 * 0x40..0x7E.  Scan one byte at a time so a partial sequence
+	 * that straddles a read boundary resumes cleanly via term_fill.
+	 *
+	 * SS3: ESC O final-byte -- exactly three bytes total.
+	 */
+	if (second == '[' || second == 'O') {
+		size_t seq_start = term_phead;
+		term_phead++; /* consume '[' / 'O' */
+		int got_final = 0;
+		if (second == 'O') {
+			if (term_phead >= term_ptail)
+				term_fill(TERM_ESC_TIMEOUT_MS);
+			if (term_phead < term_ptail) {
+				term_phead++; /* final byte */
+				got_final = 1;
+			}
+		} else {
+			for (;;) {
+				if (term_phead >= term_ptail) {
+					ssize_t m =
+					    term_fill(TERM_ESC_TIMEOUT_MS);
+					if (m <= 0)
+						break;
+				}
+				unsigned char c = term_pbuf[term_phead++];
+				if (c >= 0x40 && c <= 0x7E) {
+					got_final = 1;
+					break;
+				}
+			}
+		}
+
+		if (got_final) {
+			size_t seq_len = term_phead - seq_start;
+			int key = match_keyseq(&term_pbuf[seq_start], seq_len);
+			if (key) {
+				ev->key = key;
+				return 1;
+			}
+		}
+		/* Unrecognised or truncated -- deliver bare ESC so callers
+		 * can at least close a modal.  Bytes already consumed stay
+		 * consumed; the next event starts after them. */
+		ev->key = TK_ESC;
+		return 1;
+	}
+
+	/*
+	 * Alt-key (ESC + char) or unknown prefix.  Menuconfig doesn't
+	 * use Alt combos; drop the follow-up and deliver bare ESC.
+	 */
+	term_phead++;
+	ev->key = TK_ESC;
+	return 1;
+}
+
+/* ================================================================== */
+/*  Raw-mode output helpers                                           */
+/* ================================================================== */
+
+/*
+ * Every helper writes via stdio so the Windows output shim in
+ * platform/win/io.c can intercept the byte stream when VT processing
+ * is unavailable and dispatch to Console API calls.  fflush keeps the
+ * TUI redraw order tight against stdin -- without it a buffered
+ * escape could leave the cursor in the wrong place between keystrokes.
+ */
+
+void term_move(int row, int col)
+{
+	printf("\x1b[%d;%dH", row, col);
+	fflush(stdout);
+}
+
+void term_clear_to_eol(void)
+{
+	fputs("\x1b[K", stdout);
+	fflush(stdout);
+}
+
+void term_clear_line(void)
+{
+	fputs("\x1b[2K", stdout);
+	fflush(stdout);
+}
+
+void term_clear_screen(void)
+{
+	/* Clear the screen and home the cursor in one fflush -- the two
+	 * together are the canonical "fresh frame" prologue. */
+	fputs("\x1b[2J\x1b[H", stdout);
+	fflush(stdout);
+}
+
+void term_sgr(const char *codes)
+{
+	printf("\x1b[%sm", codes && *codes ? codes : "0");
+	fflush(stdout);
+}
+
+void term_sgr_reset(void) { term_sgr(NULL); }

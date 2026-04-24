@@ -169,18 +169,32 @@ struct ksym {
 	int user_set;		     /**< Value came from --config or
 				      *   --defaults (not a built-in
 				      *   default). */
-	int default_seeded;	     /**< Value came from an sdkconfig line
-				      *   preceded by `# default:` pragma --
-				      *   i.e. a previously-computed Kconfig
-				      *   default round-tripped through the
-				      *   sdkconfig.  Under
-				      *   @c KCONFIG_DEFAULTS_POLICY=sdkconfig
+	int default_seeded;	     /**< Effective "this value came from a
+				      *   previous default" flag.  Set from
+				      *   @c user_default_seeded at the start of
+				      *   every @ref kc_resolve, then possibly
+				      *   updated by setter-propagation
+				      *   (@ref pass_apply_sets) during resolve.
+				      *   Consulted by the emit stage and by the
+				      *   fixpoint's stick-on-default rule.
+				      *
+				      *   Under @c KCONFIG_DEFAULTS_POLICY=sdkconfig
 				      *   (the python default) these values
 				      *   "stick" like user_set ones so the
 				      *   next generation doesn't drift; under
 				      *   @c KCONFIG_DEFAULTS_POLICY=kconfig
 				      *   they are re-evaluated from the
 				      *   Kconfig default properties. */
+	int user_default_seeded;     /**< Input-only counterpart of
+				      *   @c default_seeded: set by the kc_io
+				      *   sdkconfig loader when a CONFIG_* line
+				      *   is preceded by the @c `# default:`
+				      *   pragma, cleared by @c kc_sym_set_user.
+				      *   Never touched by the evaluator.  Lets
+				      *   @ref kc_resolve restore the loader's
+				      *   seeding across successive resolves
+				      *   without losing it to setter-propagated
+				      *   writes on @c default_seeded. */
 	int default_applied;	     /**< Current cur_val came from a
 				      *   matched @c default property (used
 				      *   by emit filters to distinguish an

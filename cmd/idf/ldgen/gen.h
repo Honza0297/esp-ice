@@ -28,7 +28,7 @@
 #include <stdio.h>
 
 #include "lf.h"
-#include "sdkconfig.h"
+struct kc_ctx;
 #include "sinfo.h"
 
 /* ---- Rules ------------------------------------------------------- */
@@ -110,12 +110,13 @@ struct gen_ctx {
 /**
  * @brief Compile rules from a set of parsed fragment files.
  *
- * Conditional arms (`if`/`elif`/`else`) are evaluated against @p cfg;
- * pass NULL to skip all conditionals (useful only for self-contained
- * test fragments).
+ * Conditional arms (`if`/`elif`/`else`) are evaluated against @p cfg
+ * (a @ref kc_ctx already taken through @ref kc_parse_file and
+ * @ref kc_eval).  Pass NULL to skip all conditionals (useful only for
+ * self-contained test fragments).
  */
 void gen_compile(struct gen_ctx *ctx, struct lf_file **files, int n_files,
-		 const struct sdkconfig *cfg);
+		 const struct kc_ctx *cfg);
 
 /**
  * @brief Walk the entity DB, resolving every (archive, object, section)

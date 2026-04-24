@@ -17,6 +17,68 @@
 #define CONFIG_PREFIX_LEN (sizeof(CONFIG_PREFIX) - 1)
 
 /* ================================================================== */
+/*  Env file loader                                                   */
+/* ================================================================== */
+
+void kc_load_env_file(struct svec *env, const char *path)
+{
+	struct sbuf sb = SBUF_INIT;
+	if (sbuf_read_file(&sb, path) < 0)
+		die_errno("cannot read env-file '%s'", path);
+
+	const char *p = sb.buf;
+	while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+		p++;
+
+	if (*p == '{') {
+		struct json_value *root = json_parse(sb.buf, sb.len);
+		if (!root || json_type(root) != JSON_OBJECT)
+			die("env-file '%s' is not a JSON object", path);
+		for (int i = 0; i < root->u.object.nr; i++) {
+			const struct json_member *m =
+			    &root->u.object.members[i];
+			const char *val;
+			struct sbuf tmp = SBUF_INIT;
+			switch (json_type(m->value)) {
+			case JSON_STRING:
+				val = json_as_string(m->value);
+				sbuf_addf(&tmp, "%s=%s", m->key,
+					  val ? val : "");
+				break;
+			case JSON_BOOL:
+				sbuf_addf(&tmp, "%s=%s", m->key,
+					  json_as_bool(m->value) ? "y" : "n");
+				break;
+			case JSON_NUMBER:
+				sbuf_addf(&tmp, "%s=%lld", m->key,
+					  (long long)json_as_number(m->value));
+				break;
+			case JSON_NULL:
+				sbuf_addf(&tmp, "%s=", m->key);
+				break;
+			default:
+				sbuf_release(&tmp);
+				continue; /* arrays / objects -- skip */
+			}
+			svec_push(env, tmp.buf);
+			sbuf_release(&tmp);
+		}
+		json_free(root);
+	} else {
+		size_t pos = 0;
+		char *line;
+		while ((line = sbuf_getline(sb.buf, sb.len, &pos)) != NULL) {
+			while (*line == ' ' || *line == '\t')
+				line++;
+			if (!*line || *line == '#')
+				continue;
+			svec_push(env, line);
+		}
+	}
+	sbuf_release(&sb);
+}
+
+/* ================================================================== */
 /*  Rename table                                                      */
 /* ================================================================== */
 
@@ -210,8 +272,14 @@ static void set_default_seeded(struct kc_ctx *ctx, const char *name,
 	s->cur_val = sbuf_strdup(val);
 	/* s->user_set stays 0; mark default_seeded so the evaluator can
 	 * honour KCONFIG_DEFAULTS_POLICY=sdkconfig and emit can still
-	 * write the `# default:` pragma regardless of policy. */
+	 * write the `# default:` pragma regardless of policy.
+	 * user_default_seeded preserves the loader's intent across
+	 * successive kc_resolve invocations (menuconfig use case) --
+	 * pass_apply_sets may overwrite default_seeded during a resolve,
+	 * so the effective flag needs a stable input source to restore
+	 * from at the start of each run. */
 	s->default_seeded = 1;
+	s->user_default_seeded = 1;
 }
 
 static void process_config_line(struct kc_ctx *ctx, char *line,

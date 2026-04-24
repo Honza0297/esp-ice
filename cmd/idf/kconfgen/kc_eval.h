@@ -42,21 +42,62 @@ struct kexpr;
 int kc_expr_bool(const struct kexpr *e);
 
 /**
+ * @brief Parse a boolean expression from a NUL-terminated string.
+ *
+ * Returns a heap-owned @ref kexpr tree equivalent to the expression
+ * python kconfiglib's @c eval_string would produce.  Caller frees
+ * with @ref kc_expr_free.
+ *
+ * @p ctx must already be through @ref kc_eval so identifier references
+ * resolve against populated symbol values.  @p src_name appears in
+ * diagnostic output; pass the source path or @c "<expr>".
+ */
+struct kexpr *kc_expr_parse_string(struct kc_ctx *ctx, const char *src,
+				   const char *src_name);
+
+/**
+ * @brief Free a @ref kexpr tree returned from @ref kc_expr_parse_string.
+ *
+ * No-op on NULL.
+ */
+void kc_expr_free(struct kexpr *e);
+
+/**
  * @brief Run the full evaluation pipeline on @p ctx.
  *
- * Safe to call at most once per context (currently).  Dies on
- * oscillating fixpoints (cap: 50 iterations).
+ * Builds the structural dep / rev-dep / choice-link state (one-shot)
+ * and performs a first @ref kc_resolve.  Call once per context after
+ * parsing and seeding user input.  Subsequent interactive re-resolves
+ * (menuconfig) should go through @ref kc_resolve, which skips the
+ * structural passes.  Dies on oscillating fixpoints (cap: 50 iterations).
  */
 void kc_eval(struct kc_ctx *ctx);
 
 /**
+ * @brief Re-run the resolve passes (fixpoint + setter propagation).
+ *
+ * Must be preceded by exactly one @ref kc_eval so the structural
+ * state (effective_dep / rev_dep / choice links) is populated.  Safe
+ * to call repeatedly -- the per-resolve scratch state (set_rank,
+ * default_applied, default_seeded) is reset from
+ * @c user_default_seeded at the start of each invocation.  Dies on
+ * oscillating fixpoints.
+ */
+void kc_resolve(struct kc_ctx *ctx);
+
+/**
  * @brief Set a user-provided value on a named symbol.
  *
- * Call between kc_parse_file() and kc_eval().  Marks the symbol as
- * @c user_set so kc_eval preserves @p val instead of applying
- * defaults, provided the symbol remains visible.  Silently no-ops if
- * @p name doesn't match a known symbol -- matches python kconfgen's
- * tolerant merge behaviour.
+ * Seeds @c cur_val and sets @c user_set so the next @ref kc_eval /
+ * @ref kc_resolve preserves @p val instead of applying defaults,
+ * provided the symbol remains visible.  Clears any prior default-
+ * seeded state (the user has taken over the symbol).  Silently
+ * no-ops if @p name doesn't match a known symbol -- matches python
+ * kconfgen's tolerant merge behaviour.
+ *
+ * Usable both before the initial @ref kc_eval (batch seeding from
+ * --config / --defaults) and between successive @ref kc_resolve
+ * calls (interactive menuconfig mutation).
  */
 void kc_sym_set_user(struct kc_ctx *ctx, const char *name, const char *val);
 

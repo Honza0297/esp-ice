@@ -28,6 +28,9 @@
 #include "lf.h"
 #include "sinfo.h"
 
+#include "cmd/idf/kconfgen/kc_ast.h"
+#include "cmd/idf/kconfgen/kc_eval.h"
+
 /* ---- Internal: parsed sections/scheme tables --------------------- */
 
 struct gen_sections {
@@ -130,12 +133,29 @@ static void expand_section_entry(const char *entry, char ***v, int *n,
 
 /* ---- Fragment -> tables ----------------------------------------- */
 
+/*
+ * Evaluate a @c .lf conditional expression using the kconfgen engine.
+ *
+ * Parses @p expr into a @ref kexpr tree against @p cfg's symbol table
+ * and evaluates it to a boolean.  @p cfg is declared const to match the
+ * rest of gen.c's signatures, but kc_expr_parse_string may intern new
+ * unknown identifiers into the symtab -- harmless here since ldgen
+ * does not write sdkconfig back.
+ */
+static int eval_lf_cond(const struct kc_ctx *cfg, const char *expr)
+{
+	struct kexpr *e =
+	    kc_expr_parse_string((struct kc_ctx *)cfg, expr, "<lf>");
+	int result = kc_expr_bool(e);
+	kc_expr_free(e);
+	return result;
+}
+
 /* Evaluate a conditional's branch list against @p cfg and return the
  * active arm's statement list (or NULL if none).  @p cfg may be NULL,
  * in which case no branch is chosen. */
 static const struct lf_stmt *pick_cond_branch(const struct lf_branch *branches,
-					      int nb,
-					      const struct sdkconfig *cfg,
+					      int nb, const struct kc_ctx *cfg,
 					      int *out_n)
 {
 	if (!cfg) {
@@ -144,7 +164,7 @@ static const struct lf_stmt *pick_cond_branch(const struct lf_branch *branches,
 	}
 	for (int i = 0; i < nb; i++) {
 		const struct lf_branch *b = &branches[i];
-		if (!b->expr || sdkconfig_eval(cfg, b->expr)) {
+		if (!b->expr || eval_lf_cond(cfg, b->expr)) {
 			*out_n = b->n_stmts;
 			return b->stmts;
 		}
@@ -155,7 +175,7 @@ static const struct lf_stmt *pick_cond_branch(const struct lf_branch *branches,
 
 static void collect_stmts(const struct lf_stmt *stmts, int n,
 			  void (*visit)(const struct lf_entry *, void *),
-			  void *ud, const struct sdkconfig *cfg)
+			  void *ud, const struct kc_ctx *cfg)
 {
 	for (int i = 0; i < n; i++) {
 		if (!stmts[i].is_cond) {
@@ -287,7 +307,7 @@ static void emit_rule(struct gen_ctx *ctx, const char *archive, const char *obj,
 /* Resolve the archive statement (which may be a conditional) to a
  * single archive name. */
 static const char *resolve_archive(const struct lf_stmt *stmts, int n,
-				   const struct sdkconfig *cfg,
+				   const struct kc_ctx *cfg,
 				   const char *mapname)
 {
 	for (int i = 0; i < n; i++) {
@@ -336,7 +356,7 @@ static void compile_entry(struct gen_ctx *ctx, const char *archive,
 
 static void compile_entries(struct gen_ctx *ctx, const char *archive,
 			    const struct lf_stmt *stmts, int n,
-			    const struct sdkconfig *cfg, const char *mapname)
+			    const struct kc_ctx *cfg, const char *mapname)
 {
 	for (int i = 0; i < n; i++) {
 		if (!stmts[i].is_cond) {
@@ -353,7 +373,7 @@ static void compile_entries(struct gen_ctx *ctx, const char *archive,
 }
 
 static void compile_mapping(struct gen_ctx *ctx, const struct lf_frag *f,
-			    const struct sdkconfig *cfg)
+			    const struct kc_ctx *cfg)
 {
 	const char *archive = resolve_archive(
 	    f->u.map.archive, f->u.map.n_archive, cfg, f->u.map.name);
@@ -382,17 +402,17 @@ static int rule_cmp(const void *a, const void *b)
 }
 
 static void walk_frag(struct gen_ctx *ctx, const struct lf_frag *fr,
-		      const struct sdkconfig *cfg, int pass);
+		      const struct kc_ctx *cfg, int pass);
 
 static void walk_frags(struct gen_ctx *ctx, const struct lf_frag *frags, int n,
-		       const struct sdkconfig *cfg, int pass)
+		       const struct kc_ctx *cfg, int pass)
 {
 	for (int i = 0; i < n; i++)
 		walk_frag(ctx, &frags[i], cfg, pass);
 }
 
 static void walk_frag(struct gen_ctx *ctx, const struct lf_frag *fr,
-		      const struct sdkconfig *cfg, int pass)
+		      const struct kc_ctx *cfg, int pass)
 {
 	if (fr->kind == LF_FRAG_COND) {
 		if (!cfg)
@@ -400,7 +420,7 @@ static void walk_frag(struct gen_ctx *ctx, const struct lf_frag *fr,
 		for (int i = 0; i < fr->u.cond.n; i++) {
 			const struct lf_frag_branch *b =
 			    &fr->u.cond.branches[i];
-			if (!b->expr || sdkconfig_eval(cfg, b->expr)) {
+			if (!b->expr || eval_lf_cond(cfg, b->expr)) {
 				walk_frags(ctx, b->frags, b->n_frags, cfg,
 					   pass);
 				return;
@@ -433,7 +453,7 @@ static void walk_frag(struct gen_ctx *ctx, const struct lf_frag *fr,
 }
 
 void gen_compile(struct gen_ctx *ctx, struct lf_file **files, int n_files,
-		 const struct sdkconfig *cfg)
+		 const struct kc_ctx *cfg)
 {
 	/* Pass 0: collect sections and scheme fragments.
 	 * Pass 1: walk mappings, emit rules. */
