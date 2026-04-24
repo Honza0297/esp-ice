@@ -216,9 +216,8 @@ static const struct cmd_manual getting_started_manual = {
 	H_RAW("")
 	H_PARA("See @b{ice help init} for the full list of per-profile "
 	       "knobs.")
-	H_PARA("@b{Inspect or change configuration.}  @b{ice menuconfig} "
-	       "opens the sdkconfig UI; @b{ice config --list} dumps "
-	       "every effective setting with its source scope; "
+	H_PARA("@b{Inspect or change configuration.}  @b{ice config --list} "
+	       "dumps every effective setting with its source scope; "
 	       "@b{ice status} shows the effective state for the active "
 	       "profile.")
 	H_PARA("@b{See firmware size.}  @b{ice size} summarises memory "

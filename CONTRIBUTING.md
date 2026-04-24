@@ -168,7 +168,7 @@ matching `argv[0]` at each level, similar to how git dispatches
 ```
 cmd/
 ├── build/  clean/  flash/  init/          ← porcelain:  project-aware wrappers
-├── menuconfig/  status/                       (read .ice/, derive args)
+├── status/                                    (read .ice/, derive args)
 ├── completion/  config/  help/             ← framework:  ice itself
 ├── idf/                                    ← namespace:  bundled ESP-IDF host tools
 │   ├── idf.c                                   (dispatcher + manual)
