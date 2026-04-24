@@ -31,6 +31,22 @@ make STATIC=1           # release-style self-contained binary
 See [README.md](README.md) for cross-compilation, build variables,
 and other targets.
 
+## Release checklist
+
+Before cutting a release, refresh the bundled Mozilla CA store so
+HTTPS verification keeps working on hosts with stale system trust
+stores:
+
+```bash
+make update-ca
+```
+
+This re-fetches `vendor/cacert/cacert.pem` from
+`https://curl.se/ca/cacert.pem` and regenerates
+`vendor/cacert/ca_bundle.c` (the byte array compiled into the
+binary).  Commit both files together.  Cadence and rationale live in
+[`vendor/cacert/README.md`](vendor/cacert/README.md).
+
 ## Code standards
 
 - Follow the existing C style (enforced by `clang-format`).

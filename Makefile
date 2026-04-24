@@ -119,6 +119,7 @@ PKG_NAME := $(NAME)-$(VERSION)-$(S)-$(ARCH)$(PKG_SUFFIX)
 # (today: ar.c, elf.c, http.c have no live callers from main()).
 LIB_SRCS := \
 	ar.c \
+	ca_certs.c \
 	cmake.c \
 	cmakecache.c \
 	cmd/__complete/__complete.c \
@@ -197,6 +198,7 @@ LIB_SRCS := \
 	reader.c \
 	tar.c \
 	toolenv.c \
+	vendor/cacert/ca_bundle.c \
 	vendor/sha256/sha256.c \
 	chip.c \
 	color_rules.c \
@@ -359,7 +361,7 @@ $(LIBICE): $(LIB_OBJS)
 $(BINARY): $(MAIN_OBJS) $(LIBICE) | $(O)
 	$(CC) -o $@ $(MAIN_OBJS) $(LIBICE) $(BUILD_LDFLAGS) $(LIBS)
 
-.PHONY: clean mrproper deps vendor \
+.PHONY: clean mrproper deps vendor update-ca \
 	libice \
 	targz-pkg \
 	tarxz-pkg \
@@ -402,6 +404,13 @@ deps:
 
 vendor:
 	$(MAKE) -C vendor PREFIX=$(CURDIR)/vendor/install/$(TRIPLE) S=$(S) TRIPLE=$(TRIPLE) $(if $(CROSS),CROSS=1)
+
+# Refresh the bundled Mozilla CA store from upstream (curl.se) and
+# regenerate vendor/cacert/ca_bundle.c.  Run this before cutting a
+# release; commit both vendor/cacert/cacert.pem and the regenerated
+# ca_bundle.c together.  See vendor/cacert/README.md for cadence.
+update-ca:
+	$(MAKE) -C vendor/cacert refresh
 
 clean:
 	rm -rf $(O) $(DIST) $(STAGE) $(T_OUT)
@@ -535,6 +544,7 @@ help:
 	@echo 'dependency targets:'
 	@echo ' deps             - build external deps (zlib, mbedTLS, curl, xz)'
 	@echo ' vendor           - build vendor libs (esp-serial-flasher, pcre2)'
+	@echo ' update-ca        - refresh bundled Mozilla CA store (vendor/cacert/)'
 	@echo ''
 	@echo 'misc targets:'
 	@echo ' clean            - remove: $(O) $(DIST) $(STAGE) $(T_OUT)'
