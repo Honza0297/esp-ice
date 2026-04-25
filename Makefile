@@ -190,6 +190,7 @@ LIB_SRCS := \
 	binary.c \
 	elf2image.c \
 	progress.c \
+	pubgrub.c \
 	sbuf.c \
 	semver.c \
 	slip.c \
