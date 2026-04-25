@@ -132,6 +132,16 @@ LIB_SRCS := \
 	cmd/flash/flash.c \
 	cmd/help/help.c \
 	cmd/idf/idf.c \
+	cmd/idf/component/component.c \
+	cmd/idf/component/cmake_out.c \
+	cmd/idf/component/fetch.c \
+	cmd/idf/component/manifest.c \
+	cmd/idf/component/lockfile.c \
+	cmd/idf/component/registry.c \
+	cmd/idf/component/rules.c \
+	cmd/idf/component/solve.c \
+	cmd/idf/component/prepare/prepare.c \
+	cmd/idf/component/inject/inject.c \
 	cmd/idf/configdep/configdep.c \
 	cmd/idf/crt-bundle/crt-bundle.c \
 	cmd/idf/hints/hints.c \
@@ -190,11 +200,14 @@ LIB_SRCS := \
 	binary.c \
 	elf2image.c \
 	progress.c \
+	pubgrub.c \
 	sbuf.c \
+	semver.c \
 	slip.c \
 	smap.c \
 	svec.c \
 	http.c \
+	git.c \
 	gzip.c \
 	xz.c \
 	reader.c \
@@ -207,7 +220,8 @@ LIB_SRCS := \
 	color_rules.c \
 	esf_port.c \
 	hints.c \
-	yaml.c
+	yaml.c \
+	zip.c
 
 # MAIN_SRCS provide the program entry point.  Excluded from libice.a
 # so that unit tests (and any future external libice consumer) can

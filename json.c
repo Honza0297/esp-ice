@@ -182,6 +182,47 @@ static void skip_ws(struct parser *ps)
 		ps->cur++;
 }
 
+/* Decode 4 hex digits at @p p into @p out.  Returns 0 on success. */
+static int parse_u4(const char *p, unsigned *out)
+{
+	unsigned cp = 0;
+	for (int i = 0; i < 4; i++) {
+		char c = p[i];
+		unsigned d;
+		if (c >= '0' && c <= '9')
+			d = (unsigned)(c - '0');
+		else if (c >= 'a' && c <= 'f')
+			d = (unsigned)(c - 'a' + 10);
+		else if (c >= 'A' && c <= 'F')
+			d = (unsigned)(c - 'A' + 10);
+		else
+			return -1;
+		cp = (cp << 4) | d;
+	}
+	*out = cp;
+	return 0;
+}
+
+/* Append @p cp's UTF-8 encoding to @p sb. */
+static void utf8_emit(struct sbuf *sb, unsigned cp)
+{
+	if (cp < 0x80) {
+		sbuf_addch(sb, (char)cp);
+	} else if (cp < 0x800) {
+		sbuf_addch(sb, (char)(0xC0 | (cp >> 6)));
+		sbuf_addch(sb, (char)(0x80 | (cp & 0x3F)));
+	} else if (cp < 0x10000) {
+		sbuf_addch(sb, (char)(0xE0 | (cp >> 12)));
+		sbuf_addch(sb, (char)(0x80 | ((cp >> 6) & 0x3F)));
+		sbuf_addch(sb, (char)(0x80 | (cp & 0x3F)));
+	} else {
+		sbuf_addch(sb, (char)(0xF0 | (cp >> 18)));
+		sbuf_addch(sb, (char)(0x80 | ((cp >> 12) & 0x3F)));
+		sbuf_addch(sb, (char)(0x80 | ((cp >> 6) & 0x3F)));
+		sbuf_addch(sb, (char)(0x80 | (cp & 0x3F)));
+	}
+}
+
 static struct json_value *parse_string(struct parser *ps)
 {
 	struct sbuf sb = SBUF_INIT;
@@ -222,8 +263,34 @@ static struct json_value *parse_string(struct parser *ps)
 			case 't':
 				sbuf_addch(&sb, '\t');
 				break;
+			case 'u': {
+				/* \uXXXX -> UTF-8.  Surrogate pairs (high
+				 * + low) are recombined to a single code
+				 * point before encoding; isolated surrogates
+				 * fail.  See ECMA-404. */
+				unsigned cp;
+				if (ps->cur + 4 > ps->end ||
+				    parse_u4(ps->cur, &cp) < 0)
+					goto fail;
+				ps->cur += 4;
+				if (cp >= 0xD800 && cp <= 0xDBFF) {
+					unsigned low;
+					if (ps->cur + 6 > ps->end ||
+					    ps->cur[0] != '\\' ||
+					    ps->cur[1] != 'u' ||
+					    parse_u4(ps->cur + 2, &low) < 0 ||
+					    low < 0xDC00 || low > 0xDFFF)
+						goto fail;
+					cp = 0x10000 + ((cp - 0xD800) << 10) +
+					     (low - 0xDC00);
+					ps->cur += 6;
+				} else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+					goto fail;
+				}
+				utf8_emit(&sb, cp);
+				break;
+			}
 			default:
-				/* \uXXXX and unknown escapes not supported. */
 				goto fail;
 			}
 		} else if ((unsigned char)*ps->cur < 0x20) {

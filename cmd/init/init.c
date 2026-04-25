@@ -587,6 +587,28 @@ static void write_sitecustomize(const char *site_packages, const char *ice_path)
 	    "        # python module, so it is a safe disambiguator.\n"
 	    "        os.execv(_ICE,\n"
 	    "                 [_ICE, \"idf\", \"kconfgen\", *sys.argv[1:]])\n"
+	    "    elif sys.argv[0] == \"-m\" and \"prepare_dependencies\" "
+	    "in sys.argv[1:]:\n"
+	    "        # `python -m idf_component_manager.prepare_components\n"
+	    "        # ... prepare_dependencies ...`: the subcommand\n"
+	    "        # positional is the disambiguator.  Strip it from\n"
+	    "        # the forwarded argv so ice's parser doesn't see an\n"
+	    "        # unknown positional.\n"
+	    "        args = [a for a in sys.argv[1:] "
+	    "if a != \"prepare_dependencies\"]\n"
+	    "        os.execv(_ICE,\n"
+	    "                 [_ICE, \"idf\", \"component\", \"prepare\",\n"
+	    "                  *args])\n"
+	    "    elif sys.argv[0] == \"-m\" and \"inject_requirements\" "
+	    "in sys.argv[1:]:\n"
+	    "        # `python -m idf_component_manager.prepare_components\n"
+	    "        # ... inject_requirements ...`: mirrored dispatch to\n"
+	    "        # the sibling subcommand.\n"
+	    "        args = [a for a in sys.argv[1:] "
+	    "if a != \"inject_requirements\"]\n"
+	    "        os.execv(_ICE,\n"
+	    "                 [_ICE, \"idf\", \"component\", \"inject\",\n"
+	    "                  *args])\n"
 	    "\n"
 	    "\n"
 	    "try:\n"
@@ -753,7 +775,6 @@ static void activate_staged_profile(const char *chip, const char *idf_path,
 
 	setup_tool_env(idf_path);
 	setenv("IDF_PATH", idf_path, 1);
-	setenv("IDF_COMPONENT_MANAGER", "0", 1);
 }
 
 /* ------------------------------------------------------------------ */
