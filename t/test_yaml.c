@@ -201,5 +201,58 @@ int main(void)
 		tap_done("quoted value containing colon parses correctly");
 	}
 
+	/*
+	 * Zero-indent block sequence: the sequence value may start at the
+	 * same column as its parent key.  Common in ruamel.yaml output,
+	 * used by IDF's dependencies.lock top-level @c direct_dependencies
+	 * list.
+	 */
+	{
+		const char *src = "direct_dependencies:\n"
+				  "- foo\n"
+				  "- bar\n"
+				  "target: esp32\n";
+		struct yaml_value *root = yaml_parse(src, strlen(src));
+		struct yaml_value *seq;
+
+		tap_check(root != NULL);
+		seq = yaml_get(root, "direct_dependencies");
+		tap_check(yaml_type(seq) == YAML_SEQ);
+		tap_check(yaml_seq_size(seq) == 2);
+		tap_check(strcmp(yaml_as_string(yaml_seq_at(seq, 0)), "foo") ==
+			  0);
+		tap_check(strcmp(yaml_as_string(yaml_seq_at(seq, 1)), "bar") ==
+			  0);
+		tap_check(strcmp(yaml_as_string(yaml_get(root, "target")),
+				 "esp32") == 0);
+		yaml_free(root);
+		tap_done("zero-indent block sequence as map value");
+	}
+
+	/*
+	 * Map continues after a nested zero-indent sequence value.  This
+	 * used to mis-attribute the trailing key (the sequence left the
+	 * cursor mid-line after consuming the indent).
+	 */
+	{
+		const char *src = "outer:\n"
+				  "  key1:\n"
+				  "    nested:\n"
+				  "    - a\n"
+				  "    - b\n"
+				  "    key2: tail\n";
+		struct yaml_value *root = yaml_parse(src, strlen(src));
+		struct yaml_value *inner;
+
+		tap_check(root != NULL);
+		inner = yaml_get(yaml_get(root, "outer"), "key1");
+		tap_check(yaml_type(inner) == YAML_MAP);
+		tap_check(yaml_seq_size(yaml_get(inner, "nested")) == 2);
+		tap_check(strcmp(yaml_as_string(yaml_get(inner, "key2")),
+				 "tail") == 0);
+		yaml_free(root);
+		tap_done("map continuation after zero-indent sequence value");
+	}
+
 	return tap_result();
 }

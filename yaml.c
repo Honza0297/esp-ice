@@ -626,6 +626,85 @@ static char *parse_map_key_token(struct parser *ps)
 
 /* Parse a block mapping rooted at indent `indent`.  Caller guarantees
  * the first key is at column `indent`. */
+/* Column (bytes from start of current line) at ps->pos. */
+static int current_col(const struct parser *ps)
+{
+	size_t p = ps->pos;
+	while (p > 0 && ps->buf[p - 1] != '\n')
+		p--;
+	return (int)(ps->pos - p);
+}
+
+/*
+ * Parse a single `key: value` entry at the current position (already
+ * past the line's indent).  Appends to @p map.  Returns 0 on success,
+ * -1 on error; @p map is untouched on error so the caller can free it.
+ *
+ * @p indent is the column at which the map's keys live; used when the
+ * value is on following lines (must indent deeper than that).
+ */
+static int parse_map_entry(struct parser *ps, struct yaml_value *map,
+			   int indent)
+{
+	char *key = parse_map_key_token(ps);
+	if (!key)
+		return -1;
+
+	if (peek(ps) != ':') {
+		free(key);
+		return -1;
+	}
+	advance(ps); /* consume ':' */
+	skip_inline_ws(ps);
+
+	struct yaml_value *val;
+	if (at_newline(ps) || peek(ps) == '#' || at_eof(ps)) {
+		if (peek(ps) == '#')
+			skip_to_eol(ps);
+		skip_newline(ps);
+		skip_blank_lines(ps);
+		if (at_eof(ps)) {
+			val = new_null();
+		} else {
+			int nxt = line_indent(ps);
+			int zero_indent_seq = 0;
+			/*
+			 * Standard rule: a following-line value must indent
+			 * deeper than the key.  Exception (YAML 1.2, used
+			 * heavily by ruamel): a block sequence can start at
+			 * the SAME column as the parent key ("zero-indent
+			 * sequence").  Probe for a leading '-' followed by
+			 * whitespace/EOL to detect that form without
+			 * disturbing cursor state.
+			 */
+			if (nxt == indent) {
+				size_t save = ps->pos;
+				ps->pos += (size_t)nxt;
+				if (peek(ps) == '-') {
+					int a = peek_at(ps, 1);
+					if (a == ' ' || a == '\t' ||
+					    a == '\n' || a == '\r' || a == -1)
+						zero_indent_seq = 1;
+				}
+				ps->pos = save;
+			}
+			if (nxt < indent || (nxt == indent && !zero_indent_seq))
+				val = new_null();
+			else
+				val = parse_node(ps, nxt);
+		}
+	} else {
+		val = parse_inline(ps);
+	}
+
+	if (!val) {
+		free(key);
+		return -1;
+	}
+	map_set(map, key, val);
+	return 0;
+}
+
 static struct yaml_value *parse_block_map(struct parser *ps, int indent)
 {
 	struct yaml_value *map = new_map();
@@ -649,42 +728,8 @@ static struct yaml_value *parse_block_map(struct parser *ps, int indent)
 		if (!line_is_map_key(ps))
 			return map;
 
-		char *key = parse_map_key_token(ps);
-		if (!key)
+		if (parse_map_entry(ps, map, indent) < 0)
 			goto fail;
-
-		if (peek(ps) != ':') {
-			free(key);
-			goto fail;
-		}
-		advance(ps); /* consume ':' */
-		skip_inline_ws(ps);
-
-		struct yaml_value *val;
-		if (at_newline(ps) || peek(ps) == '#' || at_eof(ps)) {
-			if (peek(ps) == '#')
-				skip_to_eol(ps);
-			skip_newline(ps);
-			/* Value is on following lines at greater indent. */
-			skip_blank_lines(ps);
-			if (at_eof(ps)) {
-				val = new_null();
-			} else {
-				int nxt = line_indent(ps);
-				if (nxt <= indent)
-					val = new_null();
-				else
-					val = parse_node(ps, nxt);
-			}
-		} else {
-			val = parse_inline(ps);
-		}
-
-		if (!val) {
-			free(key);
-			goto fail;
-		}
-		map_set(map, key, val);
 	}
 fail:
 	yaml_free(map);
@@ -710,13 +755,25 @@ static struct yaml_value *parse_block_seq(struct parser *ps, int indent)
 			goto fail;
 
 		consume_spaces(ps, cur);
-		if (peek(ps) != '-')
+		if (peek(ps) != '-') {
+			/*
+			 * Not a sequence item after all.  Put the indent
+			 * back so the outer parser sees the line fresh;
+			 * otherwise its line_indent() returns 0 and the
+			 * key/value gets attached to the wrong map.
+			 */
+			ps->pos -= (size_t)cur;
 			return seq;
+		}
 		{
 			int next = peek_at(ps, 1);
 			if (next != ' ' && next != '\t' && next != '\n' &&
-			    next != '\r' && next != -1)
-				return seq; /* '-foo' is a plain scalar */
+			    next != '\r' && next != -1) {
+				/* '-foo' is a plain scalar.  Same "put back
+				 * indent" rationale as above. */
+				ps->pos -= (size_t)cur;
+				return seq;
+			}
 		}
 		advance(ps); /* consume '-' */
 		skip_inline_ws(ps);
@@ -736,6 +793,41 @@ static struct yaml_value *parse_block_seq(struct parser *ps, int indent)
 				else
 					val = parse_node(ps, nxt);
 			}
+		} else if (line_is_map_key(ps)) {
+			/*
+			 * Compact block-map-in-sequence: "- key: value".
+			 * The first key+value is on this line; further
+			 * entries (if any) continue at the same column on
+			 * subsequent lines.  Real IDF manifests use this
+			 * form for @c rules: @c - if: ... lists.
+			 */
+			int item_col = current_col(ps);
+			struct yaml_value *mp = new_map();
+
+			if (parse_map_entry(ps, mp, item_col) < 0) {
+				yaml_free(mp);
+				goto fail;
+			}
+			for (;;) {
+				skip_blank_lines(ps);
+				if (at_eof(ps))
+					break;
+				int ncur = line_indent(ps);
+				if (ncur < item_col)
+					break;
+				if (ncur > item_col) {
+					yaml_free(mp);
+					goto fail;
+				}
+				consume_spaces(ps, ncur);
+				if (!line_is_map_key(ps))
+					break;
+				if (parse_map_entry(ps, mp, item_col) < 0) {
+					yaml_free(mp);
+					goto fail;
+				}
+			}
+			val = mp;
 		} else {
 			val = parse_inline(ps);
 		}
