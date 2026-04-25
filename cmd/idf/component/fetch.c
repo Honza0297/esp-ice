@@ -50,8 +50,13 @@ int fetch_compute_sha256(const char *path, char out_hex[65])
 		return -1;
 
 	sha256_init(&ctx);
-	while ((n = fread(buf, 1, sizeof(buf), fp)) > 0)
-		sha256_update(&ctx, buf, n);
+	for (;;) {
+		n = fread(buf, 1, sizeof(buf), fp);
+		if (n > 0)
+			sha256_update(&ctx, buf, n);
+		if (n < sizeof(buf))
+			break;
+	}
 
 	if (ferror(fp)) {
 		fclose(fp);
@@ -61,7 +66,7 @@ int fetch_compute_sha256(const char *path, char out_hex[65])
 
 	sha256_final(&ctx, digest);
 
-	for (int i = 0; i < SHA256_BLOCK_SIZE; i++) {
+	for (size_t i = 0; i < SHA256_BLOCK_SIZE; i++) {
 		static const char hex[] = "0123456789abcdef";
 		out_hex[i * 2] = hex[(digest[i] >> 4) & 0xf];
 		out_hex[i * 2 + 1] = hex[digest[i] & 0xf];
@@ -73,7 +78,7 @@ int fetch_compute_sha256(const char *path, char out_hex[65])
 static int hex_eq_ci(const char *a, const char *b)
 {
 	while (*a && *b) {
-		int ca = *a, cb = *b;
+		int ca = (unsigned char)*a, cb = (unsigned char)*b;
 		if (ca >= 'A' && ca <= 'Z')
 			ca += 32;
 		if (cb >= 'A' && cb <= 'Z')

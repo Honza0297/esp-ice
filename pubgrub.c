@@ -540,6 +540,9 @@ int pubgrub_solver_solve(struct pubgrub_solver *s, struct pubgrub_solution *out)
 	st = ensure_state(s);
 	sbuf_reset(&st->error);
 
+	if (st->nr_packages == 0)
+		return 0;
+
 	sr = search_new(st);
 
 	for (size_t i = 0; i < st->nr_root_deps; i++) {
