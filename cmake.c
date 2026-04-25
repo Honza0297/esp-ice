@@ -62,13 +62,8 @@ void complete_profile_names(void)
 
 /*
  * Prepend the active profile's IDF tool directories to PATH and set
- * IDF_PATH / IDF_COMPONENT_MANAGER so any cmake/ninja child inherits
- * the right toolchain without ever sourcing @b{export.sh}.
- *
- * The IDF_COMPONENT_MANAGER=0 export is global (not just during init)
- * because ninja later spawns sub-cmakes (bootloader, ULP, ...) that
- * re-read project.cmake; without the env var they'd reintroduce the
- * Python component manager we explicitly opt out of.
+ * IDF_PATH so any cmake/ninja child inherits the right toolchain
+ * without ever sourcing @b{export.sh}.
  */
 static void setup_tooling_env(void)
 {
@@ -78,8 +73,6 @@ static void setup_tooling_env(void)
 		setup_tool_env(idf_path);
 		setenv("IDF_PATH", idf_path, 1);
 	}
-
-	setenv("IDF_COMPONENT_MANAGER", "0", 1);
 }
 
 /*
