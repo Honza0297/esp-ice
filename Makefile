@@ -209,7 +209,8 @@ LIB_SRCS := \
 	color_rules.c \
 	esf_port.c \
 	hints.c \
-	yaml.c
+	yaml.c \
+	zip.c
 
 # MAIN_SRCS provide the program entry point.  Excluded from libice.a
 # so that unit tests (and any future external libice consumer) can
